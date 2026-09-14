@@ -14,6 +14,10 @@ import { Route as DoctorRouteImport } from './routes/doctor'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as PatientRouteImport } from './routes/patient'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as PatientIndexRouteImport } from './routes/patient.index'
+import { Route as PatientChatRouteImport } from './routes/patient.chat'
+import { Route as PatientDoctorsRouteImport } from './routes/patient.doctors'
+import { Route as PatientDoctorsDoctorIdRouteImport } from './routes/patient.doctors.$doctorId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -40,42 +44,100 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PatientIndexRoute = PatientIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientChatRoute = PatientChatRouteImport.update({
+  id: '/chat',
+  path: '/chat',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientDoctorsRoute = PatientDoctorsRouteImport.update({
+  id: '/doctors',
+  path: '/doctors',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientDoctorsDoctorIdRoute = PatientDoctorsDoctorIdRouteImport.update({
+  id: '/$doctorId',
+  path: '/$doctorId',
+  getParentRoute: () => PatientDoctorsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/doctor': typeof DoctorRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/patient': typeof PatientRoute
+  '/patient': typeof PatientRouteWithChildren
   '/signup': typeof SignupRoute
+  '/patient/chat': typeof PatientChatRoute
+  '/patient/doctors': typeof PatientDoctorsRouteWithChildren
+  '/patient/': typeof PatientIndexRoute
+  '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/doctor': typeof DoctorRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/patient': typeof PatientRoute
   '/signup': typeof SignupRoute
+  '/patient/chat': typeof PatientChatRoute
+  '/patient/doctors': typeof PatientDoctorsRouteWithChildren
+  '/patient': typeof PatientIndexRoute
+  '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/doctor': typeof DoctorRoute
   '/forgot-password': typeof ForgotPasswordRoute
-  '/patient': typeof PatientRoute
+  '/patient': typeof PatientRouteWithChildren
   '/signup': typeof SignupRoute
+  '/patient/chat': typeof PatientChatRoute
+  '/patient/doctors': typeof PatientDoctorsRouteWithChildren
+  '/patient/': typeof PatientIndexRoute
+  '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/doctor' | '/forgot-password' | '/patient' | '/signup'
+  fullPaths:
+    | '/'
+    | '/doctor'
+    | '/forgot-password'
+    | '/patient'
+    | '/signup'
+    | '/patient/chat'
+    | '/patient/doctors'
+    | '/patient/'
+    | '/patient/doctors/$doctorId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/doctor' | '/forgot-password' | '/patient' | '/signup'
-  id: '__root__' | '/' | '/doctor' | '/forgot-password' | '/patient' | '/signup'
+  to:
+    | '/'
+    | '/doctor'
+    | '/forgot-password'
+    | '/signup'
+    | '/patient/chat'
+    | '/patient/doctors'
+    | '/patient'
+    | '/patient/doctors/$doctorId'
+  id:
+    | '__root__'
+    | '/'
+    | '/doctor'
+    | '/forgot-password'
+    | '/patient'
+    | '/signup'
+    | '/patient/chat'
+    | '/patient/doctors'
+    | '/patient/'
+    | '/patient/doctors/$doctorId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DoctorRoute: typeof DoctorRoute
   ForgotPasswordRoute: typeof ForgotPasswordRoute
-  PatientRoute: typeof PatientRoute
+  PatientRoute: typeof PatientRouteWithChildren
   SignupRoute: typeof SignupRoute
 }
 
@@ -116,14 +178,69 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/patient/': {
+      id: '/patient/'
+      path: '/'
+      fullPath: '/patient/'
+      preLoaderRoute: typeof PatientIndexRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/chat': {
+      id: '/patient/chat'
+      path: '/chat'
+      fullPath: '/patient/chat'
+      preLoaderRoute: typeof PatientChatRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/doctors': {
+      id: '/patient/doctors'
+      path: '/doctors'
+      fullPath: '/patient/doctors'
+      preLoaderRoute: typeof PatientDoctorsRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/doctors/$doctorId': {
+      id: '/patient/doctors/$doctorId'
+      path: '/$doctorId'
+      fullPath: '/patient/doctors/$doctorId'
+      preLoaderRoute: typeof PatientDoctorsDoctorIdRouteImport
+      parentRoute: typeof PatientDoctorsRoute
+    }
   }
 }
+
+interface PatientDoctorsRouteChildren {
+  PatientDoctorsDoctorIdRoute: typeof PatientDoctorsDoctorIdRoute
+}
+
+const PatientDoctorsRouteChildren: PatientDoctorsRouteChildren = {
+  PatientDoctorsDoctorIdRoute: PatientDoctorsDoctorIdRoute,
+}
+
+const PatientDoctorsRouteWithChildren = PatientDoctorsRoute._addFileChildren(
+  PatientDoctorsRouteChildren,
+)
+
+interface PatientRouteChildren {
+  PatientChatRoute: typeof PatientChatRoute
+  PatientDoctorsRoute: typeof PatientDoctorsRouteWithChildren
+  PatientIndexRoute: typeof PatientIndexRoute
+}
+
+const PatientRouteChildren: PatientRouteChildren = {
+  PatientChatRoute: PatientChatRoute,
+  PatientDoctorsRoute: PatientDoctorsRouteWithChildren,
+  PatientIndexRoute: PatientIndexRoute,
+}
+
+const PatientRouteWithChildren =
+  PatientRoute._addFileChildren(PatientRouteChildren)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DoctorRoute: DoctorRoute,
   ForgotPasswordRoute: ForgotPasswordRoute,
-  PatientRoute: PatientRoute,
+  PatientRoute: PatientRouteWithChildren,
   SignupRoute: SignupRoute,
 }
 export const routeTree = rootRouteImport
