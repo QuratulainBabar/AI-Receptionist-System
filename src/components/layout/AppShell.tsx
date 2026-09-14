@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
 import { Avatar, Badge, Button, SectionLabel } from "@/components/ui/primitives";
 import { clearSession, type Session } from "@/lib/session";
 
-export type NavItem = { to: LinkProps["to"]; label: string; group: string };
+export type NavItem = { to: string; label: string; group: string };
 
 export function AppShell({
   brandSuffix,
@@ -61,8 +61,8 @@ export function AppShell({
                   .filter((item) => item.group === group)
                   .map((item) => (
                     <Link
-                      key={item.to as string}
-                      to={item.to}
+                      key={item.to}
+                      {...({ to: item.to } as LinkProps)}
                       onClick={() => setOpen(false)}
                       activeOptions={{ exact: item.label === "Dashboard" }}
                       activeProps={{ className: "bg-primary text-primary-foreground" }}
