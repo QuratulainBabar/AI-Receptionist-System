@@ -15,8 +15,15 @@ import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
 import { Route as PatientRouteImport } from './routes/patient'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as PatientIndexRouteImport } from './routes/patient.index'
+import { Route as PatientActivityRouteImport } from './routes/patient.activity'
+import { Route as PatientAppointmentsRouteImport } from './routes/patient.appointments'
+import { Route as PatientBookRouteImport } from './routes/patient.book'
 import { Route as PatientChatRouteImport } from './routes/patient.chat'
+import { Route as PatientConfirmationRouteImport } from './routes/patient.confirmation'
 import { Route as PatientDoctorsRouteImport } from './routes/patient.doctors'
+import { Route as PatientHistoryRouteImport } from './routes/patient.history'
+import { Route as PatientMessagesRouteImport } from './routes/patient.messages'
+import { Route as PatientRecordsRouteImport } from './routes/patient.records'
 import { Route as PatientDoctorsDoctorIdRouteImport } from './routes/patient.doctors.$doctorId'
 
 const IndexRoute = IndexRouteImport.update({
@@ -49,14 +56,49 @@ const PatientIndexRoute = PatientIndexRouteImport.update({
   path: '/',
   getParentRoute: () => PatientRoute,
 } as any)
+const PatientActivityRoute = PatientActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientAppointmentsRoute = PatientAppointmentsRouteImport.update({
+  id: '/appointments',
+  path: '/appointments',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientBookRoute = PatientBookRouteImport.update({
+  id: '/book',
+  path: '/book',
+  getParentRoute: () => PatientRoute,
+} as any)
 const PatientChatRoute = PatientChatRouteImport.update({
   id: '/chat',
   path: '/chat',
   getParentRoute: () => PatientRoute,
 } as any)
+const PatientConfirmationRoute = PatientConfirmationRouteImport.update({
+  id: '/confirmation',
+  path: '/confirmation',
+  getParentRoute: () => PatientRoute,
+} as any)
 const PatientDoctorsRoute = PatientDoctorsRouteImport.update({
   id: '/doctors',
   path: '/doctors',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientHistoryRoute = PatientHistoryRouteImport.update({
+  id: '/history',
+  path: '/history',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientMessagesRoute = PatientMessagesRouteImport.update({
+  id: '/messages',
+  path: '/messages',
+  getParentRoute: () => PatientRoute,
+} as any)
+const PatientRecordsRoute = PatientRecordsRouteImport.update({
+  id: '/records',
+  path: '/records',
   getParentRoute: () => PatientRoute,
 } as any)
 const PatientDoctorsDoctorIdRoute = PatientDoctorsDoctorIdRouteImport.update({
@@ -71,8 +113,15 @@ export interface FileRoutesByFullPath {
   '/forgot-password': typeof ForgotPasswordRoute
   '/patient': typeof PatientRouteWithChildren
   '/signup': typeof SignupRoute
+  '/patient/activity': typeof PatientActivityRoute
+  '/patient/appointments': typeof PatientAppointmentsRoute
+  '/patient/book': typeof PatientBookRoute
   '/patient/chat': typeof PatientChatRoute
+  '/patient/confirmation': typeof PatientConfirmationRoute
   '/patient/doctors': typeof PatientDoctorsRouteWithChildren
+  '/patient/history': typeof PatientHistoryRoute
+  '/patient/messages': typeof PatientMessagesRoute
+  '/patient/records': typeof PatientRecordsRoute
   '/patient/': typeof PatientIndexRoute
   '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
 }
@@ -81,8 +130,15 @@ export interface FileRoutesByTo {
   '/doctor': typeof DoctorRoute
   '/forgot-password': typeof ForgotPasswordRoute
   '/signup': typeof SignupRoute
+  '/patient/activity': typeof PatientActivityRoute
+  '/patient/appointments': typeof PatientAppointmentsRoute
+  '/patient/book': typeof PatientBookRoute
   '/patient/chat': typeof PatientChatRoute
+  '/patient/confirmation': typeof PatientConfirmationRoute
   '/patient/doctors': typeof PatientDoctorsRouteWithChildren
+  '/patient/history': typeof PatientHistoryRoute
+  '/patient/messages': typeof PatientMessagesRoute
+  '/patient/records': typeof PatientRecordsRoute
   '/patient': typeof PatientIndexRoute
   '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
 }
@@ -93,8 +149,15 @@ export interface FileRoutesById {
   '/forgot-password': typeof ForgotPasswordRoute
   '/patient': typeof PatientRouteWithChildren
   '/signup': typeof SignupRoute
+  '/patient/activity': typeof PatientActivityRoute
+  '/patient/appointments': typeof PatientAppointmentsRoute
+  '/patient/book': typeof PatientBookRoute
   '/patient/chat': typeof PatientChatRoute
+  '/patient/confirmation': typeof PatientConfirmationRoute
   '/patient/doctors': typeof PatientDoctorsRouteWithChildren
+  '/patient/history': typeof PatientHistoryRoute
+  '/patient/messages': typeof PatientMessagesRoute
+  '/patient/records': typeof PatientRecordsRoute
   '/patient/': typeof PatientIndexRoute
   '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
 }
@@ -106,8 +169,15 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/patient'
     | '/signup'
+    | '/patient/activity'
+    | '/patient/appointments'
+    | '/patient/book'
     | '/patient/chat'
+    | '/patient/confirmation'
     | '/patient/doctors'
+    | '/patient/history'
+    | '/patient/messages'
+    | '/patient/records'
     | '/patient/'
     | '/patient/doctors/$doctorId'
   fileRoutesByTo: FileRoutesByTo
@@ -116,8 +186,15 @@ export interface FileRouteTypes {
     | '/doctor'
     | '/forgot-password'
     | '/signup'
+    | '/patient/activity'
+    | '/patient/appointments'
+    | '/patient/book'
     | '/patient/chat'
+    | '/patient/confirmation'
     | '/patient/doctors'
+    | '/patient/history'
+    | '/patient/messages'
+    | '/patient/records'
     | '/patient'
     | '/patient/doctors/$doctorId'
   id:
@@ -127,8 +204,15 @@ export interface FileRouteTypes {
     | '/forgot-password'
     | '/patient'
     | '/signup'
+    | '/patient/activity'
+    | '/patient/appointments'
+    | '/patient/book'
     | '/patient/chat'
+    | '/patient/confirmation'
     | '/patient/doctors'
+    | '/patient/history'
+    | '/patient/messages'
+    | '/patient/records'
     | '/patient/'
     | '/patient/doctors/$doctorId'
   fileRoutesById: FileRoutesById
@@ -185,6 +269,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PatientIndexRouteImport
       parentRoute: typeof PatientRoute
     }
+    '/patient/activity': {
+      id: '/patient/activity'
+      path: '/activity'
+      fullPath: '/patient/activity'
+      preLoaderRoute: typeof PatientActivityRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/appointments': {
+      id: '/patient/appointments'
+      path: '/appointments'
+      fullPath: '/patient/appointments'
+      preLoaderRoute: typeof PatientAppointmentsRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/book': {
+      id: '/patient/book'
+      path: '/book'
+      fullPath: '/patient/book'
+      preLoaderRoute: typeof PatientBookRouteImport
+      parentRoute: typeof PatientRoute
+    }
     '/patient/chat': {
       id: '/patient/chat'
       path: '/chat'
@@ -192,11 +297,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PatientChatRouteImport
       parentRoute: typeof PatientRoute
     }
+    '/patient/confirmation': {
+      id: '/patient/confirmation'
+      path: '/confirmation'
+      fullPath: '/patient/confirmation'
+      preLoaderRoute: typeof PatientConfirmationRouteImport
+      parentRoute: typeof PatientRoute
+    }
     '/patient/doctors': {
       id: '/patient/doctors'
       path: '/doctors'
       fullPath: '/patient/doctors'
       preLoaderRoute: typeof PatientDoctorsRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/history': {
+      id: '/patient/history'
+      path: '/history'
+      fullPath: '/patient/history'
+      preLoaderRoute: typeof PatientHistoryRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/messages': {
+      id: '/patient/messages'
+      path: '/messages'
+      fullPath: '/patient/messages'
+      preLoaderRoute: typeof PatientMessagesRouteImport
+      parentRoute: typeof PatientRoute
+    }
+    '/patient/records': {
+      id: '/patient/records'
+      path: '/records'
+      fullPath: '/patient/records'
+      preLoaderRoute: typeof PatientRecordsRouteImport
       parentRoute: typeof PatientRoute
     }
     '/patient/doctors/$doctorId': {
@@ -222,14 +355,28 @@ const PatientDoctorsRouteWithChildren = PatientDoctorsRoute._addFileChildren(
 )
 
 interface PatientRouteChildren {
+  PatientActivityRoute: typeof PatientActivityRoute
+  PatientAppointmentsRoute: typeof PatientAppointmentsRoute
+  PatientBookRoute: typeof PatientBookRoute
   PatientChatRoute: typeof PatientChatRoute
+  PatientConfirmationRoute: typeof PatientConfirmationRoute
   PatientDoctorsRoute: typeof PatientDoctorsRouteWithChildren
+  PatientHistoryRoute: typeof PatientHistoryRoute
+  PatientMessagesRoute: typeof PatientMessagesRoute
+  PatientRecordsRoute: typeof PatientRecordsRoute
   PatientIndexRoute: typeof PatientIndexRoute
 }
 
 const PatientRouteChildren: PatientRouteChildren = {
+  PatientActivityRoute: PatientActivityRoute,
+  PatientAppointmentsRoute: PatientAppointmentsRoute,
+  PatientBookRoute: PatientBookRoute,
   PatientChatRoute: PatientChatRoute,
+  PatientConfirmationRoute: PatientConfirmationRoute,
   PatientDoctorsRoute: PatientDoctorsRouteWithChildren,
+  PatientHistoryRoute: PatientHistoryRoute,
+  PatientMessagesRoute: PatientMessagesRoute,
+  PatientRecordsRoute: PatientRecordsRoute,
   PatientIndexRoute: PatientIndexRoute,
 }
 
