@@ -311,31 +311,110 @@ export async function listAppointmentsForAdmin(input: { q?: string; limit?: numb
       doctorUser: true,
       followUpOf: { select: { id: true, reference: true } },
     },
-    orderBy: { startsAt: "desc" },
+    orderBy: { createdAt: "desc" },
     take: limit,
   });
 
-  return rows.map(
-    (row): PublicAppointment => ({
-      id: row.id,
-      reference: row.reference,
-      doctorId: row.doctorUserId,
-      doctorName: row.doctorUser.fullName,
-      speciality: row.specialtyName,
-      patientId: row.patientId,
-      patientName: row.patient.fullName,
-      date: formatDateLabel(row.startsAt),
-      time: formatTimeLabel(row.startsAt),
-      duration: `${row.durationMinutes} min`,
-      mode: toPublicMode(row.mode),
-      reason: row.reason,
-      status: toPublicStatus(row.status),
-      clinic: row.clinic,
-      fee: row.fee,
-      startsAt: row.startsAt.toISOString(),
-      followUpOfId: row.followUpOfId ?? null,
-      followUpOfReference: row.followUpOf?.reference ?? null,
-      isFollowUp: Boolean(row.followUpOfId),
-    }),
-  );
+  return rows.map(mapPublicAppointment);
+}
+
+export type AdminAppointmentDetail = PublicAppointment & {
+  patientEmail: string;
+  patientReference: string;
+  doctorEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  followUps: Array<{
+    id: string;
+    reference: string;
+    date: string;
+    time: string;
+    status: string;
+  }>;
+  voiceCalls: Array<{
+    id: string;
+    status: string;
+    fromNumber: string;
+    startedAt: string | null;
+    summary: string;
+  }>;
+};
+
+function mapPublicAppointment(row: {
+  id: string;
+  reference: string;
+  doctorUserId: string;
+  doctorUser: { fullName: string };
+  specialtyName: string;
+  patientId: string;
+  patient: { fullName: string };
+  startsAt: Date;
+  durationMinutes: number;
+  mode: string;
+  reason: string;
+  status: string;
+  clinic: string;
+  fee: string;
+  followUpOfId: string | null;
+  followUpOf?: { reference: string } | null;
+}): PublicAppointment {
+  return {
+    id: row.id,
+    reference: row.reference,
+    doctorId: row.doctorUserId,
+    doctorName: row.doctorUser.fullName,
+    speciality: row.specialtyName,
+    patientId: row.patientId,
+    patientName: row.patient.fullName,
+    date: formatDateLabel(row.startsAt),
+    time: formatTimeLabel(row.startsAt),
+    duration: `${row.durationMinutes} min`,
+    mode: toPublicMode(row.mode),
+    reason: row.reason,
+    status: toPublicStatus(row.status),
+    clinic: row.clinic,
+    fee: row.fee,
+    startsAt: row.startsAt.toISOString(),
+    followUpOfId: row.followUpOfId ?? null,
+    followUpOfReference: row.followUpOf?.reference ?? null,
+    isFollowUp: Boolean(row.followUpOfId),
+  };
+}
+
+export async function getAppointmentForAdmin(appointmentId: string): Promise<AdminAppointmentDetail> {
+  const row = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: {
+      patient: true,
+      doctorUser: true,
+      followUpOf: { select: { id: true, reference: true } },
+      followUps: { orderBy: { startsAt: "asc" }, take: 20 },
+      voiceCalls: { orderBy: { createdAt: "desc" }, take: 10 },
+    },
+  });
+
+  if (!row) throw new AppError(404, "Appointment not found");
+
+  return {
+    ...mapPublicAppointment(row),
+    patientEmail: row.patient.email,
+    patientReference: row.patient.reference,
+    doctorEmail: row.doctorUser.email,
+    createdAt: row.createdAt.toISOString(),
+    updatedAt: row.updatedAt.toISOString(),
+    followUps: row.followUps.map((item) => ({
+      id: item.id,
+      reference: item.reference,
+      date: formatDateLabel(item.startsAt),
+      time: formatTimeLabel(item.startsAt),
+      status: toPublicStatus(item.status),
+    })),
+    voiceCalls: row.voiceCalls.map((call) => ({
+      id: call.id,
+      status: call.status,
+      fromNumber: call.fromNumber,
+      startedAt: call.startedAt?.toISOString() ?? call.createdAt.toISOString(),
+      summary: call.summary?.trim() || "",
+    })),
+  };
 }

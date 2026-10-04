@@ -60,7 +60,7 @@ export { findPatientByPhone } from "./patient-phone.service.js";
 async function buildClinicContext() {
   const now = new Date();
   const doctors = await prisma.doctorProfile.findMany({
-    where: { isVerified: true, user: { isActive: true, role: "DOCTOR" } },
+    where: { user: { isActive: true, role: "DOCTOR" } },
     include: {
       user: true,
       specialty: true,
@@ -71,7 +71,7 @@ async function buildClinicContext() {
       },
     },
     orderBy: { user: { fullName: "asc" } },
-    take: 20,
+    take: 100,
   });
 
   const lines = doctors.map((doctor) => {
@@ -112,8 +112,26 @@ async function buildClinicContext() {
     clinic_name: "Qubetech AI Receptionist Clinic",
     doctors_available: String(doctors.length),
     doctors_directory: lines.join("\n") || "No doctors currently available.",
+    availability_summary:
+      lines
+        .map((line) => {
+          const name = line.match(/^Doctor: ([^|]+)/)?.[1]?.trim() || "";
+          const fee = line.match(/consultation_fee: ([^|]+)/)?.[1]?.trim() || "";
+          const slots = line.match(/next_slots: (.+)$/)?.[1]?.trim() || "none";
+          if (!name) return "";
+          if (!slots || slots === "none") return `${name}: no open slots`;
+          const firstTwo = slots
+            .split(";")
+            .map((part) => part.replace(/\s*\[slot:[^\]]+\]/g, "").trim())
+            .filter(Boolean)
+            .slice(0, 2)
+            .join("; ");
+          return `${name} AVAILABLE (${fee}): ${firstTwo}`;
+        })
+        .filter(Boolean)
+        .join(" | ") || "No open slots.",
     booking_instructions:
-      "To book, confirm patient full name, preferred doctor, and one available slot_id. Then call the book appointment action with patient_id or phone, doctor_id, and slot_id. Share bio, qualifications, certifications, expertise, hospital, location, languages, and weekly hours ONLY if the caller asks about that doctor.",
+      "You CAN check availability from availability_summary and doctors_directory next_slots. Never say you cannot check. To book, confirm name, doctor, and slot_id, then call the book appointment action.",
   };
 }
 
@@ -271,8 +289,9 @@ async function maybeBookFromDataWebhook(
       email: fields.email,
       doctorId,
       doctorName: fields.doctorName,
-      slotId,
+      slotId: fields.slotId,
       reason,
+      whenHint: fields.whenHint,
       allowRegister: true,
       synthflowCallId: context.callId || undefined,
     });
@@ -465,20 +484,19 @@ function pickFirstFromExtracted(fields: Record<string, string>, keys: string[]) 
 export async function handleAvailabilityAction(body: unknown) {
   const root = asRecord(body);
   const specialty = pickString(root, ["specialty", "speciality", "department"]).toLowerCase();
-  const doctorName = pickString(root, ["doctor_name", "doctor", "doctorName"]).toLowerCase();
+  const doctorNameRaw = pickString(root, ["doctor_name", "doctor", "doctorName"]);
   const doctorId = pickString(root, ["doctor_id", "doctorId"]);
+  const doctorQuery = doctorNameRaw
+    .toLowerCase()
+    .replace(/^dr\.?\s*/i, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 
   const now = new Date();
   const doctors = await prisma.doctorProfile.findMany({
     where: {
       ...(doctorId ? { userId: doctorId } : {}),
-      user: {
-        isActive: true,
-        role: "DOCTOR",
-        ...(doctorName
-          ? { fullName: { contains: doctorName, mode: "insensitive" as const } }
-          : {}),
-      },
+      user: { isActive: true, role: "DOCTOR" },
       ...(specialty
         ? { specialty: { name: { contains: specialty, mode: "insensitive" as const } } }
         : {}),
@@ -492,29 +510,54 @@ export async function handleAvailabilityAction(body: unknown) {
         take: 6,
       },
     },
-    take: 10,
+    take: 40,
   });
+
+  const matched = doctors.filter((doctor) => {
+    if (!doctorQuery) return true;
+    const hay = doctor.user.fullName
+      .toLowerCase()
+      .replace(/^dr\.?\s*/i, "")
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+    const parts = doctorQuery.split(" ").filter(Boolean);
+    return hay.includes(doctorQuery) || parts.every((part) => hay.includes(part));
+  });
+
+  const rows = (matched.length ? matched : doctors).map((doctor) => ({
+    doctor_id: doctor.userId,
+    name: doctor.user.fullName,
+    specialty: doctor.specialty.name,
+    clinic: doctor.clinic,
+    fee: doctor.fee,
+    available: doctor.availability.length > 0,
+    slots: doctor.availability.map((slot) => ({
+      slot_id: slot.id,
+      starts_at: slot.startsAt.toISOString(),
+      label: slot.startsAt.toLocaleString("en-US", {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      }),
+    })),
+  }));
+
+  const first = rows[0];
+  const spoken_summary = first
+    ? first.available
+      ? `Yes, ${first.name} is available. Next openings: ${first.slots
+          .slice(0, 2)
+          .map((slot) => slot.label)
+          .join("; ")}. Fee ${first.fee}.`
+      : `${first.name} has no open slots right now.`
+    : "That doctor is not on the current clinic roster.";
 
   return {
     success: true,
-    doctors: doctors.map((doctor) => ({
-      doctor_id: doctor.userId,
-      name: doctor.user.fullName,
-      specialty: doctor.specialty.name,
-      clinic: doctor.clinic,
-      fee: doctor.fee,
-      slots: doctor.availability.map((slot) => ({
-        slot_id: slot.id,
-        starts_at: slot.startsAt.toISOString(),
-        label: slot.startsAt.toLocaleString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        }),
-      })),
-    })),
+    spoken_summary,
+    doctors: rows,
   };
 }
 
@@ -543,6 +586,7 @@ export async function handleBookAction(body: unknown) {
     doctorName: fields.doctorName,
     slotId,
     reason,
+    whenHint: fields.whenHint,
     allowRegister: true,
     synthflowCallId: callId || undefined,
   });

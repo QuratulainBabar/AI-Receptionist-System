@@ -15,6 +15,7 @@ import {
   adminApi,
   doctorsApi,
   formatApiError,
+  type ApiAdminDoctorSlot,
   type ApiDoctorProfile,
   type ApiSpecialty,
   type ApiUser,
@@ -83,6 +84,7 @@ function AdminDoctorDetails() {
   const [profile, setProfile] = useState<ApiDoctorProfile | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [specialties, setSpecialties] = useState<ApiSpecialty[]>([]);
+  const [openSlots, setOpenSlots] = useState<ApiAdminDoctorSlot[]>([]);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(true);
@@ -92,14 +94,16 @@ function AdminDoctorDetails() {
     setLoading(true);
     setError("");
     try {
-      const [crm, specialtyResult] = await Promise.all([
+      const [crm, specialtyResult, slotsResult] = await Promise.all([
         adminApi.getDoctorCrm(userId),
         doctorsApi.listSpecialties().catch(() => ({ specialties: [] as ApiSpecialty[] })),
+        adminApi.listDoctorOpenSlots(userId).catch(() => ({ slots: [] as ApiAdminDoctorSlot[] })),
       ]);
       setUser(crm.user);
       setProfile(crm.profile);
       setForm(crm.profile ? profileToForm(crm.profile) : null);
       setSpecialties(specialtyResult.specialties);
+      setOpenSlots(slotsResult.slots);
     } catch (err) {
       setError(formatApiError(err, "Unable to load doctor CRM."));
     } finally {
@@ -157,8 +161,26 @@ function AdminDoctorDetails() {
       setProfile(result.profile);
       setForm(result.profile ? profileToForm(result.profile) : null);
       setSuccess(result.message || "Doctor CRM profile saved.");
+      const slotsResult = await adminApi.listDoctorOpenSlots(userId).catch(() => ({ slots: [] }));
+      setOpenSlots(slotsResult.slots);
     } catch (err) {
       setError(formatApiError(err, "Unable to save doctor CRM profile."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function generateBookableSlots() {
+    setSaving(true);
+    setError("");
+    setSuccess("");
+    try {
+      const result = await adminApi.generateDoctorSlots(userId, 2);
+      const slotsResult = await adminApi.listDoctorOpenSlots(userId);
+      setOpenSlots(slotsResult.slots);
+      setSuccess(result.message || `Created ${result.created} bookable slots.`);
+    } catch (err) {
+      setError(formatApiError(err, "Unable to generate bookable slots from weekly hours."));
     } finally {
       setSaving(false);
     }
@@ -254,7 +276,7 @@ function AdminDoctorDetails() {
               ) : null}
             </div>
             <p className="text-xs text-muted-foreground">
-              Only verified doctors are included when Super Admin syncs the Synthflow doctors directory.
+              Verification is a CRM flag. Active doctors are included in the Synthflow directory when Super Admin syncs.
             </p>
             {form ? (
               <Field label="Verification note">
@@ -269,7 +291,7 @@ function AdminDoctorDetails() {
             <div className="flex flex-wrap gap-2">
               <Button
                 size="sm"
-                disabled={!profile || saving || profile.isVerified}
+                disabled={saving || Boolean(profile?.isVerified)}
                 onClick={() => void setVerification(true)}
               >
                 Verify doctor
@@ -288,7 +310,9 @@ function AdminDoctorDetails() {
       ) : null}
 
       {!loading && !profile ? (
-        <EmptyNote>This doctor has no clinical profile on file yet.</EmptyNote>
+        <EmptyNote>
+          Creating a clinical profile for this doctor. Refresh if the form does not appear.
+        </EmptyNote>
       ) : null}
 
       {form && profile ? (
@@ -382,9 +406,36 @@ function AdminDoctorDetails() {
 
           <Panel className="p-4">
             <SectionLabel>Weekly hours template</SectionLabel>
-            <p className="mt-1 text-xs text-muted-foreground">
-              {profile.weeklyHoursSummary || "No weekly hours set"}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+              <p className="mt-1 text-xs text-muted-foreground">
+                {profile.weeklyHoursSummary || "No weekly hours set"}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={saving}
+                onClick={() => void generateBookableSlots()}
+              >
+                Generate bookable slots
+              </Button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Phone AI books from generated 30-minute slots, not the weekly template alone. Save CRM
+              or generate slots after changing hours.
             </p>
+            {openSlots.length ? (
+              <ul className="mt-3 space-y-1 text-xs text-muted-foreground">
+                {openSlots.slice(0, 8).map((slot) => (
+                  <li key={slot.id}>
+                    {slot.date} · {slot.time}
+                  </li>
+                ))}
+                {openSlots.length > 8 ? <li>+{openSlots.length - 8} more open slots</li> : null}
+              </ul>
+            ) : (
+              <p className="mt-3 text-xs text-muted-foreground">No bookable slots yet — generate them for the phone AI.</p>
+            )}
             <div className="mt-3 space-y-2">
               {form.weeklyHours.map((slot) => (
                 <div

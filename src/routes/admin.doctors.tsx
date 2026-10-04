@@ -24,7 +24,9 @@ function AdminDoctorsPage() {
   const [status, setStatus] = useState<"all" | "active" | "inactive">("all");
   const [verification, setVerification] = useState<"all" | "verified" | "unverified">("all");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
+  const [syncBusy, setSyncBusy] = useState(false);
 
   async function load(
     nextQ = appliedQ,
@@ -64,12 +66,38 @@ function AdminDoctorsPage() {
     }
   }
 
+  async function syncSynthflow() {
+    setSyncBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await adminApi.syncSynthflowDirectory();
+      const count = result.settings.doctorsCount;
+      setNotice(
+        result.warning
+          ? `Directory synced. ${result.warning}`
+          : count === 0
+            ? "Synced, but no active doctors were found to send to Synthflow."
+            : `Doctor directory synced to Synthflow agent (${count} doctors).`,
+      );
+    } catch (err) {
+      setError(formatApiError(err, "Unable to sync doctors with Synthflow."));
+    } finally {
+      setSyncBusy(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
         eyebrow="CRM"
         title="Doctors"
         description="Manage accounts, clinical profiles, and Synthflow verification."
+        actions={
+          <Button type="button" variant="outline" disabled={syncBusy} onClick={() => void syncSynthflow()}>
+            {syncBusy ? "Syncing…" : "Sync Synthflow"}
+          </Button>
+        }
       />
 
       <Panel className="mb-6 p-4">
@@ -129,6 +157,7 @@ function AdminDoctorsPage() {
       </Panel>
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
+      {notice ? <p className="mb-4 text-sm text-success">{notice}</p> : null}
 
       {loading ? (
         <EmptyNote>Loading doctors…</EmptyNote>

@@ -41,6 +41,7 @@ import { Route as PatientDoctorsRouteImport } from './routes/patient.doctors'
 import { Route as PatientHistoryRouteImport } from './routes/patient.history'
 import { Route as PatientMessagesRouteImport } from './routes/patient.messages'
 import { Route as PatientRecordsRouteImport } from './routes/patient.records'
+import { Route as AdminAppointmentsAppointmentIdRouteImport } from './routes/admin.appointments.$appointmentId'
 import { Route as AdminDoctorsUserIdRouteImport } from './routes/admin.doctors.$userId'
 import { Route as AdminPatientsUserIdRouteImport } from './routes/admin.patients.$userId'
 import { Route as DoctorPatientsPatientIdRouteImport } from './routes/doctor.patients.$patientId'
@@ -207,6 +208,12 @@ const PatientRecordsRoute = PatientRecordsRouteImport.update({
   path: '/records',
   getParentRoute: () => PatientRoute,
 } as any)
+const AdminAppointmentsAppointmentIdRoute =
+  AdminAppointmentsAppointmentIdRouteImport.update({
+    id: '/$appointmentId',
+    path: '/$appointmentId',
+    getParentRoute: () => AdminAppointmentsRoute,
+  } as any)
 const AdminDoctorsUserIdRoute = AdminDoctorsUserIdRouteImport.update({
   id: '/$userId',
   path: '/$userId',
@@ -242,7 +249,7 @@ export interface FileRoutesByFullPath {
   '/patient': typeof PatientRouteWithChildren
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/admin/appointments': typeof AdminAppointmentsRoute
+  '/admin/appointments': typeof AdminAppointmentsRouteWithChildren
   '/admin/doctors': typeof AdminDoctorsRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
@@ -267,6 +274,7 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/doctor/': typeof DoctorIndexRoute
   '/patient/': typeof PatientIndexRoute
+  '/admin/appointments/$appointmentId': typeof AdminAppointmentsAppointmentIdRoute
   '/admin/doctors/$userId': typeof AdminDoctorsUserIdRoute
   '/admin/patients/$userId': typeof AdminPatientsUserIdRoute
   '/doctor/patients/$patientId': typeof DoctorPatientsPatientIdRoute
@@ -278,7 +286,7 @@ export interface FileRoutesByTo {
   '/forgot-password': typeof ForgotPasswordRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/admin/appointments': typeof AdminAppointmentsRoute
+  '/admin/appointments': typeof AdminAppointmentsRouteWithChildren
   '/admin/doctors': typeof AdminDoctorsRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
@@ -303,6 +311,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/doctor': typeof DoctorIndexRoute
   '/patient': typeof PatientIndexRoute
+  '/admin/appointments/$appointmentId': typeof AdminAppointmentsAppointmentIdRoute
   '/admin/doctors/$userId': typeof AdminDoctorsUserIdRoute
   '/admin/patients/$userId': typeof AdminPatientsUserIdRoute
   '/doctor/patients/$patientId': typeof DoctorPatientsPatientIdRoute
@@ -318,7 +327,7 @@ export interface FileRoutesById {
   '/patient': typeof PatientRouteWithChildren
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
-  '/admin/appointments': typeof AdminAppointmentsRoute
+  '/admin/appointments': typeof AdminAppointmentsRouteWithChildren
   '/admin/doctors': typeof AdminDoctorsRouteWithChildren
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
@@ -343,6 +352,7 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/doctor/': typeof DoctorIndexRoute
   '/patient/': typeof PatientIndexRoute
+  '/admin/appointments/$appointmentId': typeof AdminAppointmentsAppointmentIdRoute
   '/admin/doctors/$userId': typeof AdminDoctorsUserIdRoute
   '/admin/patients/$userId': typeof AdminPatientsUserIdRoute
   '/doctor/patients/$patientId': typeof DoctorPatientsPatientIdRoute
@@ -384,6 +394,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/doctor/'
     | '/patient/'
+    | '/admin/appointments/$appointmentId'
     | '/admin/doctors/$userId'
     | '/admin/patients/$userId'
     | '/doctor/patients/$patientId'
@@ -420,6 +431,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/doctor'
     | '/patient'
+    | '/admin/appointments/$appointmentId'
     | '/admin/doctors/$userId'
     | '/admin/patients/$userId'
     | '/doctor/patients/$patientId'
@@ -459,6 +471,7 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/doctor/'
     | '/patient/'
+    | '/admin/appointments/$appointmentId'
     | '/admin/doctors/$userId'
     | '/admin/patients/$userId'
     | '/doctor/patients/$patientId'
@@ -702,6 +715,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PatientRecordsRouteImport
       parentRoute: typeof PatientRoute
     }
+    '/admin/appointments/$appointmentId': {
+      id: '/admin/appointments/$appointmentId'
+      path: '/$appointmentId'
+      fullPath: '/admin/appointments/$appointmentId'
+      preLoaderRoute: typeof AdminAppointmentsAppointmentIdRouteImport
+      parentRoute: typeof AdminAppointmentsRoute
+    }
     '/admin/doctors/$userId': {
       id: '/admin/doctors/$userId'
       path: '/$userId'
@@ -740,6 +760,17 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AdminAppointmentsRouteChildren {
+  AdminAppointmentsAppointmentIdRoute: typeof AdminAppointmentsAppointmentIdRoute
+}
+
+const AdminAppointmentsRouteChildren: AdminAppointmentsRouteChildren = {
+  AdminAppointmentsAppointmentIdRoute: AdminAppointmentsAppointmentIdRoute,
+}
+
+const AdminAppointmentsRouteWithChildren =
+  AdminAppointmentsRoute._addFileChildren(AdminAppointmentsRouteChildren)
+
 interface AdminDoctorsRouteChildren {
   AdminDoctorsUserIdRoute: typeof AdminDoctorsUserIdRoute
 }
@@ -765,7 +796,7 @@ const AdminPatientsRouteWithChildren = AdminPatientsRoute._addFileChildren(
 )
 
 interface AdminRouteChildren {
-  AdminAppointmentsRoute: typeof AdminAppointmentsRoute
+  AdminAppointmentsRoute: typeof AdminAppointmentsRouteWithChildren
   AdminDoctorsRoute: typeof AdminDoctorsRouteWithChildren
   AdminLoginRoute: typeof AdminLoginRoute
   AdminPatientsRoute: typeof AdminPatientsRouteWithChildren
@@ -775,7 +806,7 @@ interface AdminRouteChildren {
 }
 
 const AdminRouteChildren: AdminRouteChildren = {
-  AdminAppointmentsRoute: AdminAppointmentsRoute,
+  AdminAppointmentsRoute: AdminAppointmentsRouteWithChildren,
   AdminDoctorsRoute: AdminDoctorsRouteWithChildren,
   AdminLoginRoute: AdminLoginRoute,
   AdminPatientsRoute: AdminPatientsRouteWithChildren,

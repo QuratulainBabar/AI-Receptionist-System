@@ -2,8 +2,10 @@ import { Role, type Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { toPublicUser } from "./auth.helpers.js";
+import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
 import {
   toDoctorProfileDto,
+  ensureDoctorProfileForUser,
   updateDoctorProfileForDoctor,
   type DoctorProfileDto,
   type UpdateDoctorProfileInput,
@@ -76,7 +78,14 @@ export async function listDoctorsForAdmin(input: {
 }
 
 export async function getDoctorCrmForAdmin(userId: string): Promise<AdminDoctorCrm> {
-  const user = await prisma.user.findUnique({
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || user.role !== Role.DOCTOR) {
+    throw new AppError(404, "Doctor not found");
+  }
+
+  await ensureDoctorProfileForUser(userId);
+
+  const withProfile = await prisma.user.findUnique({
     where: { id: userId },
     include: {
       doctorProfile: {
@@ -88,13 +97,13 @@ export async function getDoctorCrmForAdmin(userId: string): Promise<AdminDoctorC
     },
   });
 
-  if (!user || user.role !== Role.DOCTOR) {
-    throw new AppError(404, "Doctor not found");
+  if (!withProfile?.doctorProfile) {
+    throw new AppError(404, "Doctor profile not found");
   }
 
   return {
-    user: toPublicUser(user),
-    profile: user.doctorProfile ? toDoctorProfileDto(user.doctorProfile) : null,
+    user: toPublicUser(withProfile),
+    profile: toDoctorProfileDto(withProfile.doctorProfile),
   };
 }
 
@@ -109,12 +118,18 @@ export async function updateDoctorCrmForAdmin(
   if (!user || user.role !== Role.DOCTOR) {
     throw new AppError(404, "Doctor not found");
   }
-  if (!user.doctorProfile) {
-    throw new AppError(400, "This doctor has no clinical profile yet");
-  }
+
+  await ensureDoctorProfileForUser(userId);
 
   // Reuse the same field validation/update path as the doctor portal.
   await updateDoctorProfileForDoctor(userId, input, { requireActive: false });
+  if (input.weeklyHours !== undefined) {
+    await generateSlotsFromWeeklyHours(userId, {
+      weeks: 2,
+      requireActive: false,
+      allowEmpty: true,
+    });
+  }
   return getDoctorCrmForAdmin(userId);
 }
 
@@ -131,9 +146,8 @@ export async function setDoctorVerificationForAdmin(input: {
   if (!user || user.role !== Role.DOCTOR) {
     throw new AppError(404, "Doctor not found");
   }
-  if (!user.doctorProfile) {
-    throw new AppError(400, "This doctor has no clinical profile yet");
-  }
+
+  await ensureDoctorProfileForUser(input.userId);
 
   await prisma.doctorProfile.update({
     where: { userId: input.userId },

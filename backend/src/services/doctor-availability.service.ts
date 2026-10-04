@@ -15,12 +15,15 @@ export type PublicDoctorSlot = {
   patientName: string | null;
 };
 
-async function requireDoctorProfile(doctorUserId: string) {
+async function requireDoctorProfile(doctorUserId: string, options?: { requireActive?: boolean }) {
   const profile = await prisma.doctorProfile.findUnique({
     where: { userId: doctorUserId },
     include: { user: true },
   });
-  if (!profile || profile.user.role !== "DOCTOR" || !profile.user.isActive) {
+  if (!profile || profile.user.role !== "DOCTOR") {
+    throw new AppError(403, "Only doctors can manage availability");
+  }
+  if (options?.requireActive !== false && !profile.user.isActive) {
     throw new AppError(403, "Only active doctors can manage availability");
   }
   return profile;
@@ -197,9 +200,9 @@ export async function deleteSlotForDoctor(doctorUserId: string, slotId: string) 
 
 export async function generateSlotsFromWeeklyHours(
   doctorUserId: string,
-  options?: { weeks?: number },
+  options?: { weeks?: number; requireActive?: boolean; allowEmpty?: boolean },
 ) {
-  const profile = await requireDoctorProfile(doctorUserId);
+  const profile = await requireDoctorProfile(doctorUserId, { requireActive: options?.requireActive });
   const weeks = Math.max(1, Math.min(8, Math.floor(options?.weeks ?? 2)));
   const weeklyHours = parseWeeklyHours(profile.weeklyHours);
   const byDay = new Map(weeklyHours.map((row) => [row.day, row]));
@@ -234,9 +237,12 @@ export async function generateSlotsFromWeeklyHours(
   }
 
   if (!candidates.length) {
+    if (options?.allowEmpty) {
+      return { created: 0, considered: 0, weeks, slotMinutes: SLOT_MINUTES };
+    }
     throw new AppError(
       400,
-      "No future slots to generate. Enable days and timings under My profile first.",
+      "No future slots to generate. Enable days and timings under weekly hours first.",
     );
   }
 

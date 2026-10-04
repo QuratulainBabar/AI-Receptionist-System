@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
   Badge,
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/admin/appointments")({
   head: () => ({
     meta: [{ title: "Appointments — Super Admin" }],
   }),
-  component: AdminAppointmentsPage,
+  component: AdminAppointmentsLayout,
 });
 
 const STATUS_ACTIONS: Array<{ status: ApiAppointment["status"]; label: string }> = [
@@ -31,6 +31,13 @@ const STATUS_ACTIONS: Array<{ status: ApiAppointment["status"]; label: string }>
   { status: "completed", label: "Complete" },
   { status: "cancelled", label: "Cancel" },
 ];
+
+function AdminAppointmentsLayout() {
+  const matches = useMatches();
+  const isDetail = matches.some((match) => match.routeId === "/admin/appointments/$appointmentId");
+  if (isDetail) return <Outlet />;
+  return <AdminAppointmentsPage />;
+}
 
 function AdminAppointmentsPage() {
   const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
@@ -188,6 +195,11 @@ function AdminAppointmentsPage() {
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-1.5 border-t border-border pt-3">
+                  <Link to="/admin/appointments/$appointmentId" params={{ appointmentId: row.id }}>
+                    <Button size="sm" variant="outline">
+                      Details
+                    </Button>
+                  </Link>
                   {!terminal
                     ? STATUS_ACTIONS.filter((action) => action.status !== row.status).map((action) => (
                         <Button

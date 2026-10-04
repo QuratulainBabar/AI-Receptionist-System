@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import {
   CONSULTATION_TYPES,
+  defaultWeeklyHours,
   formatWeeklyHoursSummary,
   parseWeeklyHours,
   splitListInput,
@@ -108,6 +109,40 @@ function toDto(profile: {
 }
 
 export { toDto as toDoctorProfileDto };
+
+export async function ensureDoctorProfileForUser(userId: string) {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || user.role !== "DOCTOR") {
+    throw new AppError(404, "Doctor not found");
+  }
+
+  const existing = await prisma.doctorProfile.findUnique({
+    where: { userId },
+    include: { user: true, specialty: true },
+  });
+  if (existing) return existing;
+
+  const specialty =
+    (await prisma.specialty.findUnique({ where: { id: "general" } })) ||
+    (await prisma.specialty.findFirst({ orderBy: { sortOrder: "asc" } }));
+  if (!specialty) {
+    throw new AppError(400, "No specialties are configured. Seed specialties first.");
+  }
+
+  return prisma.doctorProfile.create({
+    data: {
+      userId,
+      specialtyId: specialty.id,
+      experienceYears: 0,
+      clinic: "",
+      fee: "",
+      about: "",
+      languages: ["English"],
+      weeklyHours: defaultWeeklyHours() as unknown as Prisma.InputJsonValue,
+    },
+    include: { user: true, specialty: true },
+  });
+}
 
 async function requireDoctorProfile(
   doctorUserId: string,

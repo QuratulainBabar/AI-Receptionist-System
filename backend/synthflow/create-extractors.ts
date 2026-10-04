@@ -28,7 +28,7 @@ const extractors: Extractor[] = [
   {
     identifier: "patient_name",
     description: "What is the patient's full name?",
-    examples: ["Maya Okonkwo", "Tufail Khan", "Zain Ali"],
+    examples: ["Maya Okonkwo", "Qurat ul Ain", "Zain Ali"],
   },
   {
     identifier: "phone",

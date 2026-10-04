@@ -4,6 +4,14 @@ export function getApiBaseUrl() {
   return (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || DEFAULT_API_URL;
 }
 
+function withApiHeaders(init?: HeadersInit) {
+  const headers = new Headers(init);
+  if (getApiBaseUrl().includes("ngrok")) {
+    headers.set("ngrok-skip-browser-warning", "true");
+  }
+  return headers;
+}
+
 export type AuthRole = "patient" | "doctor" | "admin";
 
 export type ApiUser = {
@@ -230,6 +238,28 @@ export type ApiAppointment = {
   isFollowUp?: boolean;
 };
 
+export type ApiAdminAppointmentDetail = ApiAppointment & {
+  patientEmail: string;
+  patientReference: string;
+  doctorEmail: string;
+  createdAt: string;
+  updatedAt: string;
+  followUps: Array<{
+    id: string;
+    reference: string;
+    date: string;
+    time: string;
+    status: string;
+  }>;
+  voiceCalls: Array<{
+    id: string;
+    status: string;
+    fromNumber: string;
+    startedAt: string | null;
+    summary: string;
+  }>;
+};
+
 export type ApiDoctorSlot = {
   id: string;
   startsAt: string;
@@ -341,7 +371,7 @@ export function formatApiError(err: unknown, fallback: string) {
 }
 
 async function request<T>(path: string, options: RequestInit = {}, token?: string | null): Promise<T> {
-  const headers = new Headers(options.headers);
+  const headers = withApiHeaders(options.headers);
   headers.set("Content-Type", "application/json");
   if (token) headers.set("Authorization", `Bearer ${token}`);
 
@@ -442,7 +472,7 @@ export const adminApi = {
   },
   async getVoiceCallRecordingObjectUrl(callId: string) {
     const token = authHeader();
-    const headers = new Headers();
+    const headers = withApiHeaders();
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     const response = await fetch(
@@ -478,6 +508,13 @@ export const adminApi = {
       authHeader(),
     );
   },
+  getAppointment(appointmentId: string) {
+    return request<{ success: boolean; appointment: ApiAdminAppointmentDetail }>(
+      `/api/admin/appointments/${appointmentId}`,
+      { method: "GET" },
+      authHeader(),
+    );
+  },
   updateAppointmentStatus(appointmentId: string, status: ApiAppointment["status"]) {
     return request<{ success: boolean; appointment: ApiAppointment; message?: string }>(
       `/api/admin/appointments/${appointmentId}/status`,
@@ -496,6 +533,19 @@ export const adminApi = {
     return request<{ success: boolean; slots: ApiAdminDoctorSlot[] }>(
       `/api/admin/doctors/${userId}/slots`,
       { method: "GET" },
+      authHeader(),
+    );
+  },
+  generateDoctorSlots(userId: string, weeks = 2) {
+    return request<{
+      success: boolean;
+      created: number;
+      considered: number;
+      weeks: number;
+      message?: string;
+    }>(
+      `/api/admin/doctors/${userId}/slots/generate`,
+      { method: "POST", body: JSON.stringify({ weeks }) },
       authHeader(),
     );
   },
@@ -895,7 +945,7 @@ export const doctorPatientsApi = {
   },
   async openRecordFile(patientId: string, recordId: string) {
     const token = authHeader();
-    const headers = new Headers();
+    const headers = withApiHeaders();
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     const response = await fetch(
@@ -965,7 +1015,7 @@ export const recordsApi = {
     if (category) form.append("category", category);
 
     const token = authHeader();
-    const headers = new Headers();
+    const headers = withApiHeaders();
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     let response: Response;
@@ -997,7 +1047,7 @@ export const recordsApi = {
   },
   async openFile(recordId: string) {
     const token = authHeader();
-    const headers = new Headers();
+    const headers = withApiHeaders();
     if (token) headers.set("Authorization", `Bearer ${token}`);
 
     const response = await fetch(`${getApiBaseUrl()}/api/patient/records/${recordId}/file`, {

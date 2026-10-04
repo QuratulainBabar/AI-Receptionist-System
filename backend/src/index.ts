@@ -60,7 +60,7 @@ app.use(errorHandler);
 app.listen(env.PORT, () => {
   const urls = synthflowWebhookUrls();
   console.log(`API listening on http://localhost:${env.PORT}`);
-  console.log("[synthflow] Paste these into Deployment Settings → Phone:");
+  console.log("[synthflow] Paste these into Synthflow → Deployment Settings → Phone:");
   console.log(`  Inbound Webhook URL: ${urls.inbound}`);
   console.log(`  Data Webhook URL:    ${urls.data}`);
   void resolveBootAgentId()

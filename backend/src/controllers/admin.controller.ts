@@ -4,6 +4,7 @@ import * as authService from "../services/auth.service.js";
 import * as adminClinicService from "../services/admin-clinic.service.js";
 import * as adminDoctorService from "../services/admin-doctor.service.js";
 import * as appointmentsService from "../services/appointments.service.js";
+import * as doctorAvailabilityService from "../services/doctor-availability.service.js";
 import { WEEKDAYS } from "../utils/doctor-profile.js";
 import { AppError } from "../utils/AppError.js";
 
@@ -233,6 +234,16 @@ export async function listAppointments(req: Request, res: Response, next: NextFu
   }
 }
 
+export async function getAppointment(req: Request, res: Response, next: NextFunction) {
+  try {
+    const appointmentId = String(req.params.appointmentId);
+    const appointment = await adminClinicService.getAppointmentForAdmin(appointmentId);
+    res.json({ success: true, appointment });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function updateAppointmentStatus(req: Request, res: Response, next: NextFunction) {
   try {
     const appointmentId = String(req.params.appointmentId);
@@ -274,6 +285,28 @@ export async function listDoctorOpenSlots(req: Request, res: Response, next: Nex
     const userId = String(req.params.userId);
     const slots = await appointmentsService.listOpenSlotsForDoctorAdmin(userId);
     res.json({ success: true, slots });
+  } catch (error) {
+    next(error);
+  }
+}
+
+const generateSlotsBodySchema = z.object({
+  weeks: z.coerce.number().int().min(1).max(8).optional(),
+});
+
+export async function generateDoctorSlots(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = String(req.params.userId);
+    const body = generateSlotsBodySchema.parse(req.body ?? {});
+    const result = await doctorAvailabilityService.generateSlotsFromWeeklyHours(userId, {
+      weeks: body.weeks,
+      requireActive: false,
+    });
+    res.json({
+      success: true,
+      ...result,
+      message: `Created ${result.created} open slot${result.created === 1 ? "" : "s"} from weekly hours.`,
+    });
   } catch (error) {
     next(error);
   }

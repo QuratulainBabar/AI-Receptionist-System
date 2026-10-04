@@ -138,6 +138,70 @@ export async function createInformationExtractor(input: {
   return { raw: json, action_id: actionId };
 }
 
+export async function createCustomAction(input: {
+  name: string;
+  description: string;
+  url: string;
+  jsonBody: Record<string, string>;
+  variables: { name: string; description: string; example: string }[];
+  prompt?: string;
+  messageError?: string;
+}) {
+  const json = await synthflowRequest<SynthflowJson>("POST", "/actions", {
+    CUSTOM_ACTION: {
+      http_mode: "POST",
+      url: input.url,
+      run_action_before_call_start: false,
+      name: input.name,
+      description: input.description,
+      variables_during_the_call: input.variables.map((variable) => ({
+        name: variable.name,
+        type: "string",
+        description: variable.description,
+        example: variable.example,
+      })),
+      json_body_stringified: JSON.stringify(input.jsonBody),
+      prompt: input.prompt,
+      message_error: input.messageError,
+      agent_speak_naturally: true,
+    },
+  });
+
+  const response = (json.response as SynthflowJson | undefined) ?? {};
+  const actionId =
+    (response.action_id as string | undefined) ||
+    (json.action_id as string | undefined) ||
+    (response.id as string | undefined) ||
+    (json.id as string | undefined) ||
+    null;
+
+  return { raw: json, action_id: actionId };
+}
+
+export async function findActionIdByName(name: string) {
+  const want = name.trim().toLowerCase();
+  if (!want) return null;
+  try {
+    const json = await synthflowRequest<SynthflowJson>("GET", "/actions?limit=100");
+    const response = (json.response as SynthflowJson | undefined) ?? {};
+    const actions = (response.actions as unknown[]) || (json.actions as unknown[]) || [];
+    if (!Array.isArray(actions)) return null;
+    for (const raw of actions) {
+      const row = raw as Record<string, unknown>;
+      const actionName = String(row.name || row.action_name || "").trim().toLowerCase();
+      if (actionName !== want) continue;
+      const id = String(row.action_id || row.id || "").trim();
+      if (id) return id;
+    }
+  } catch (error) {
+    console.warn(
+      "[synthflow] list actions failed:",
+      error instanceof Error ? error.message : error,
+    );
+  }
+  return null;
+}
+
 export async function attachActions(modelId: string, actionIds: string[]) {
   const ids = actionIds.filter(Boolean);
   if (!ids.length) return null;

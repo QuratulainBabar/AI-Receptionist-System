@@ -12,6 +12,7 @@ import {
   toPublicUser,
   verifyPassword,
 } from "./auth.helpers.js";
+import { ensureDoctorProfileForUser } from "./doctor-profile.service.js";
 
 export async function signupUser(input: {
   fullName: string;
@@ -38,6 +39,10 @@ export async function signupUser(input: {
       isActive: true,
     },
   });
+
+  if (prismaRole === Role.DOCTOR) {
+    await ensureDoctorProfileForUser(user.id);
+  }
 
   const token = signAccessToken(user);
   return { user: toPublicUser(user), token };

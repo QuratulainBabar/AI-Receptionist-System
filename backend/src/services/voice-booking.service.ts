@@ -6,7 +6,7 @@ import {
   getAppointmentForPatient,
   type PublicAppointment,
 } from "./appointments.service.js";
-import { emptyish } from "./synthflow-fields.service.js";
+import { emptyish, looksLikeRecordId } from "./synthflow-fields.service.js";
 import { findOrCreatePatientForVoice } from "./voice-patient.service.js";
 import { findPatientByPhone } from "./patient-phone.service.js";
 import { logPatientActivity, ActivityType } from "./activity.service.js";
@@ -20,6 +20,7 @@ export type VoiceBookingInput = {
   doctorName?: string;
   slotId?: string;
   reason?: string;
+  whenHint?: Date | null;
   allowRegister?: boolean;
   synthflowCallId?: string;
 };
@@ -46,6 +47,34 @@ async function resolveDoctorUserId(doctorId?: string, doctorName?: string) {
     include: { user: true },
   });
   return profile?.userId ?? null;
+}
+
+async function resolveSlotId(doctorUserId: string, slotId?: string, whenHint?: Date | null) {
+  if (slotId && looksLikeRecordId(slotId)) {
+    const exact = await prisma.availabilitySlot.findFirst({
+      where: { id: slotId, doctor: { userId: doctorUserId } },
+    });
+    if (exact) return exact.id;
+  }
+
+  if (!whenHint || Number.isNaN(whenHint.getTime())) return null;
+
+  const profile = await prisma.doctorProfile.findUnique({ where: { userId: doctorUserId } });
+  if (!profile) return null;
+
+  const windowMs = 20 * 60 * 1000;
+  const slot = await prisma.availabilitySlot.findFirst({
+    where: {
+      doctorId: profile.id,
+      isBooked: false,
+      startsAt: {
+        gte: new Date(whenHint.getTime() - windowMs),
+        lte: new Date(whenHint.getTime() + windowMs),
+      },
+    },
+    orderBy: { startsAt: "asc" },
+  });
+  return slot?.id ?? null;
 }
 
 async function existingAppointmentForCall(synthflowCallId?: string) {
@@ -99,8 +128,23 @@ export async function processVoiceBooking(
   if (!patient) return null;
 
   const doctorId = await resolveDoctorUserId(input.doctorId, input.doctorName);
-  const slotId = input.slotId?.trim();
-  if (!doctorId || !slotId || emptyish(slotId)) return null;
+  if (!doctorId) {
+    console.warn("[voice-booking] skipped: doctor not resolved", {
+      doctorId: input.doctorId,
+      doctorName: input.doctorName,
+    });
+    return null;
+  }
+
+  const slotId = await resolveSlotId(doctorId, input.slotId, input.whenHint);
+  if (!slotId) {
+    console.warn("[voice-booking] skipped: slot not resolved", {
+      doctorId,
+      slotId: input.slotId,
+      whenHint: input.whenHint?.toISOString() ?? null,
+    });
+    return null;
+  }
 
   const reason = input.reason?.trim() || "Booked via AI voice receptionist";
 
