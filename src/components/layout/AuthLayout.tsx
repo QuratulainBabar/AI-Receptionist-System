@@ -1,6 +1,5 @@
 import type { ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
-import { SectionLabel } from "@/components/ui/primitives";
 
 export function AuthLayout({
   eyebrow,
@@ -9,7 +8,7 @@ export function AuthLayout({
   children,
   footer,
 }: {
-  eyebrow: string;
+  eyebrow?: string;
   title: string;
   description: string;
   children: ReactNode;
@@ -17,9 +16,9 @@ export function AuthLayout({
 }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
-      <aside className="hidden flex-col justify-between bg-primary p-10 text-primary-foreground lg:flex">
+      <aside className="hidden flex-col justify-between bg-[oklch(0.32_0.045_245)] p-10 text-primary-foreground lg:flex">
         <div className="flex items-center gap-2.5">
-          <div className="grid size-9 place-items-center rounded-lg bg-primary-foreground/15 font-display text-sm font-semibold">
+          <div className="grid size-9 place-items-center rounded-xl bg-primary-foreground/15 font-display text-sm font-semibold">
             AR
           </div>
           <p className="font-display text-[15px] font-semibold">AI Receptionist</p>
@@ -43,19 +42,19 @@ export function AuthLayout({
         </p>
       </aside>
 
-      <main className="flex items-center justify-center bg-background p-6">
+      <main className="flex items-center justify-center p-6">
         <div className="w-full max-w-sm">
           <Link to="/" className="mb-8 flex items-center gap-2.5 lg:hidden">
-            <div className="grid size-8 place-items-center rounded-lg bg-primary font-display text-xs font-semibold text-primary-foreground">
+            <div className="grid size-8 place-items-center rounded-xl bg-primary font-display text-xs font-semibold text-primary-foreground">
               AR
             </div>
             <span className="font-display text-sm font-semibold">AI Receptionist</span>
           </Link>
-          <SectionLabel>{eyebrow}</SectionLabel>
-          <h1 className="mt-1.5 text-2xl font-semibold">{title}</h1>
+          {eyebrow ? <p className="label-mono">{eyebrow}</p> : null}
+          <h1 className={eyebrow ? "mt-1.5 text-2xl font-semibold" : "text-2xl font-semibold"}>{title}</h1>
           <p className="mt-2 text-sm text-muted-foreground">{description}</p>
           <div className="mt-6">{children}</div>
-          {footer ? <div className="mt-6 text-sm text-muted-foreground">{footer}</div> : null}
+          {footer ? <div className="mt-6 text-center text-sm text-muted-foreground">{footer}</div> : null}
         </div>
       </main>
     </div>

@@ -1,8 +1,16 @@
-import { createFileRoute, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Outlet, redirect, useRouter } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { AppShell, type NavItem } from "@/components/layout/AppShell";
-import { patientSession } from "@/lib/session";
+import { getSession, type Session } from "@/lib/session";
 
 export const Route = createFileRoute("/patient")({
+  beforeLoad: () => {
+    if (typeof window === "undefined") return;
+    const session = getSession();
+    if (!session?.token || session.role !== "patient") {
+      throw redirect({ to: "/" });
+    }
+  },
   component: PatientLayout,
 });
 
@@ -19,8 +27,22 @@ const nav: NavItem[] = [
 ];
 
 function PatientLayout() {
+  const router = useRouter();
+  const [session, setSession] = useState<Session | null>(() => getSession());
+
+  useEffect(() => {
+    const current = getSession();
+    if (!current?.token || current.role !== "patient") {
+      void router.navigate({ to: "/" });
+      return;
+    }
+    setSession(current);
+  }, [router]);
+
+  if (!session) return null;
+
   return (
-    <AppShell brandSuffix="Patient portal" nav={nav} session={patientSession}>
+    <AppShell brandSuffix="Patient portal" nav={nav} session={session}>
       <Outlet />
     </AppShell>
   );

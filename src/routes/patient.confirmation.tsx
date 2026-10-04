@@ -1,8 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Badge, Button, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
-import { appointments, followUps } from "@/lib/mock-data";
+import { useEffect, useState } from "react";
+import { Badge, Button, EmptyNote, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
+import { appointmentsApi, formatApiError, type ApiAppointment } from "@/lib/api";
 
 export const Route = createFileRoute("/patient/confirmation")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    appointmentId: typeof search.appointmentId === "string" ? search.appointmentId : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Appointment confirmed — AI Receptionist" },
@@ -15,7 +19,51 @@ export const Route = createFileRoute("/patient/confirmation")({
 });
 
 function Confirmation() {
-  const appointment = appointments[0]!;
+  const { appointmentId } = Route.useSearch();
+  const [appointment, setAppointment] = useState<ApiAppointment | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function load() {
+      setLoading(true);
+      setError("");
+      try {
+        if (!appointmentId) {
+          if (!cancelled) setError("No appointment was selected.");
+          return;
+        }
+        const result = await appointmentsApi.get(appointmentId);
+        if (!cancelled) setAppointment(result.appointment);
+      } catch (err) {
+        if (!cancelled) setError(formatApiError(err, "Unable to load confirmation."));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void load();
+    return () => {
+      cancelled = true;
+    };
+  }, [appointmentId]);
+
+  if (loading) {
+    return <EmptyNote>Loading confirmation…</EmptyNote>;
+  }
+
+  if (error || !appointment) {
+    return (
+      <>
+        <PageHeader eyebrow="Patient" title="Appointment confirmed" description={error || "Appointment not found."} />
+        <Link to="/patient/appointments">
+          <Button variant="outline">My appointments</Button>
+        </Link>
+      </>
+    );
+  }
 
   return (
     <>
@@ -32,8 +80,11 @@ function Confirmation() {
               {appointment.date} · {appointment.time}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
-              {appointment.doctorName} · {appointment.speciality} · Northgate Medical Centre, Room 4
+              {appointment.doctorName} · {appointment.speciality} · {appointment.clinic}
             </p>
+            {appointment.reason ? (
+              <p className="mt-3 text-sm text-muted-foreground">Reason: {appointment.reason}</p>
+            ) : null}
             <div className="mt-4 flex flex-wrap gap-2">
               <Link to="/patient/appointments">
                 <Button variant="outline" size="sm">
@@ -60,20 +111,28 @@ function Confirmation() {
 
         <aside className="space-y-4">
           <Panel className="p-4">
-            <SectionLabel>Messages queued</SectionLabel>
-            <ul className="mt-3 space-y-3">
-              {followUps.slice(0, 2).map((item) => (
-                <li key={item.id}>
-                  <p className="text-[13px] font-medium">{item.subject}</p>
-                  <p className="font-mono text-[10px] text-muted-foreground">
-                    {item.channel} · {item.status}
-                  </p>
-                </li>
-              ))}
-            </ul>
+            <SectionLabel>Visit summary</SectionLabel>
+            <dl className="mt-3 space-y-2 text-[13px]">
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Duration</dt>
+                <dd>{appointment.duration}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Mode</dt>
+                <dd>{appointment.mode}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Fee</dt>
+                <dd>{appointment.fee}</dd>
+              </div>
+              <div className="flex justify-between gap-2">
+                <dt className="text-muted-foreground">Status</dt>
+                <dd className="capitalize">{appointment.status}</dd>
+              </div>
+            </dl>
             <Link to="/patient/messages">
               <Button variant="soft" size="sm" className="mt-3 w-full">
-                View all messages
+                View messages
               </Button>
             </Link>
           </Panel>

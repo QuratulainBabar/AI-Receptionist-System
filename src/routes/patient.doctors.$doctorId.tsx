@@ -1,34 +1,98 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { Avatar, Badge, Button, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
-import { availableDates, doctors, initials, timeSlots } from "@/lib/mock-data";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
+import { Avatar, Badge, Button, EmptyNote, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
+import {
+  doctorsApi,
+  formatApiError,
+  type ApiAvailabilityDate,
+  type ApiDoctor,
+  type ApiTimeSlot,
+} from "@/lib/api";
+import { initials } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/patient/doctors/$doctorId")({
-  loader: ({ params }) => {
-    const doctor = doctors.find((d) => d.id === params.doctorId);
-    if (!doctor) throw notFound();
-    return { doctor };
-  },
-  head: ({ loaderData }) => {
-    if (!loaderData) {
-      return { meta: [{ title: "Doctor not found — AI Receptionist" }, { name: "robots", content: "noindex" }] };
-    }
-    const { doctor } = loaderData;
-    const description = `${doctor.speciality} at ${doctor.clinic}. ${doctor.experience} of experience. Next available ${doctor.nextAvailable}.`;
-    return {
-      meta: [
-        { title: `${doctor.name} — AI Receptionist` },
-        { name: "description", content: description },
-        { property: "og:title", content: `${doctor.name} · ${doctor.speciality}` },
-        { property: "og:description", content: description },
-      ],
-    };
-  },
+  head: () => ({
+    meta: [
+      { title: "Doctor profile — AI Receptionist" },
+      { name: "description", content: "View doctor details and available appointment slots." },
+    ],
+  }),
   component: DoctorDetails,
 });
 
 function DoctorDetails() {
-  const { doctor } = Route.useLoaderData();
+  const { doctorId } = Route.useParams();
+  const [doctor, setDoctor] = useState<ApiDoctor | null>(null);
+  const [dates, setDates] = useState<ApiAvailabilityDate[]>([]);
+  const [timeSlots, setTimeSlots] = useState<ApiTimeSlot[]>([]);
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadDoctor() {
+      setLoading(true);
+      setError("");
+      try {
+        const [doctorResult, availabilityResult] = await Promise.all([
+          doctorsApi.get(doctorId),
+          doctorsApi.availability(doctorId),
+        ]);
+        if (cancelled) return;
+        setDoctor(doctorResult.doctor);
+        setDates(availabilityResult.availability.dates);
+        setSelectedDate(availabilityResult.availability.selectedDate);
+        setTimeSlots(availabilityResult.availability.timeSlots);
+      } catch (err) {
+        if (!cancelled) setError(formatApiError(err, "Unable to load doctor profile."));
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+
+    void loadDoctor();
+    return () => {
+      cancelled = true;
+    };
+  }, [doctorId]);
+
+  useEffect(() => {
+    if (!selectedDate || !doctor) return;
+    let cancelled = false;
+
+    async function loadSlots() {
+      try {
+        const result = await doctorsApi.availability(doctorId, selectedDate ?? undefined);
+        if (cancelled) return;
+        setTimeSlots(result.availability.timeSlots);
+      } catch (err) {
+        if (!cancelled) setError(formatApiError(err, "Unable to load availability."));
+      }
+    }
+
+    void loadSlots();
+    return () => {
+      cancelled = true;
+    };
+  }, [doctorId, selectedDate, doctor]);
+
+  if (loading) {
+    return <EmptyNote>Loading doctor profile…</EmptyNote>;
+  }
+
+  if (error || !doctor) {
+    return (
+      <>
+        <PageHeader eyebrow="Doctor profile" title="Doctor not found" description={error || "This doctor is unavailable."} />
+        <Link to="/patient/doctors">
+          <Button variant="outline">Back to list</Button>
+        </Link>
+      </>
+    );
+  }
 
   return (
     <>
@@ -54,29 +118,65 @@ function DoctorDetails() {
             <div className="flex items-start gap-4">
               <Avatar label={initials(doctor.name)} className="size-14 text-base" />
               <div className="min-w-0">
-                <p className="text-sm font-semibold">{doctor.speciality}</p>
-                <p className="text-xs text-muted-foreground">{doctor.clinic}</p>
+                <p className="text-sm font-semibold">
+                  {doctor.speciality}
+                  {doctor.subSpecialty ? ` · ${doctor.subSpecialty}` : ""}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {doctor.clinic}
+                  {doctor.location ? ` · ${doctor.location}` : ""}
+                </p>
                 <div className="mt-3 flex flex-wrap gap-1.5">
                   <Badge tone="success">{doctor.rating} rating</Badge>
                   <Badge tone="primary">{doctor.experience}</Badge>
                   <Badge>{doctor.reviews} reviews</Badge>
                   <Badge tone="accent">Fee {doctor.fee}</Badge>
+                  {doctor.consultationType ? <Badge>{doctor.consultationType}</Badge> : null}
                 </div>
               </div>
             </div>
           </Panel>
 
+          {doctor.areasOfExpertise?.length ||
+          doctor.qualifications?.length ||
+          doctor.certifications?.length ? (
+            <Panel className="p-4">
+              <SectionLabel>Credentials & expertise</SectionLabel>
+              <dl className="mt-3 space-y-2 text-[13px]">
+                {doctor.qualifications?.length ? (
+                  <div>
+                    <dt className="text-muted-foreground">Qualifications</dt>
+                    <dd>{doctor.qualifications.join(", ")}</dd>
+                  </div>
+                ) : null}
+                {doctor.certifications?.length ? (
+                  <div>
+                    <dt className="text-muted-foreground">Certifications</dt>
+                    <dd>{doctor.certifications.join(", ")}</dd>
+                  </div>
+                ) : null}
+                {doctor.areasOfExpertise?.length ? (
+                  <div>
+                    <dt className="text-muted-foreground">Areas of expertise</dt>
+                    <dd>{doctor.areasOfExpertise.join(", ")}</dd>
+                  </div>
+                ) : null}
+              </dl>
+            </Panel>
+          ) : null}
+
           <Panel className="p-4">
             <SectionLabel>Availability this week</SectionLabel>
             <div className="mt-3 flex flex-wrap gap-2">
-              {availableDates.map((date, index) => (
+              {dates.map((date) => (
                 <button
                   key={date.id}
                   type="button"
                   disabled={date.slots === 0}
+                  onClick={() => setSelectedDate(date.id)}
                   className={cn(
                     "rounded-lg border px-3 py-2 text-center transition-colors",
-                    index === 0 ? "border-primary bg-primary/8" : "border-border bg-card hover:border-primary/40",
+                    selectedDate === date.id ? "border-primary bg-primary/8" : "border-border bg-card hover:border-primary/40",
                     date.slots === 0 && "opacity-40",
                   )}
                 >
@@ -88,19 +188,23 @@ function DoctorDetails() {
               ))}
             </div>
             <div className="mt-4 grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-              {timeSlots.map((slot) => (
-                <button
-                  key={slot.id}
-                  type="button"
-                  disabled={!slot.available}
-                  className={cn(
-                    "rounded-md border border-border bg-card py-2 font-mono text-[11px] transition-colors hover:border-primary/40",
-                    !slot.available && "opacity-40",
-                  )}
-                >
-                  {slot.time}
-                </button>
-              ))}
+              {timeSlots.length === 0 ? (
+                <p className="col-span-full text-sm text-muted-foreground">No slots on this day.</p>
+              ) : (
+                timeSlots.map((slot) => (
+                  <button
+                    key={slot.id}
+                    type="button"
+                    disabled={!slot.available}
+                    className={cn(
+                      "rounded-md border border-border bg-card py-2 font-mono text-[11px] transition-colors hover:border-primary/40",
+                      !slot.available && "opacity-40",
+                    )}
+                  >
+                    {slot.time}
+                  </button>
+                ))
+              )}
             </div>
           </Panel>
         </div>
@@ -111,12 +215,21 @@ function DoctorDetails() {
             <dl className="mt-3 space-y-2 text-[13px]">
               <div className="flex justify-between gap-2">
                 <dt className="text-muted-foreground">Languages</dt>
-                <dd className="text-right">{doctor.languages.join(", ")}</dd>
+                <dd className="text-right">{doctor.languages.join(", ") || "—"}</dd>
               </div>
               <div className="flex justify-between gap-2">
                 <dt className="text-muted-foreground">Consultation</dt>
-                <dd>{doctor.fee}</dd>
+                <dd className="text-right">
+                  {doctor.fee}
+                  {doctor.consultationType ? ` · ${doctor.consultationType}` : ""}
+                </dd>
               </div>
+              {doctor.weeklyHoursSummary ? (
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Weekly hours</dt>
+                  <dd className="text-right text-xs">{doctor.weeklyHoursSummary}</dd>
+                </div>
+              ) : null}
               <div className="flex justify-between gap-2">
                 <dt className="text-muted-foreground">Next free</dt>
                 <dd className="text-primary">{doctor.nextAvailable}</dd>

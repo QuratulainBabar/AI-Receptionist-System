@@ -1,12 +1,13 @@
 import { Link } from "@tanstack/react-router";
 import { Avatar, Badge, Button, Panel, SectionLabel } from "@/components/ui/primitives";
+import type { ApiAppointment, ApiDoctor } from "@/lib/api";
 import { initials, statusTone, type Appointment, type Doctor } from "@/lib/mock-data";
 
 export function AppointmentCard({
   appointment,
   perspective = "patient",
 }: {
-  appointment: Appointment;
+  appointment: Appointment | ApiAppointment;
   perspective?: "patient" | "doctor";
 }) {
   const who = perspective === "patient" ? appointment.doctorName : appointment.patientName;
@@ -32,7 +33,7 @@ export function AppointmentCard({
           {appointment.reference} · {appointment.mode}
         </span>
         {perspective === "patient" ? (
-          <Link to="/patient/appointments">
+          <Link to="/patient/appointments/$appointmentId" params={{ appointmentId: appointment.id }}>
             <Button variant="outline" size="sm">
               Details
             </Button>
@@ -49,7 +50,7 @@ export function AppointmentCard({
   );
 }
 
-export function DoctorCard({ doctor }: { doctor: Doctor }) {
+export function DoctorCard({ doctor }: { doctor: Doctor | ApiDoctor }) {
   return (
     <Panel className="p-4">
       <div className="flex items-start gap-3">

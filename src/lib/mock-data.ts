@@ -3,17 +3,21 @@
 export type Role = "patient" | "doctor";
 
 export const demoCredentials = [
-  { role: "patient" as Role, email: "patient@example.com", password: "Patient123" },
-  { role: "doctor" as Role, email: "doctor@example.com", password: "Doctor123" },
+  { role: "patient" as const, email: "patient@example.com", password: "Patient123", label: "Patient" },
+  { role: "doctor" as const, email: "doctor@example.com", password: "Doctor123", label: "Doctor" },
+  { role: "admin" as const, email: "admin@example.com", password: "Admin123", label: "Super Admin" },
 ];
 
 export const specialities = [
-  { id: "cardiology", name: "Cardiology", description: "Heart, blood pressure and circulation", doctors: 8 },
-  { id: "dermatology", name: "Dermatology", description: "Skin, hair and nail conditions", doctors: 5 },
-  { id: "neurology", name: "Neurology", description: "Headaches, nerves and the brain", doctors: 4 },
+  { id: "neurology", name: "Neurologist", description: "Headaches, nerves, brain and neurological conditions", doctors: 6 },
+  { id: "cardiology", name: "Cardiologist", description: "Heart, blood pressure and circulation", doctors: 8 },
+  { id: "dermatology", name: "Dermatologist", description: "Skin, hair and nail conditions", doctors: 5 },
+  { id: "general", name: "General Physician", description: "Everyday illness, routine checkups and general medical care", doctors: 11 },
+  { id: "orthopedics", name: "Orthopedic", description: "Bones, joints, fractures and sports injuries", doctors: 5 },
+  { id: "dentist", name: "Dentist", description: "Teeth, gums, oral health and dental care", doctors: 3 },
+  { id: "gynecologist", name: "Gynecologist", description: "Women's reproductive health and related care", doctors: 4 },
+  { id: "psychiatrist", name: "Psychiatrist", description: "Mental health, mood disorders and psychiatric care", doctors: 3 },
   { id: "pediatrics", name: "Pediatrics", description: "Care for infants, children and teens", doctors: 6 },
-  { id: "orthopedics", name: "Orthopedics", description: "Bones, joints and sports injuries", doctors: 5 },
-  { id: "general", name: "General Medicine", description: "Everyday illness and routine checkups", doctors: 11 },
 ];
 
 export type Doctor = {
@@ -461,6 +465,14 @@ export const activityLog: ActivityEntry[] = [
   { id: "l-3", label: "Visit completed", detail: "Annual checkup with Dr. Ellen Chen", time: "27 Aug 2026, 09:24" },
   { id: "l-4", label: "Medical history updated", detail: "Added allergy: Pollen", time: "22 Aug 2026, 11:02" },
   { id: "l-5", label: "Appointment cancelled", detail: "APT-4795 with Dr. Lena Sorensen", time: "10 Jul 2026, 18:30" },
+];
+
+export const doctorActivityLog: ActivityEntry[] = [
+  { id: "dl-1", label: "New booking received", detail: "APT-4833 — Amina Yusuf · Chest tightness assessment", time: "14 Sep 2026, 16:22" },
+  { id: "dl-2", label: "Appointment rescheduled", detail: "APT-4822 — Tomas Lindqvist moved to 11:15 AM", time: "14 Sep 2026, 12:05" },
+  { id: "dl-3", label: "Patient report reviewed", detail: "ECG_Report_Aug2026.pdf — Maya Okonkwo", time: "13 Sep 2026, 18:40" },
+  { id: "dl-4", label: "Visit completed", detail: "APT-4821 prep notes saved for Maya Okonkwo", time: "09 Sep 2026, 10:55" },
+  { id: "dl-5", label: "Slot released", detail: "APT cancelled — Ravi Menon · Fri 19 Sep 09:30 AM", time: "13 Sep 2026, 09:12" },
 ];
 
 export const statusTone: Record<AppointmentStatus, "success" | "warning" | "muted" | "destructive"> = {

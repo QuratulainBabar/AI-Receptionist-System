@@ -1,12 +1,20 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { Button, Field, Input } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
 import type { Role } from "@/lib/mock-data";
-import { saveSession } from "@/lib/session";
+import { authApi, formatApiError } from "@/lib/api";
+import { getSession, homeForRole, saveAuth } from "@/lib/session";
 
 export const Route = createFileRoute("/signup")({
+  beforeLoad: () => {
+    if (typeof window === "undefined") return;
+    const session = getSession();
+    if (session?.token) {
+      throw redirect({ to: homeForRole(session.role) });
+    }
+  },
   head: () => ({
     meta: [
       { title: "Create an account — AI Receptionist" },
@@ -22,28 +30,56 @@ export const Route = createFileRoute("/signup")({
 });
 
 const roleOptions: { role: Role; title: string; description: string }[] = [
-  { role: "patient", title: "Patient", description: "Ask questions, find a doctor and book visits" },
-  { role: "doctor", title: "Doctor", description: "Manage your schedule and patient records" },
+  { role: "patient", title: "Patient", description: "Book visits & manage records" },
+  { role: "doctor", title: "Doctor", description: "Manage schedule & patients" },
 ];
 
 function SignupPage() {
   const navigate = useNavigate();
   const [role, setRole] = useState<Role>("patient");
+  const [fullName, setFullName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent) {
     event.preventDefault();
-    saveSession(role);
-    void navigate({ to: role === "doctor" ? "/doctor" : "/patient" });
+    setError("");
+
+    if (fullName.trim().length < 2) {
+      setError("Full name must be at least 2 characters.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await authApi.signup({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        password,
+        role,
+      });
+      saveAuth(result.user, result.token);
+      await navigate({ to: homeForRole(result.user.role) });
+    } catch (err) {
+      setError(formatApiError(err, "Unable to create account."));
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <AuthLayout
-      eyebrow="Get started"
       title="Create your account"
-      description="Pick how you'll use the clinic, then fill in your details."
+      description="Choose your role and get started with the portal."
       footer={
         <p>
-          Already registered?{" "}
+          Already have an account?{" "}
           <Link to="/" className="font-medium text-primary underline-offset-4 hover:underline">
             Sign in
           </Link>
@@ -52,7 +88,7 @@ function SignupPage() {
     >
       <form className="space-y-5" onSubmit={submit}>
         <fieldset className="space-y-2">
-          <legend className="text-[13px] font-medium">I am a</legend>
+          <legend className="text-[13px] font-medium text-foreground">I am signing up as</legend>
           <div className="grid gap-2 sm:grid-cols-2">
             {roleOptions.map((option) => (
               <button
@@ -61,40 +97,52 @@ function SignupPage() {
                 onClick={() => setRole(option.role)}
                 aria-pressed={role === option.role}
                 className={cn(
-                  "rounded-lg border p-3 text-left transition-colors",
+                  "rounded-xl border p-3.5 text-left transition-colors",
                   role === option.role
-                    ? "border-primary bg-primary/8 text-foreground"
-                    : "border-border bg-card text-muted-foreground hover:border-primary/40",
+                    ? "border-primary/50 bg-primary/10 text-foreground"
+                    : "border-border bg-card text-muted-foreground hover:border-primary/35",
                 )}
               >
                 <span className="block text-[13px] font-semibold text-foreground">{option.title}</span>
-                <span className="mt-0.5 block text-xs">{option.description}</span>
+                <span className="mt-0.5 block text-xs text-muted-foreground">{option.description}</span>
               </button>
             ))}
           </div>
         </fieldset>
 
         <Field label="Full name">
-          <Input placeholder={role === "doctor" ? "Dr. Daniel Osei" : "Maya Okonkwo"} />
+          <Input
+            className="border-border bg-card"
+            placeholder={role === "doctor" ? "Dr. Daniel Osei" : "Maya Okonkwo"}
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            required
+          />
         </Field>
         <Field label="Email">
-          <Input type="email" placeholder="you@example.com" />
+          <Input
+            type="email"
+            placeholder="you@example.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
         </Field>
-        {role === "doctor" ? (
-          <Field label="Speciality">
-            <Input placeholder="Cardiology" />
-          </Field>
-        ) : (
-          <Field label="Phone">
-            <Input placeholder="+1 (415) 555-0148" />
-          </Field>
-        )}
         <Field label="Password" hint="At least 8 characters.">
-          <Input type="password" placeholder="••••••••" />
+          <Input
+            type="password"
+            placeholder="••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={8}
+            required
+          />
         </Field>
 
-        <Button type="submit" size="lg" className="w-full">
-          Create account
+        {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+        <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          {loading ? "Creating account…" : "Create account"}
         </Button>
       </form>
     </AuthLayout>

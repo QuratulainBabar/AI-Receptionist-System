@@ -5,7 +5,7 @@ type ButtonVariant = "primary" | "outline" | "ghost" | "soft" | "danger";
 type ButtonSize = "sm" | "md" | "lg";
 
 const buttonVariants: Record<ButtonVariant, string> = {
-  primary: "bg-primary text-primary-foreground hover:bg-primary/90",
+  primary: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm",
   outline: "border border-border bg-card text-foreground hover:bg-secondary",
   ghost: "text-muted-foreground hover:bg-secondary hover:text-foreground",
   soft: "bg-secondary text-secondary-foreground hover:bg-secondary/70",
@@ -27,7 +27,7 @@ export function Button({
   return (
     <button
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
+        "inline-flex items-center justify-center gap-2 rounded-xl font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50",
         buttonVariants[variant],
         buttonSizes[size],
         className,
@@ -49,11 +49,11 @@ type BadgeTone = "primary" | "success" | "warning" | "destructive" | "muted" | "
 
 const badgeTones: Record<BadgeTone, string> = {
   primary: "bg-primary/10 text-primary",
-  success: "bg-success/12 text-success",
+  success: "bg-[oklch(0.95_0.03_175)] text-success",
   warning: "bg-warning/18 text-warning-foreground",
   destructive: "bg-destructive/10 text-destructive",
   muted: "bg-muted text-muted-foreground",
-  accent: "bg-accent/12 text-accent",
+  accent: "bg-accent/15 text-accent-foreground",
 };
 
 export function Badge({ tone = "muted", children, className }: { tone?: BadgeTone; children: ReactNode; className?: string }) {
@@ -92,7 +92,7 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return (
     <input
       className={cn(
-        "h-10 w-full rounded-md border border-input bg-card px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+        "h-11 w-full rounded-xl border border-transparent bg-input-fill px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring/40 focus-visible:bg-card focus-visible:ring-2 focus-visible:ring-ring/25 focus-visible:outline-none",
         className,
       )}
       {...props}
@@ -104,7 +104,7 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   return (
     <textarea
       className={cn(
-        "w-full rounded-md border border-input bg-card p-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
+        "w-full rounded-xl border border-input bg-card p-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:outline-none",
         className,
       )}
       {...props}
@@ -116,7 +116,7 @@ export function Avatar({ label, className }: { label: string; className?: string
   return (
     <div
       className={cn(
-        "grid size-10 shrink-0 place-items-center rounded-lg bg-secondary font-display text-xs font-semibold text-secondary-foreground",
+        "grid size-10 shrink-0 place-items-center rounded-xl bg-secondary font-display text-xs font-semibold text-secondary-foreground",
         className,
       )}
     >

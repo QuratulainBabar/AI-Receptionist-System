@@ -1,0 +1,333 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  PATIENT
+  DOCTOR
+  SUPER_ADMIN
+}
+
+enum AppointmentStatus {
+  CONFIRMED
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+enum AppointmentMode {
+  IN_CLINIC
+  VIDEO_CALL
+}
+
+enum MessageChannel {
+  EMAIL
+  SMS
+}
+
+enum MessageStatus {
+  DELIVERED
+  SCHEDULED
+  OPENED
+}
+
+enum VoiceCallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum VoiceCallStatus {
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         Role
+  reference    String   @unique
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  passwordResetTokens  PasswordResetToken[]
+  doctorProfile        DoctorProfile?
+  patientAppointments  Appointment[] @relation("PatientAppointments")
+  doctorAppointments   Appointment[] @relation("DoctorAppointments")
+  followUpMessages     FollowUpMessage[]
+  medicalHistory       PatientMedicalHistory?
+  medicalRecords       PatientMedicalRecord[]
+  activities           PatientActivity[]
+  doctorNotifications  DoctorNotification[] @relation("DoctorNotifications")
+  voiceCallsAsPatient  VoiceCall[] @relation("PatientVoiceCalls")
+  voiceCallsAsDoctor   VoiceCall[] @relation("DoctorVoiceCalls")
+
+  @@index([role])
+  @@index([isActive])
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@map("password_reset_tokens")
+}
+
+model Specialty {
+  id          String          @id
+  name        String
+  description String
+  sortOrder   Int             @default(0)
+  doctors     DoctorProfile[]
+
+  @@map("specialties")
+}
+
+model DoctorProfile {
+  id                String   @id @default(cuid())
+  userId            String   @unique
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  specialtyId       String
+  specialty         Specialty @relation(fields: [specialtyId], references: [id])
+  subSpecialty      String   @default("")
+  qualifications    String[] @default([])
+  certifications    String[] @default([])
+  experienceYears   Int
+  rating            Float    @default(0)
+  reviews           Int      @default(0)
+  /** Hospital / clinic name shown to patients and Synthflow. */
+  clinic            String
+  fee               String
+  consultationType  String   @default("In clinic")
+  languages         String[]
+  /** Professional bio shown when a patient asks about the doctor. */
+  about             String
+  areasOfExpertise  String[] @default([])
+  location          String   @default("")
+  /** Weekly available days/timings: [{ day, enabled, startTime, endTime }]. */
+  weeklyHours       Json?
+  /** Super Admin verification — only verified doctors sync to Synthflow. */
+  isVerified        Boolean  @default(false)
+  verifiedAt        DateTime?
+  verifiedByAdminId String?
+  verificationNote  String   @default("")
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  availability AvailabilitySlot[]
+
+  @@index([specialtyId])
+  @@index([clinic])
+  @@index([isVerified])
+  @@map("doctor_profiles")
+}
+
+model AvailabilitySlot {
+  id          String        @id @default(cuid())
+  doctorId    String
+  doctor      DoctorProfile @relation(fields: [doctorId], references: [id], onDelete: Cascade)
+  startsAt    DateTime
+  isBooked    Boolean       @default(false)
+  createdAt   DateTime      @default(now())
+  appointment Appointment?
+
+  @@unique([doctorId, startsAt])
+  @@index([doctorId, startsAt])
+  @@index([startsAt, isBooked])
+  @@map("availability_slots")
+}
+
+model Appointment {
+  id              String            @id @default(cuid())
+  reference       String            @unique
+  patientId       String
+  patient         User              @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Cascade)
+  doctorUserId    String
+  doctorUser      User              @relation("DoctorAppointments", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  slotId          String            @unique
+  slot            AvailabilitySlot  @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  startsAt        DateTime
+  durationMinutes Int               @default(30)
+  mode            AppointmentMode   @default(IN_CLINIC)
+  reason          String            @default("")
+  fee             String
+  clinic          String
+  specialtyName   String
+  status          AppointmentStatus @default(CONFIRMED)
+  /** Prior visit this appointment follows up on (doctor-scheduled return visit). */
+  followUpOfId    String?
+  followUpOf      Appointment?      @relation("AppointmentFollowUps", fields: [followUpOfId], references: [id], onDelete: SetNull)
+  followUps       Appointment[]     @relation("AppointmentFollowUps")
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  followUpMessages FollowUpMessage[]
+  voiceCalls       VoiceCall[]
+
+  @@index([patientId, startsAt])
+  @@index([doctorUserId, startsAt])
+  @@index([status])
+  @@index([followUpOfId])
+  @@map("appointments")
+}
+
+model FollowUpMessage {
+  id            String         @id @default(cuid())
+  patientId     String
+  patient       User           @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  appointmentId String?
+  appointment   Appointment?   @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  kind          String
+  channel       MessageChannel
+  status        MessageStatus
+  subject       String
+  preview       String
+  sentAt        DateTime
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@unique([appointmentId, kind])
+  @@index([patientId, sentAt])
+  @@map("follow_up_messages")
+}
+
+model PatientMedicalHistory {
+  id            String   @id @default(cuid())
+  userId        String   @unique
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  age           Int?
+  gender        String   @default("")
+  bloodGroup    String   @default("")
+  phone         String   @default("")
+  symptoms      String   @default("")
+  conditions    String[] @default([])
+  allergies     String[] @default([])
+  medications   String[] @default([])
+  surgeries     String[] @default([])
+  familyHistory String[] @default([])
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("patient_medical_histories")
+}
+
+model PatientMedicalRecord {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName     String
+  category     String
+  mimeType     String
+  sizeBytes    Int
+  storagePath  String
+  uploadedBy   String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([userId, createdAt])
+  @@map("patient_medical_records")
+}
+
+model PatientActivity {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type       String
+  label      String
+  detail     String
+  relatedId  String?
+  occurredAt DateTime
+  createdAt  DateTime @default(now())
+
+  @@index([userId, occurredAt])
+  @@index([userId, type, relatedId])
+  @@map("patient_activities")
+}
+
+model DoctorNotification {
+  id           String   @id @default(cuid())
+  doctorUserId String
+  doctorUser   User     @relation("DoctorNotifications", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  kind         String
+  eventType    String
+  title        String
+  detail       String
+  relatedId    String?
+  occurredAt   DateTime
+  createdAt    DateTime @default(now())
+
+  @@unique([doctorUserId, eventType, relatedId])
+  @@index([doctorUserId, occurredAt])
+  @@map("doctor_notifications")
+}
+
+model VoiceCall {
+  id              String             @id @default(cuid())
+  synthflowCallId String?            @unique
+  direction       VoiceCallDirection @default(INBOUND)
+  status          VoiceCallStatus    @default(RINGING)
+  fromNumber      String             @default("")
+  toNumber        String             @default("")
+  /** Name captured from Synthflow extractors / lead, even when no patient account is linked. */
+  callerName      String             @default("")
+  patientId       String?
+  patient         User?              @relation("PatientVoiceCalls", fields: [patientId], references: [id], onDelete: SetNull)
+  doctorUserId    String?
+  doctorUser      User?              @relation("DoctorVoiceCalls", fields: [doctorUserId], references: [id], onDelete: SetNull)
+  appointmentId   String?
+  appointment     Appointment?       @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  modelId         String             @default("")
+  transcript      String             @default("")
+  recordingUrl    String?
+  durationSeconds Int?
+  endCallReason   String             @default("")
+  summary         String             @default("")
+  metadata        Json?
+  rawPayload      Json?
+  startedAt       DateTime?
+  endedAt         DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([fromNumber])
+  @@index([callerName])
+  @@index([patientId, createdAt])
+  @@index([doctorUserId, createdAt])
+  @@index([status, createdAt])
+  @@map("voice_calls")
+}
+
+/** Singleton clinic phone-AI settings (id = "default"), mirrors restaurant Synthflow config. */
+model ClinicVoiceSettings {
+  id                 String    @id @default("default")
+  clinicName         String    @default("Qubetech AI Receptionist Clinic")
+  phoneNumber        String    @default("")
+  synthflowAgentId   String?
+  synthflowActionIds Json?
+  agentLanguage      String    @default("en")
+  agentVoiceId       String    @default("")
+  agentFirstMessage  String    @default("")
+  agentSystemPrompt  String    @default("")
+  voiceProvider      String    @default("synthflow")
+  synthflowSyncedAt  DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@map("clinic_voice_settings")
+}

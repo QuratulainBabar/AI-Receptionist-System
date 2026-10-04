@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { Button, Field, Input, Panel, SectionLabel } from "@/components/ui/primitives";
+import { authApi, formatApiError } from "@/lib/api";
 
 export const Route = createFileRoute("/forgot-password")({
   head: () => ({
@@ -16,11 +17,29 @@ export const Route = createFileRoute("/forgot-password")({
 });
 
 function ForgotPasswordPage() {
+  const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [devResetUrl, setDevResetUrl] = useState<string | null>(null);
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setError("");
+    setLoading(true);
+    try {
+      const result = await authApi.forgotPassword({ email: email.trim() });
+      setDevResetUrl(result.resetUrl ?? null);
+      setSent(true);
+    } catch (err) {
+      setError(formatApiError(err, "Unable to request reset."));
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <AuthLayout
-      eyebrow="Account help"
       title="Forgot password"
       description="Enter the email on your account and we'll send reset instructions."
       footer={
@@ -35,26 +54,42 @@ function ForgotPasswordPage() {
         <Panel>
           <SectionLabel>Check your inbox</SectionLabel>
           <p className="mt-2 text-sm text-muted-foreground">
-            If that email exists, reset instructions are on the way. This is a demo screen, so no message is
-            actually sent.
+            If that email exists, password reset instructions have been prepared.
           </p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => setSent(false)}>
+          {devResetUrl ? (
+            <p className="mt-3 break-all text-xs text-muted-foreground">
+              Dev reset link:{" "}
+              <a href={devResetUrl} className="font-medium text-primary underline-offset-4 hover:underline">
+                {devResetUrl}
+              </a>
+            </p>
+          ) : null}
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-4"
+            onClick={() => {
+              setSent(false);
+              setDevResetUrl(null);
+            }}
+          >
             Use a different email
           </Button>
         </Panel>
       ) : (
-        <form
-          className="space-y-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            setSent(true);
-          }}
-        >
+        <form className="space-y-4" onSubmit={submit}>
           <Field label="Email">
-            <Input type="email" placeholder="you@example.com" />
+            <Input
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+            />
           </Field>
-          <Button type="submit" size="lg" className="w-full">
-            Send reset link
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+          <Button type="submit" size="lg" className="w-full" disabled={loading}>
+            {loading ? "Sending…" : "Send reset link"}
           </Button>
         </form>
       )}

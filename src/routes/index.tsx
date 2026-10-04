@@ -1,11 +1,19 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
-import { Button, Field, Input, Panel, SectionLabel } from "@/components/ui/primitives";
+import { Button, Field, Input, SectionLabel } from "@/components/ui/primitives";
+import { authApi, formatApiError } from "@/lib/api";
 import { demoCredentials } from "@/lib/mock-data";
-import { saveSession } from "@/lib/session";
+import { getSession, homeForRole, saveAuth } from "@/lib/session";
 
 export const Route = createFileRoute("/")({
+  beforeLoad: () => {
+    if (typeof window === "undefined") return;
+    const session = getSession();
+    if (session?.token) {
+      throw redirect({ to: homeForRole(session.role) });
+    }
+  },
   head: () => ({
     meta: [
       { title: "Sign in — AI Receptionist" },
@@ -17,7 +25,7 @@ export const Route = createFileRoute("/")({
       { property: "og:title", content: "Sign in — AI Receptionist" },
       {
         property: "og:description",
-        content: "AI-powered medical reception for patients and doctors. Demo interface with sample data.",
+        content: "AI-powered medical reception for patients and doctors.",
       },
     ],
   }),
@@ -29,46 +37,51 @@ function LoginPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
   function fill(index: number) {
     const demo = demoCredentials[index]!;
+    if (demo.role === "admin") {
+      if (typeof window !== "undefined") {
+        window.sessionStorage.setItem(
+          "ai-receptionist-admin-demo",
+          JSON.stringify({ email: demo.email, password: demo.password }),
+        );
+      }
+      void navigate({ to: "/admin/login" });
+      return;
+    }
     setEmail(demo.email);
     setPassword(demo.password);
     setError("");
   }
 
-  function submit(event: React.FormEvent) {
+  async function submit(event: React.FormEvent) {
     event.preventDefault();
-    const match = demoCredentials.find(
-      (item) => item.email === email.trim().toLowerCase() && item.password === password,
-    );
-    if (!match) {
-      setError("Use one of the demo accounts listed below.");
-      return;
+    setError("");
+    setLoading(true);
+    try {
+      const result = await authApi.login({ email: email.trim(), password });
+      saveAuth(result.user, result.token);
+      await navigate({ to: homeForRole(result.user.role) });
+    } catch (err) {
+      setError(formatApiError(err, "Unable to sign in."));
+    } finally {
+      setLoading(false);
     }
-    saveSession(match.role);
-    void navigate({ to: match.role === "doctor" ? "/doctor" : "/patient" });
   }
 
   return (
     <AuthLayout
-      eyebrow="Welcome back"
-      title="Sign in"
-      description="Use a demo account to explore the patient or doctor experience."
+      title="Welcome back"
+      description="Sign in to continue to your portal."
       footer={
-        <div className="space-y-2">
-          <p>
-            New here?{" "}
-            <Link to="/signup" className="font-medium text-primary underline-offset-4 hover:underline">
-              Create an account
-            </Link>
-          </p>
-          <p>
-            <Link to="/forgot-password" className="font-medium text-primary underline-offset-4 hover:underline">
-              Forgot your password?
-            </Link>
-          </p>
-        </div>
+        <p>
+          New here?{" "}
+          <Link to="/signup" className="font-medium text-primary underline-offset-4 hover:underline">
+            Create an account
+          </Link>
+        </p>
       }
     >
       <form className="space-y-4" onSubmit={submit}>
@@ -79,6 +92,7 @@ function LoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
             autoComplete="username"
+            required
           />
         </Field>
         <Field label="Password">
@@ -88,32 +102,46 @@ function LoginPage() {
             onChange={(e) => setPassword(e.target.value)}
             placeholder="••••••••"
             autoComplete="current-password"
+            required
           />
         </Field>
+
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <Link to="/admin/login" className="font-medium text-primary underline-offset-4 hover:underline">
+            Super Admin sign in
+          </Link>
+          <Link to="/forgot-password" className="font-medium text-primary underline-offset-4 hover:underline">
+            Forgot password?
+          </Link>
+        </div>
+
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        <Button type="submit" size="lg" className="w-full">
-          Sign in
+
+        <Button type="submit" size="lg" className="w-full" disabled={loading}>
+          {loading ? "Signing in…" : "Sign in"}
         </Button>
       </form>
 
-      <Panel className="mt-6 p-4">
-        <SectionLabel>Demo accounts</SectionLabel>
-        <div className="mt-3 space-y-2">
+      <div className="mt-6 rounded-xl border border-dashed border-border bg-muted/40 p-4">
+        <SectionLabel>Demo credentials</SectionLabel>
+        <div className="mt-3 space-y-3">
           {demoCredentials.map((demo, index) => (
-            <div key={demo.email} className="flex items-center justify-between gap-3 rounded-md bg-muted/60 px-3 py-2">
+            <div key={demo.email} className="flex items-start justify-between gap-3">
               <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium capitalize">{demo.role}</p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                  {demo.email} · {demo.password}
+                <p className="text-[13px] font-semibold">Demo {demo.label}</p>
+                <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
+                  {demo.email}
+                  <br />
+                  {demo.password}
                 </p>
               </div>
-              <Button type="button" variant="outline" size="sm" onClick={() => fill(index)}>
-                Use
+              <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={() => fill(index)}>
+                Use {demo.label.toLowerCase()} demo
               </Button>
             </div>
           ))}
         </div>
-      </Panel>
+      </div>
     </AuthLayout>
   );
 }
