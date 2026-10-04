@@ -100,7 +100,7 @@ export async function updateDoctorCrm(req: Request, res: Response, next: NextFun
     const userId = String(req.params.userId);
     const body = doctorCrmBodySchema.parse(req.body ?? {});
     const data = await adminDoctorService.updateDoctorCrmForAdmin(userId, body);
-    res.json({ success: true, ...data, message: "Doctor CRM profile saved." });
+    res.json({ success: true, ...data, message: "Doctor CRM profile saved and synced to the phone AI." });
   } catch (error) {
     next(error);
   }

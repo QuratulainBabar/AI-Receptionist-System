@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import * as doctorProfileService from "../services/doctor-profile.service.js";
+import { queueDirectorySync } from "../services/clinic-synthflow.service.js";
 import { AppError } from "../utils/AppError.js";
 import { WEEKDAYS } from "../utils/doctor-profile.js";
 
@@ -46,6 +47,7 @@ export async function updateProfile(req: Request, res: Response, next: NextFunct
     }
     const body = updateBodySchema.parse(req.body ?? {});
     const profile = await doctorProfileService.updateDoctorProfileForDoctor(req.user.sub, body);
+    queueDirectorySync("doctor-profile-save");
     res.json({ success: true, profile, message: "Doctor profile saved." });
   } catch (error) {
     next(error);

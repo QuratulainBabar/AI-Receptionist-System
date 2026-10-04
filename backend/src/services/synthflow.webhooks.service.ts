@@ -8,7 +8,7 @@ import { findPatientByPhone } from "./patient-phone.service.js";
 import { emptyish, extractSynthflowFields, extractVoiceBookingFields } from "./synthflow-fields.service.js";
 import { processVoiceBooking } from "./voice-booking.service.js";
 import { fetchCallRecordingUrl } from "./synthflow.client.js";
-import { formatDoctorDirectoryLine } from "./doctor-profile.service.js";
+import { formatDoctorDirectoryLine, formatDoctorSpokenBlurb } from "./doctor-profile.service.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -74,6 +74,7 @@ async function buildClinicContext() {
     take: 100,
   });
 
+  const profileBlurbs: string[] = [];
   const lines = doctors.map((doctor) => {
     const slots = doctor.availability
       .map((slot) => {
@@ -88,6 +89,19 @@ async function buildClinicContext() {
       })
       .join("; ");
     const weeklyHoursSummary = formatWeeklyHoursSummary(parseWeeklyHours(doctor.weeklyHours));
+    profileBlurbs.push(
+      formatDoctorSpokenBlurb({
+        fullName: doctor.user.fullName,
+        specialty: doctor.specialty.name,
+        qualifications: doctor.qualifications,
+        certifications: doctor.certifications,
+        experienceYears: doctor.experienceYears,
+        about: doctor.about,
+        clinic: doctor.clinic,
+        fee: doctor.fee,
+        languages: doctor.languages,
+      }),
+    );
     return formatDoctorDirectoryLine({
       fullName: doctor.user.fullName,
       doctorId: doctor.userId,
@@ -112,6 +126,7 @@ async function buildClinicContext() {
     clinic_name: "Qubetech AI Receptionist Clinic",
     doctors_available: String(doctors.length),
     doctors_directory: lines.join("\n") || "No doctors currently available.",
+    doctor_profiles: profileBlurbs.join("\n") || "none",
     availability_summary:
       lines
         .map((line) => {
@@ -131,7 +146,7 @@ async function buildClinicContext() {
         .filter(Boolean)
         .join(" | ") || "No open slots.",
     booking_instructions:
-      "You CAN check availability from availability_summary and doctors_directory next_slots. Never say you cannot check. To book, confirm name, doctor, and slot_id, then call the book appointment action.",
+      "When a doctor is discussed, share experience, qualifications, and professional bio from doctor_profiles. You CAN check availability from availability_summary and doctors_directory next_slots. To book, confirm name, doctor, and slot_id, then call the book appointment action.",
   };
 }
 
@@ -524,12 +539,16 @@ export async function handleAvailabilityAction(body: unknown) {
     return hay.includes(doctorQuery) || parts.every((part) => hay.includes(part));
   });
 
-  const rows = (matched.length ? matched : doctors).map((doctor) => ({
+  const sourceDoctors = matched.length ? matched : doctors;
+  const rows = sourceDoctors.map((doctor) => ({
     doctor_id: doctor.userId,
     name: doctor.user.fullName,
     specialty: doctor.specialty.name,
     clinic: doctor.clinic,
     fee: doctor.fee,
+    experience_years: doctor.experienceYears,
+    qualifications: doctor.qualifications,
+    professional_bio: doctor.about,
     available: doctor.availability.length > 0,
     slots: doctor.availability.map((slot) => ({
       slot_id: slot.id,
@@ -544,14 +563,28 @@ export async function handleAvailabilityAction(body: unknown) {
     })),
   }));
 
+  const firstDoctor = sourceDoctors[0];
   const first = rows[0];
+  const intro = firstDoctor
+    ? formatDoctorSpokenBlurb({
+        fullName: firstDoctor.user.fullName,
+        specialty: firstDoctor.specialty.name,
+        qualifications: firstDoctor.qualifications,
+        certifications: firstDoctor.certifications,
+        experienceYears: firstDoctor.experienceYears,
+        about: firstDoctor.about,
+        clinic: firstDoctor.clinic,
+        fee: firstDoctor.fee,
+        languages: firstDoctor.languages,
+      }).replace(/^- /, "")
+    : "";
   const spoken_summary = first
     ? first.available
-      ? `Yes, ${first.name} is available. Next openings: ${first.slots
+      ? `${intro} Next openings: ${first.slots
           .slice(0, 2)
           .map((slot) => slot.label)
-          .join("; ")}. Fee ${first.fee}.`
-      : `${first.name} has no open slots right now.`
+          .join("; ")}.`
+      : `${intro} There are no open slots right now.`
     : "That doctor is not on the current clinic roster.";
 
   return {

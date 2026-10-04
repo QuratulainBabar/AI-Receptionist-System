@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { toPublicUser } from "./auth.helpers.js";
 import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
+import { queueDirectorySync } from "./clinic-synthflow.service.js";
 import {
   toDoctorProfileDto,
   ensureDoctorProfileForUser,
@@ -130,6 +131,7 @@ export async function updateDoctorCrmForAdmin(
       allowEmpty: true,
     });
   }
+  queueDirectorySync("admin-crm-save");
   return getDoctorCrmForAdmin(userId);
 }
 

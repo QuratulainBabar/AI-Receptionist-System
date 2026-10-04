@@ -17,7 +17,7 @@ import {
   toSynthflowLanguage,
   updateAgent,
 } from "./synthflow.client.js";
-import { formatDoctorDirectoryLine } from "./doctor-profile.service.js";
+import { formatDoctorDirectoryLine, formatDoctorSpokenBlurb } from "./doctor-profile.service.js";
 import { formatWeeklyHoursSummary, parseWeeklyHours } from "../utils/doctor-profile.js";
 
 const SETTINGS_ID = "default";
@@ -114,7 +114,7 @@ export function stripOutdatedDoctorLists(prompt: string) {
   next = next.replace(/\n## Specialties[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|$)/, "\n");
   next = next.replace(/\n## Doctors \(quote exact fee\)[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|$)/, "\n");
   next = next.replace(
-    /\n## (Availability answers|Live openings|Current roster|Live doctor directory)[\s\S]*$/,
+    /\n## (Availability answers|Live openings|Doctor profiles|Current roster|Live doctor directory)[\s\S]*$/,
     "",
   );
   next = next.replace(/^\s*- (Cardiology|Dermatology|Neurology|Pediatrics|Orthopedics|General Medicine): ONLY .+$/gm, "");
@@ -160,6 +160,7 @@ export async function buildDoctorsDirectoryKnowledge() {
   const specialtyNames = [...bySpecialty.keys()];
 
   const openingLines: string[] = [];
+  const profileBlurbs: string[] = [];
   const lines = doctors.map((doctor) => {
     const slotLabels = doctor.availability
       .map((slot) => {
@@ -177,6 +178,19 @@ export async function buildDoctorsDirectoryKnowledge() {
       doctor.availability.length
         ? `${doctor.user.fullName} (${doctor.specialty.name}, ${doctor.fee}): AVAILABLE — ${slotLabels.slice(0, 2).join("; ")}`
         : `${doctor.user.fullName} (${doctor.specialty.name}): no open slots right now`,
+    );
+    profileBlurbs.push(
+      formatDoctorSpokenBlurb({
+        fullName: doctor.user.fullName,
+        specialty: doctor.specialty.name,
+        qualifications: doctor.qualifications,
+        certifications: doctor.certifications,
+        experienceYears: doctor.experienceYears,
+        about: doctor.about,
+        clinic: doctor.clinic,
+        fee: doctor.fee,
+        languages: doctor.languages,
+      }),
     );
 
     const weeklyHoursSummary = formatWeeklyHoursSummary(parseWeeklyHours(doctor.weeklyHours));
@@ -206,10 +220,15 @@ export async function buildDoctorsDirectoryKnowledge() {
     knowledge: [
       "## Availability answers (mandatory)",
       "You CAN check availability. Use Live openings below. NEVER say you cannot check availability or calendars.",
-      "If asked whether a doctor is available, answer yes/no, quote the next 1-2 times and fee, then ask if they want to book.",
+      "If asked whether a doctor is available, share experience, qualifications, and bio, then yes/no, the next 1-2 times and fee, then ask if they want to book.",
       "",
       "## Live openings",
       openingLines.join("\n") || "No open slots.",
+      "",
+      "## Doctor profiles (say these on the call)",
+      "When a doctor is named, chosen, or asked about, you MUST share experience, qualifications, and professional bio from this list. Use 2 short sentences, then fee and next slot.",
+      "Never invent qualifications or bio. If a field is missing, skip it.",
+      profileBlurbs.join("\n") || "- none",
       "",
       `${ROSTER_HEADING} (source of truth — ignore any older doctor names above)`,
       `Specialties now available: ${specialtyNames.join(", ") || "none"}.`,
@@ -218,8 +237,8 @@ export async function buildDoctorsDirectoryKnowledge() {
       "",
       `${DIRECTORY_HEADING} (active profiles)`,
       "Use doctor_id / slot_id and exact consultation_fee when booking.",
-      "Share bio, qualifications, certifications, expertise, hospital, location, languages, and weekly hours ONLY if the caller asks about that doctor.",
-      "For booking, prefer specialty, doctor name, fee, consultation type, and next_slots unless more detail is requested.",
+      "When discussing a doctor, speak experience_years, qualifications, certifications, and professional_bio from the Doctor profiles section.",
+      "Then offer fee and next_slots.",
       lines.join("\n") || "No doctors currently available.",
     ].join("\n"),
   };
@@ -283,7 +302,7 @@ async function ensureAvailabilityCustomAction(existingIds: string[]) {
           },
         ],
         prompt:
-          "Use spoken_summary from the response. Speak the next 1-2 times and fee. Never say you cannot check availability.",
+          "Use spoken_summary from the response. First share experience, qualifications, and bio, then the next 1-2 times and fee. Never say you cannot check availability.",
         messageError: "I can still see openings in our clinic directory. Let me share the next times.",
       });
       actionId = created.action_id;
@@ -469,10 +488,14 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     input?.firstMessage?.trim() ||
     settings.agentFirstMessage.trim() ||
     defaultGreeting(clinicName);
-  const basePrompt =
+  const filePrompt = loadDefaultPromptFromFile();
+  const storedPrompt =
     input?.systemPrompt?.trim() ||
     settings.agentSystemPrompt.trim() ||
-    loadDefaultPromptFromFile() ||
+    "";
+  const basePrompt =
+    filePrompt ||
+    stripOutdatedDoctorLists(storedPrompt) ||
     fallbackPrompt(clinicName);
 
   const { knowledge, doctorsCount } = await buildDoctorsDirectoryKnowledge();
@@ -610,6 +633,16 @@ export async function syncClinicDirectoryToSynthflow() {
     language: settings.agentLanguage,
     voiceId: settings.agentVoiceId,
     synthflowAgentId: settings.synthflowAgentId,
+  });
+}
+
+export function queueDirectorySync(reason: string) {
+  void syncClinicDirectoryToSynthflow().catch((error) => {
+    console.warn(
+      "[synthflow] auto directory sync failed:",
+      reason,
+      error instanceof Error ? error.message : error,
+    );
   });
 }
 

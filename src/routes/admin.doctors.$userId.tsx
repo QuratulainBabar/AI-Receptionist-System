@@ -160,7 +160,7 @@ function AdminDoctorDetails() {
       setUser(result.user);
       setProfile(result.profile);
       setForm(result.profile ? profileToForm(result.profile) : null);
-      setSuccess(result.message || "Doctor CRM profile saved.");
+      setSuccess(result.message || "Doctor CRM profile saved and synced to the phone AI.");
       const slotsResult = await adminApi.listDoctorOpenSlots(userId).catch(() => ({ slots: [] }));
       setOpenSlots(slotsResult.slots);
     } catch (err) {

@@ -284,3 +284,37 @@ export function formatDoctorDirectoryLine(input: {
     `next_slots: ${input.nextSlots || "none"}`,
   ].join(" | ");
 }
+
+/** Short spoken profile the phone agent should read when a doctor is discussed. */
+export function formatDoctorSpokenBlurb(input: {
+  fullName: string;
+  specialty: string;
+  qualifications?: string[];
+  certifications?: string[];
+  experienceYears?: number;
+  about?: string;
+  clinic?: string;
+  fee?: string;
+  languages?: string[];
+}) {
+  const quals = (input.qualifications || []).map((item) => item.trim()).filter(Boolean);
+  const certs = (input.certifications || []).map((item) => item.trim()).filter(Boolean);
+  const bio = input.about?.trim();
+  const languages = (input.languages || []).map((item) => item.trim()).filter(Boolean);
+  const lead = [
+    `${input.fullName} is a ${input.specialty}`,
+    input.experienceYears ? `with ${input.experienceYears} years of experience` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const parts = [
+    lead,
+    quals.length ? `Qualifications: ${quals.join(", ")}` : "",
+    certs.length ? `Certifications: ${certs.join(", ")}` : "",
+    bio || "",
+    input.clinic?.trim() ? `Hospital: ${input.clinic.trim()}` : "",
+    languages.length ? `Languages: ${languages.join(", ")}` : "",
+    input.fee?.trim() ? `Fee ${input.fee.trim()}` : "",
+  ].filter(Boolean);
+  return `- ${parts.join(". ")}.`;
+}
