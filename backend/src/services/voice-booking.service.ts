@@ -153,6 +153,7 @@ export async function processVoiceBooking(
     doctorId,
     slotId,
     reason,
+    phone,
   });
 
   await logPatientActivity({

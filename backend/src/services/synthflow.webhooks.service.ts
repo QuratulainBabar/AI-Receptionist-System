@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { env } from "../config/env.js";
+import { AppError } from "../utils/AppError.js";
 import { formatWeeklyHoursSummary, parseWeeklyHours } from "../utils/doctor-profile.js";
 import { logPatientActivity, ActivityType } from "./activity.service.js";
 import { digitsOnly, normalizePhone } from "../utils/phone.js";
@@ -146,7 +147,11 @@ async function buildClinicContext() {
         .filter(Boolean)
         .join(" | ") || "No open slots.",
     booking_instructions:
+<<<<<<< Updated upstream
       "When a doctor is discussed, share experience, qualifications, and professional bio from doctor_profiles. You CAN check availability from availability_summary and doctors_directory next_slots. To book, confirm name, doctor, and slot_id, then call the book appointment action.",
+=======
+      "To book, confirm patient full name, preferred doctor, and one available slot_id. Then call the book appointment action with patient_id or phone, doctor_id, and slot_id. One active appointment per mobile: if booking fails because they already have a Pending or Confirmed appointment, tell them clearly they must complete or cancel it before booking another. Completed or Cancelled appointments allow a new booking. Share bio, qualifications, certifications, expertise, hospital, location, languages, and weekly hours ONLY if the caller asks about that doctor.",
+>>>>>>> Stashed changes
   };
 }
 
@@ -610,6 +615,7 @@ export async function handleBookAction(body: unknown) {
   const email = pickString(root, ["email"]) || fields.email;
   const callId = pickString(root, ["call_id", "callId"]);
 
+<<<<<<< Updated upstream
   const booked = await processVoiceBooking({
     patientId: patientId || undefined,
     phone,
@@ -623,6 +629,31 @@ export async function handleBookAction(body: unknown) {
     allowRegister: true,
     synthflowCallId: callId || undefined,
   });
+=======
+  let booked: Awaited<ReturnType<typeof processVoiceBooking>>;
+  try {
+    booked = await processVoiceBooking({
+      patientId: patientId || undefined,
+      phone,
+      patientName,
+      email,
+      doctorId,
+      doctorName: fields.doctorName,
+      slotId,
+      reason,
+      allowRegister: true,
+      synthflowCallId: callId || undefined,
+    });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return {
+        success: false,
+        message: error.message,
+      };
+    }
+    throw error;
+  }
+>>>>>>> Stashed changes
 
   if (!booked) {
     return {

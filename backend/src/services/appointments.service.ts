@@ -1,6 +1,8 @@
 import type { Appointment, AppointmentMode, AppointmentStatus, User } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
+import { normalizePhone } from "../utils/phone.js";
+import { findPatientIdsByPhone } from "./patient-phone.service.js";
 import { createMessagesForAppointment } from "./messages.service.js";
 import { logAppointmentBooked } from "./activity.service.js";
 import {
@@ -8,6 +10,44 @@ import {
   logAppointmentCancelledForDoctor,
   logAppointmentRescheduledForDoctor,
 } from "./notifications.service.js";
+
+const ACTIVE_BOOKING_STATUSES: AppointmentStatus[] = ["PENDING", "CONFIRMED"];
+
+/**
+ * One active appointment per mobile: PENDING/CONFIRMED block new bookings;
+ * COMPLETED/CANCELLED do not.
+ */
+async function assertNoActiveAppointmentForMobile(patientId: string, phoneHint?: string) {
+  const history = await prisma.patientMedicalHistory.findUnique({
+    where: { userId: patientId },
+    select: { phone: true },
+  });
+  const phone = normalizePhone(phoneHint || history?.phone || "");
+
+  const patientIds = new Set<string>([patientId]);
+  if (phone) {
+    for (const id of await findPatientIdsByPhone(phone)) {
+      patientIds.add(id);
+    }
+  }
+
+  const active = await prisma.appointment.findFirst({
+    where: {
+      patientId: { in: [...patientIds] },
+      status: { in: ACTIVE_BOOKING_STATUSES },
+    },
+    include: { doctorUser: true },
+    orderBy: { startsAt: "asc" },
+  });
+
+  if (!active) return;
+
+  const statusLabel = toPublicStatus(active.status);
+  throw new AppError(
+    409,
+    `You already have an active appointment (${active.reference}, ${statusLabel}) with ${active.doctorUser.fullName}. Please complete or cancel it before booking another one.`,
+  );
+}
 
 export type PublicAppointment = {
   id: string;
@@ -131,11 +171,15 @@ export async function createAppointment(input: {
   doctorId: string;
   slotId: string;
   reason?: string;
+  /** Optional mobile used for the one-active-appointment rule (voice / Synthflow). */
+  phone?: string;
 }) {
   const patient = await prisma.user.findUnique({ where: { id: input.patientId } });
   if (!patient || patient.role !== "PATIENT" || !patient.isActive) {
     throw new AppError(403, "Only active patients can book appointments");
   }
+
+  await assertNoActiveAppointmentForMobile(patient.id, input.phone);
 
   const profile = await prisma.doctorProfile.findUnique({
     where: { userId: input.doctorId },
