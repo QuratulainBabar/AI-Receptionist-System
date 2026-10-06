@@ -6,7 +6,14 @@ import type {
 } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
+import { clinicTimeZone, formatClinicDate, formatClinicTime } from "../utils/clinic-time.js";
 import { formatFileSize, formatRecordDate } from "./records.service.js";
+import {
+  syncDoctorAppointmentInvoices,
+  toPublicAppointmentInvoice,
+  type PublicAppointmentInvoice,
+} from "./appointment-invoices.service.js";
+import { buildPatientTimeline, type PatientTimelineEvent } from "./patient-chart.service.js";
 
 export type PublicDoctorPatient = {
   id: string;
@@ -39,6 +46,18 @@ export type PublicDoctorPatientFile = {
     clinic: string;
     fee: string;
     startsAt: string;
+    followUpOfId: string | null;
+    followUpOfReference: string | null;
+    isFollowUp: boolean;
+    invoice: PublicAppointmentInvoice | null;
+    recordRequest: {
+      status: string;
+      smsSent: boolean;
+      smsError: string;
+      expiresAt: string;
+      createdAt: string;
+      recordsCount: number;
+    } | null;
   }>;
   history: {
     fullName: string;
@@ -61,7 +80,32 @@ export type PublicDoctorPatientFile = {
     size: string;
     uploadedBy: string;
     mimeType: string;
+    appointmentId: string | null;
+    appointmentReference: string | null;
+    appointmentDate: string | null;
   }>;
+  recordGroups: Array<{
+    appointmentId: string | null;
+    appointmentReference: string | null;
+    appointmentDate: string | null;
+    label: string;
+    uploadDates: Array<{
+      date: string;
+      records: Array<{
+        id: string;
+        name: string;
+        type: string;
+        date: string;
+        size: string;
+        uploadedBy: string;
+        mimeType: string;
+        appointmentId: string | null;
+        appointmentReference: string | null;
+        appointmentDate: string | null;
+      }>;
+    }>;
+  }>;
+  timeline: PatientTimelineEvent[];
 };
 
 type PatientWithRelations = User & {
@@ -71,6 +115,7 @@ type PatientWithRelations = User & {
 
 function formatLastVisitLabel(date: Date) {
   return date.toLocaleDateString("en-GB", {
+    timeZone: clinicTimeZone(),
     day: "numeric",
     month: "short",
     year: "numeric",
@@ -78,20 +123,11 @@ function formatLastVisitLabel(date: Date) {
 }
 
 function formatAppointmentDate(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatClinicDate(date);
 }
 
 function formatAppointmentTime(date: Date) {
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return formatClinicTime(date);
 }
 
 function shortCondition(value: string) {
@@ -148,6 +184,15 @@ function toPublicAppointment(
     patient: User;
     doctorUser: User;
     followUpOf?: { id: string; reference: string } | null;
+    recordRequest?: {
+      status: string;
+      smsSent: boolean;
+      smsError: string;
+      expiresAt: Date;
+      createdAt: Date;
+      _count?: { records: number };
+    } | null;
+    invoice?: Parameters<typeof toPublicAppointmentInvoice>[0];
   },
 ) {
   const status =
@@ -158,6 +203,16 @@ function toPublicAppointment(
         : row.status === "CANCELLED"
           ? "cancelled"
           : "confirmed";
+
+  const recordsCount = row.recordRequest?._count?.records ?? 0;
+  const expired = row.recordRequest ? row.recordRequest.expiresAt.getTime() < Date.now() : false;
+  const requestStatus = !row.recordRequest
+    ? null
+    : recordsCount > 0
+      ? "uploaded"
+      : expired
+        ? "expired"
+        : row.recordRequest.status;
 
   return {
     id: row.id,
@@ -179,10 +234,25 @@ function toPublicAppointment(
     followUpOfId: row.followUpOfId ?? null,
     followUpOfReference: row.followUpOf?.reference ?? null,
     isFollowUp: Boolean(row.followUpOfId),
+    invoice: toPublicAppointmentInvoice(row.invoice ?? null),
+    recordRequest: row.recordRequest
+      ? {
+          status: requestStatus || row.recordRequest.status,
+          smsSent: row.recordRequest.smsSent,
+          smsError: row.recordRequest.smsError,
+          expiresAt: row.recordRequest.expiresAt.toISOString(),
+          createdAt: row.recordRequest.createdAt.toISOString(),
+          recordsCount,
+        }
+      : null,
   };
 }
 
-function toPublicRecord(record: PatientMedicalRecord) {
+function toPublicRecord(
+  record: PatientMedicalRecord & {
+    appointment?: { id: string; reference: string; startsAt: Date } | null;
+  },
+) {
   return {
     id: record.id,
     name: record.fileName,
@@ -191,7 +261,41 @@ function toPublicRecord(record: PatientMedicalRecord) {
     size: formatFileSize(record.sizeBytes),
     uploadedBy: record.uploadedBy,
     mimeType: record.mimeType,
+    appointmentId: record.appointmentId ?? null,
+    appointmentReference: record.appointment?.reference ?? null,
+    appointmentDate: record.appointment ? formatRecordDate(record.appointment.startsAt) : null,
   };
+}
+
+function groupRecords(
+  records: ReturnType<typeof toPublicRecord>[],
+): PublicDoctorPatientFile["recordGroups"] {
+  const groups = new Map<string, PublicDoctorPatientFile["recordGroups"][number]>();
+
+  for (const record of records) {
+    const key = record.appointmentId || "unassigned";
+    let group = groups.get(key);
+    if (!group) {
+      group = {
+        appointmentId: record.appointmentId,
+        appointmentReference: record.appointmentReference,
+        appointmentDate: record.appointmentDate,
+        label: record.appointmentReference
+          ? `${record.appointmentReference}${record.appointmentDate ? ` · ${record.appointmentDate}` : ""}`
+          : "Not linked to an appointment",
+        uploadDates: [],
+      };
+      groups.set(key, group);
+    }
+    let dateBucket = group.uploadDates.find((row) => row.date === record.date);
+    if (!dateBucket) {
+      dateBucket = { date: record.date, records: [] };
+      group.uploadDates.push(dateBucket);
+    }
+    dateBucket.records.push(record);
+  }
+
+  return [...groups.values()];
 }
 
 function matchesQuery(patient: PublicDoctorPatient, q: string) {
@@ -264,6 +368,7 @@ export async function getPatientFileForDoctor(doctorUserId: string, patientId: s
         orderBy: { startsAt: "desc" },
       },
       medicalRecords: {
+        include: { appointment: { select: { id: true, reference: true, startsAt: true } } },
         orderBy: { createdAt: "desc" },
       },
     },
@@ -273,17 +378,34 @@ export async function getPatientFileForDoctor(doctorUserId: string, patientId: s
     throw new AppError(404, "Patient not found");
   }
 
+  await syncDoctorAppointmentInvoices(doctorUserId);
+
   const appointments = await prisma.appointment.findMany({
     where: { doctorUserId, patientId },
     include: {
       patient: true,
       doctorUser: true,
       followUpOf: { select: { id: true, reference: true } },
+      recordRequest: { include: { _count: { select: { records: true } } } },
+      invoice: {
+        select: {
+          status: true,
+          amountCents: true,
+          currency: true,
+          hostedInvoiceUrl: true,
+          phone: true,
+          smsError: true,
+          sentAt: true,
+          paidAt: true,
+        },
+      },
     },
     orderBy: { startsAt: "desc" },
   });
 
   const history = patient.medicalHistory;
+  const records = patient.medicalRecords.map(toPublicRecord);
+  const timeline = await buildPatientTimeline(doctorUserId, patientId);
 
   return {
     patient: toPublicPatient({
@@ -304,6 +426,8 @@ export async function getPatientFileForDoctor(doctorUserId: string, patientId: s
       familyHistory: history?.familyHistory ?? [],
       updatedAt: history?.updatedAt.toISOString() ?? null,
     },
-    records: patient.medicalRecords.map(toPublicRecord),
+    records,
+    recordGroups: groupRecords(records),
+    timeline,
   } satisfies PublicDoctorPatientFile;
 }

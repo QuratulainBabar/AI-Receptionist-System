@@ -67,13 +67,14 @@ function AdminSynthflowConfig() {
     setError("");
     setNotice("");
     try {
+      // Never persist the textarea prompt — it can still hold an old multi-doctor copy.
+      // Prompt is only updated by Create/Update agent or Sync doctor profile.
       const result = await adminApi.updateSynthflow({
         clinicName,
         phoneNumber,
         synthflowAgentId: agentId.trim() || null,
         agentLanguage: language,
         agentFirstMessage: firstMessage,
-        agentSystemPrompt: systemPrompt,
       });
       applySettings(result.settings);
       setNotice("Settings saved.");
@@ -89,26 +90,29 @@ function AdminSynthflowConfig() {
     setError("");
     setNotice("");
     try {
+      // Save clinic/phone only — do not persist the textarea prompt (may name an old doctor).
+      // Backend reloads agent-prompt.md and injects the live Clinic doctor on create/update.
       await adminApi.updateSynthflow({
         clinicName,
         phoneNumber,
         synthflowAgentId: agentId.trim() || null,
         agentLanguage: language,
         agentFirstMessage: firstMessage,
-        agentSystemPrompt: systemPrompt,
       });
       const result = await adminApi.createOrUpdateSynthflowAgent({
         firstMessage,
-        systemPrompt,
         phoneNumber,
         language,
         synthflowAgentId: agentId.trim() || undefined,
       });
       applySettings(result.settings);
+      const doctorName = result.clinicDoctorName || result.settings.clinicDoctorName;
       setNotice(
         result.warning
           ? `Agent ${result.action}. ${result.warning}`
-          : `Agent ${result.action} successfully (${result.synthflowAgentId}).`,
+          : `Agent ${result.action} successfully (${result.synthflowAgentId})${
+              doctorName ? ` — clinic doctor: ${doctorName}` : ""
+            }.`,
       );
     } catch (err) {
       setError(formatApiError(err, "Unable to create/update Synthflow agent."));
@@ -124,13 +128,15 @@ function AdminSynthflowConfig() {
     try {
       const result = await adminApi.syncSynthflowDirectory();
       applySettings(result.settings);
+      const doctorName =
+        result.clinicDoctorName || result.settings.clinicDoctorName || "clinic doctor";
       setNotice(
         result.warning
-          ? `Directory synced. ${result.warning}`
-          : `Doctor directory synced to agent (${result.settings.doctorsCount} doctors).`,
+          ? `Synced ${doctorName}. ${result.warning}`
+          : `Synced ${doctorName} (profile + open slots) to the agent prompt.`,
       );
     } catch (err) {
-      setError(formatApiError(err, "Unable to sync doctor directory."));
+      setError(formatApiError(err, "Unable to sync clinic doctor profile."));
     } finally {
       setSyncBusy(false);
     }
@@ -152,7 +158,7 @@ function AdminSynthflowConfig() {
       <PageHeader
         eyebrow="Phone AI"
         title="Synthflow configuration"
-        description="Clinic phone receptionist — same pattern as restaurant Synthflow setup, using your doctors directory for bookings."
+        description="Clinic phone receptionist for a one-to-one doctor setup — Sync pushes the Doctor Dashboard profile and open slots to the agent."
         actions={
           <Button variant="outline" type="button" onClick={() => void load()} disabled={loading}>
             Refresh
@@ -172,7 +178,7 @@ function AdminSynthflowConfig() {
               <div>
                 <SectionLabel>Status</SectionLabel>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Dedicated clinic inbound agent. Patients call; AI books against live doctors.
+                  Dedicated clinic inbound agent. Patients call; AI books with the single Doctor Dashboard doctor.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -194,8 +200,14 @@ function AdminSynthflowConfig() {
                 <span className="text-foreground">{settings?.synthflowAgentId || "not created"}</span>
               </div>
               <div>
-                Doctors in directory:{" "}
-                <span className="text-foreground">{settings?.doctorsCount ?? 0}</span>
+                Clinic doctor:{" "}
+                <span className="text-foreground">
+                  {settings?.clinicDoctorName
+                    ? settings.clinicDoctorName
+                    : settings?.doctorsCount
+                      ? "yes (name unavailable)"
+                      : "no doctor profile"}
+                </span>
               </div>
               {settings?.synthflowSyncedAt ? (
                 <div>Last synced: {new Date(settings.synthflowSyncedAt).toLocaleString()}</div>
@@ -241,14 +253,14 @@ function AdminSynthflowConfig() {
               />
             </Field>
             <Field
-              label="System prompt"
-              hint="Doctor directory is appended automatically when you create/sync the agent."
+              label="Last synced system prompt (read-only)"
+              hint="This is what Sync last pushed (one clinic doctor + open slots). Click Sync doctor profile to refresh — do not paste old multi-doctor text here."
             >
               <Textarea
                 value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
+                readOnly
                 rows={14}
-                className="font-mono text-xs"
+                className="font-mono text-xs bg-muted/40"
               />
             </Field>
             <div className="flex flex-wrap gap-2">
@@ -262,7 +274,7 @@ function AdminSynthflowConfig() {
             <SectionLabel>3. Create / update Synthflow agent</SectionLabel>
             <p className="text-sm text-muted-foreground">
               Creates or updates the inbound agent, sets inbound + data webhooks, attaches appointment
-              extractors, and injects the current doctors directory (like restaurant menu sync).
+              extractors, and injects the clinic’s one doctor profile plus real open slots.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button
@@ -282,7 +294,7 @@ function AdminSynthflowConfig() {
                 disabled={syncBusy || !agentReady}
                 onClick={() => void syncDirectory()}
               >
-                {syncBusy ? "Syncing…" : "Sync doctors directory"}
+                {syncBusy ? "Syncing…" : "Sync doctor profile"}
               </Button>
             </div>
           </Panel>

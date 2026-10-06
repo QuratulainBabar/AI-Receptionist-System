@@ -75,13 +75,13 @@ function AdminDoctorsPage() {
       const count = result.settings.doctorsCount;
       setNotice(
         result.warning
-          ? `Directory synced. ${result.warning}`
+          ? `Clinic doctor synced. ${result.warning}`
           : count === 0
-            ? "Synced, but no active doctors were found to send to Synthflow."
-            : `Doctor directory synced to Synthflow agent (${count} doctors).`,
+            ? "Synced, but no active doctor profile was found for the phone AI."
+            : "Clinic doctor profile synced to the Synthflow agent.",
       );
     } catch (err) {
-      setError(formatApiError(err, "Unable to sync doctors with Synthflow."));
+      setError(formatApiError(err, "Unable to sync the clinic doctor with Synthflow."));
     } finally {
       setSyncBusy(false);
     }
@@ -178,6 +178,17 @@ function AdminDoctorsPage() {
               </div>
               <Badge tone={user.isVerified ? "success" : "warning"}>
                 {user.isVerified ? "Verified" : "Unverified"}
+              </Badge>
+              <Badge
+                tone={
+                  user.subscriptionStatus === "Active" || user.subscriptionStatus === "Trialing"
+                    ? "success"
+                    : user.subscriptionStatus
+                      ? "warning"
+                      : "muted"
+                }
+              >
+                {user.subscriptionStatus || "No plan"}
               </Badge>
               <Badge tone={user.isActive ? "success" : "destructive"}>
                 {user.isActive ? "Active" : "Inactive"}

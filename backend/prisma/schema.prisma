@@ -36,6 +36,27 @@ enum MessageStatus {
   OPENED
 }
 
+enum AppointmentReminderKind {
+  THREE_DAYS
+  TWENTY_FOUR_HOURS
+  SIX_HOURS
+}
+
+enum AppointmentReminderStatus {
+  SCHEDULED
+  SENT
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum AppointmentInvoiceStatus {
+  PENDING
+  SENT
+  PAID
+  FAILED
+}
+
 enum VoiceCallDirection {
   INBOUND
   OUTBOUND
@@ -49,6 +70,19 @@ enum VoiceCallStatus {
   CANCELLED
 }
 
+enum BillingCycle {
+  MONTHLY
+  YEARLY
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  TRIALING
+  PAST_DUE
+  CANCELLED
+  EXPIRED
+}
+
 model User {
   id           String   @id @default(cuid())
   email        String   @unique
@@ -56,9 +90,10 @@ model User {
   fullName     String
   role         Role
   reference    String   @unique
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  isActive          Boolean  @default(true)
+  stripeCustomerId  String?  @unique
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
 
   passwordResetTokens  PasswordResetToken[]
   doctorProfile        DoctorProfile?
@@ -71,6 +106,13 @@ model User {
   doctorNotifications  DoctorNotification[] @relation("DoctorNotifications")
   voiceCallsAsPatient  VoiceCall[] @relation("PatientVoiceCalls")
   voiceCallsAsDoctor   VoiceCall[] @relation("DoctorVoiceCalls")
+  patientRecordRequests RecordRequest[] @relation("PatientRecordRequests")
+  doctorRecordRequests  RecordRequest[] @relation("DoctorRecordRequests")
+  subscriptions         Subscription[]
+  patientClinicalNotes  ClinicalNote[] @relation("PatientClinicalNotes")
+  doctorClinicalNotes   ClinicalNote[] @relation("DoctorClinicalNotes")
+  patientPrescriptions  DoctorPrescription[] @relation("PatientPrescriptions")
+  doctorPrescriptions   DoctorPrescription[] @relation("DoctorPrescriptions")
 
   @@index([role])
   @@index([isActive])
@@ -121,6 +163,8 @@ model DoctorProfile {
   about             String
   areasOfExpertise  String[] @default([])
   location          String   @default("")
+  /** Always the configured clinic US time zone. Weekly hours are interpreted in this zone. */
+  timezone          String   @default("America/Los_Angeles")
   /** Weekly available days/timings: [{ day, enabled, startTime, endTime }]. */
   weeklyHours       Json?
   /** Super Admin verification — only verified doctors sync to Synthflow. */
@@ -171,6 +215,8 @@ model Appointment {
   clinic          String
   specialtyName   String
   status          AppointmentStatus @default(CONFIRMED)
+  /** Mobile number the patient gave when this visit was booked. Reminders text this number. */
+  bookingPhone    String            @default("")
   /** Prior visit this appointment follows up on (doctor-scheduled return visit). */
   followUpOfId    String?
   followUpOf      Appointment?      @relation("AppointmentFollowUps", fields: [followUpOfId], references: [id], onDelete: SetNull)
@@ -179,12 +225,138 @@ model Appointment {
   updatedAt       DateTime          @updatedAt
   followUpMessages FollowUpMessage[]
   voiceCalls       VoiceCall[]
+  otps             AppointmentOtp[]
+  reminders        AppointmentReminder[]
+  invoice          AppointmentInvoice?
+  recordRequest    RecordRequest?
+  medicalRecords   PatientMedicalRecord[]
+  clinicalNotes    ClinicalNote[]
+  prescriptions    DoctorPrescription[]
+  statusEvents     AppointmentStatusEvent[]
 
   @@index([patientId, startsAt])
   @@index([doctorUserId, startsAt])
   @@index([status])
   @@index([followUpOfId])
   @@map("appointments")
+}
+
+/** One-time code for a voice booking. The appointment stays pending until this code is verified. */
+model AppointmentOtp {
+  id            String      @id @default(cuid())
+  phone         String
+  codeHash      String
+  expiresAt     DateTime
+  usedAt        DateTime?
+  attempts      Int         @default(0)
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@index([phone, createdAt])
+  @@index([appointmentId])
+  @@index([expiresAt])
+  @@map("appointment_otps")
+}
+
+/** SMS reminder queued from the appointment instant in the clinic US time zone. */
+model AppointmentReminder {
+  id            String                    @id @default(cuid())
+  appointmentId String
+  appointment   Appointment               @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  kind          AppointmentReminderKind
+  phone         String
+  scheduledFor  DateTime
+  sentAt        DateTime?
+  status        AppointmentReminderStatus @default(SCHEDULED)
+  attempts      Int                       @default(0)
+  error         String                    @default("")
+  createdAt     DateTime                  @default(now())
+  updatedAt     DateTime                  @updatedAt
+
+  @@unique([appointmentId, kind])
+  @@index([status, scheduledFor])
+  @@map("appointment_reminders")
+}
+
+/** One Stripe invoice for a visit. The patient pays through the hosted invoice link. */
+model AppointmentInvoice {
+  id               String                   @id @default(cuid())
+  appointmentId    String                   @unique
+  appointment      Appointment              @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patientId        String
+  doctorUserId     String
+  amountCents      Int
+  currency         String                   @default("usd")
+  status           AppointmentInvoiceStatus @default(PENDING)
+  stripeCustomerId String                   @default("")
+  stripeInvoiceId  String                   @default("")
+  hostedInvoiceUrl String                   @default("")
+  phone            String                   @default("")
+  smsError         String                   @default("")
+  sentAt           DateTime?
+  paidAt           DateTime?
+  createdAt        DateTime                 @default(now())
+  updatedAt        DateTime                 @updatedAt
+
+  @@index([doctorUserId, status])
+  @@index([stripeInvoiceId])
+  @@map("appointment_invoices")
+}
+
+/** Doctor-written visit note on a patient profile. */
+model ClinicalNote {
+  id            String       @id @default(cuid())
+  patientId     String
+  patient       User         @relation("PatientClinicalNotes", fields: [patientId], references: [id], onDelete: Cascade)
+  doctorUserId  String
+  doctorUser    User         @relation("DoctorClinicalNotes", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  appointmentId String?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  body          String
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([patientId, createdAt])
+  @@index([doctorUserId, createdAt])
+  @@map("clinical_notes")
+}
+
+/** Doctor-written prescription, separate from an uploaded prescription file. */
+model DoctorPrescription {
+  id            String       @id @default(cuid())
+  patientId     String
+  patient       User         @relation("PatientPrescriptions", fields: [patientId], references: [id], onDelete: Cascade)
+  doctorUserId  String
+  doctorUser    User         @relation("DoctorPrescriptions", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  appointmentId String?
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  medication    String
+  dosage        String       @default("")
+  instructions  String       @default("")
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([patientId, createdAt])
+  @@index([doctorUserId, createdAt])
+  @@map("doctor_prescriptions")
+}
+
+/** History of appointment status changes for the patient timeline. */
+model AppointmentStatusEvent {
+  id            String      @id @default(cuid())
+  appointmentId String
+  appointment   Appointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patientId     String
+  doctorUserId  String
+  fromStatus    String      @default("")
+  toStatus      String
+  occurredAt    DateTime    @default(now())
+  createdAt     DateTime    @default(now())
+
+  @@index([patientId, occurredAt])
+  @@index([appointmentId, occurredAt])
+  @@map("appointment_status_events")
 }
 
 model FollowUpMessage {
@@ -228,20 +400,50 @@ model PatientMedicalHistory {
 }
 
 model PatientMedicalRecord {
-  id           String   @id @default(cuid())
-  userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  fileName     String
-  category     String
-  mimeType     String
-  sizeBytes    Int
-  storagePath  String
-  uploadedBy   String
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id              String         @id @default(cuid())
+  userId          String
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  appointmentId   String?
+  appointment     Appointment?   @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  recordRequestId String?
+  recordRequest   RecordRequest? @relation(fields: [recordRequestId], references: [id], onDelete: SetNull)
+  fileName        String
+  category        String
+  mimeType        String
+  sizeBytes       Int
+  storagePath     String
+  uploadedBy      String
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 
   @@index([userId, createdAt])
+  @@index([appointmentId, createdAt])
   @@map("patient_medical_records")
+}
+
+/** Secure link a doctor sends so the patient can upload records for one appointment. */
+model RecordRequest {
+  id            String                 @id @default(cuid())
+  tokenHash     String                 @unique
+  appointmentId String                 @unique
+  appointment   Appointment            @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patientId     String
+  patient       User                   @relation("PatientRecordRequests", fields: [patientId], references: [id], onDelete: Cascade)
+  doctorUserId  String
+  doctorUser    User                   @relation("DoctorRecordRequests", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  phone         String
+  status        String                 @default("sent")
+  smsSent       Boolean                @default(false)
+  smsError      String                 @default("")
+  expiresAt     DateTime
+  openedAt      DateTime?
+  createdAt     DateTime               @default(now())
+  updatedAt     DateTime               @updatedAt
+  records       PatientMedicalRecord[]
+
+  @@index([patientId])
+  @@index([doctorUserId])
+  @@map("record_requests")
 }
 
 model PatientActivity {
@@ -330,4 +532,53 @@ model ClinicVoiceSettings {
   updatedAt          DateTime  @updatedAt
 
   @@map("clinic_voice_settings")
+}
+
+model SubscriptionPlan {
+  id               String       @id @default(cuid())
+  name             String
+  description      String       @default("")
+  amountCents      Int
+  currency         String       @default("usd")
+  billingCycle     BillingCycle @default(MONTHLY)
+  features         String[]     @default([])
+  stripeProductId  String
+  stripePriceId    String       @unique
+  isActive         Boolean      @default(true)
+  sortOrder        Int          @default(0)
+  trialDays        Int          @default(0)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  subscriptions    Subscription[]
+
+  @@index([isActive, sortOrder])
+  @@map("subscription_plans")
+}
+
+model Subscription {
+  id                     String             @id @default(cuid())
+  userId                 String
+  user                   User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId                 String
+  plan                   SubscriptionPlan   @relation(fields: [planId], references: [id], onDelete: Restrict)
+  stripeCustomerId       String
+  stripeSubscriptionId   String             @unique
+  stripePriceId          String
+  status                 SubscriptionStatus @default(ACTIVE)
+  amountCents            Int
+  currency               String             @default("usd")
+  billingCycle           BillingCycle       @default(MONTHLY)
+  currentPeriodStart     DateTime?
+  currentPeriodEnd       DateTime?
+  cancelAtPeriodEnd      Boolean            @default(false)
+  canceledAt             DateTime?
+  trialStart             DateTime?
+  trialEnd               DateTime?
+  createdAt              DateTime           @default(now())
+  updatedAt              DateTime           @updatedAt
+
+  @@index([userId, status])
+  @@index([planId, status])
+  @@index([stripeCustomerId])
+  @@map("subscriptions")
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   EmptyNote,
@@ -22,10 +22,12 @@ export function FollowUpDialog({
 }: {
   parent: ApiAppointment;
   onClose: () => void;
-  onCreated: (appointment: ApiAppointment) => void;
+  onCreated: (appointment: ApiAppointment, message: string) => void;
 }) {
   const [slots, setSlots] = useState<ApiDoctorSlot[]>([]);
+  const [date, setDate] = useState("");
   const [slotId, setSlotId] = useState("");
+  const [mode, setMode] = useState<ApiAppointment["mode"]>(parent.mode);
   const [reason, setReason] = useState(
     `Follow-up after ${parent.reference}${parent.reason ? ` — ${parent.reason}` : ""}`,
   );
@@ -41,10 +43,12 @@ export function FollowUpDialog({
         if (cancelled) return;
         const parentTime = new Date(parent.startsAt).getTime();
         const open = result.slots.filter(
-          (slot) => !slot.isBooked && new Date(slot.startsAt).getTime() > parentTime,
+          (slot) => !slot.isBooked && new Date(slot.startsAt).getTime() > Math.max(parentTime, Date.now()),
         );
         setSlots(open);
-        setSlotId(open[0]?.id ?? "");
+        const firstDate = open[0]?.date ?? "";
+        setDate(firstDate);
+        setSlotId(open.find((slot) => slot.date === firstDate)?.id ?? "");
       })
       .catch((err) => {
         if (!cancelled) setError(formatApiError(err, "Unable to load open slots."));
@@ -57,9 +61,18 @@ export function FollowUpDialog({
     };
   }, [parent.id, parent.startsAt]);
 
+  const dates = useMemo(() => [...new Set(slots.map((slot) => slot.date))], [slots]);
+  const times = useMemo(() => slots.filter((slot) => slot.date === date), [slots, date]);
+
+  function chooseDate(nextDate: string) {
+    setDate(nextDate);
+    const first = slots.find((slot) => slot.date === nextDate);
+    setSlotId(first?.id ?? "");
+  }
+
   async function submit() {
     if (!slotId) {
-      setError("Select an open slot for the follow-up visit.");
+      setError("Select a date and time for the next visit.");
       return;
     }
     setSaving(true);
@@ -68,10 +81,11 @@ export function FollowUpDialog({
       const result = await doctorAppointmentsApi.scheduleFollowUp(parent.id, {
         slotId,
         reason: reason.trim(),
+        mode,
       });
-      onCreated(result.appointment);
+      onCreated(result.appointment, result.message || "Next visit scheduled.");
     } catch (err) {
-      setError(formatApiError(err, "Unable to schedule follow-up."));
+      setError(formatApiError(err, "Unable to schedule the next visit."));
     } finally {
       setSaving(false);
     }
@@ -82,12 +96,12 @@ export function FollowUpDialog({
       <Panel className="w-full max-w-lg space-y-4 p-5">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <SectionLabel>Follow-up visit</SectionLabel>
+            <SectionLabel>Schedule next visit</SectionLabel>
             <p className="mt-1 text-sm font-semibold">
               After {parent.reference} · {parent.patientName}
             </p>
             <p className="text-xs text-muted-foreground">
-              {parent.date} · {parent.time}
+              This visit stays on the same patient profile and is linked to {parent.reference}.
             </p>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose}>
@@ -98,42 +112,68 @@ export function FollowUpDialog({
         {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
         {loading ? (
-          <EmptyNote>Loading open slots…</EmptyNote>
+          <EmptyNote>Loading open times…</EmptyNote>
         ) : slots.length === 0 ? (
           <EmptyNote>
-            No open slots after this visit. Add slots under Availability first.
+            No open times after this visit. Add availability first, then schedule the next visit from this appointment.
           </EmptyNote>
         ) : (
-          <Field label="Open slot">
-            <select
-              className="h-11 w-full rounded-xl border border-transparent bg-input-fill px-3.5 text-sm"
-              value={slotId}
-              onChange={(e) => setSlotId(e.target.value)}
-            >
-              {slots.map((slot) => (
-                <option key={slot.id} value={slot.id}>
-                  {slot.date} · {slot.time}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <>
+            <Field label="Date">
+              <select
+                className="h-11 w-full rounded-xl border border-transparent bg-input-fill px-3.5 text-sm"
+                value={date}
+                onChange={(e) => chooseDate(e.target.value)}
+              >
+                {dates.map((value) => (
+                  <option key={value} value={value}>
+                    {value}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Time">
+              <select
+                className="h-11 w-full rounded-xl border border-transparent bg-input-fill px-3.5 text-sm"
+                value={slotId}
+                onChange={(e) => setSlotId(e.target.value)}
+              >
+                {times.map((slot) => (
+                  <option key={slot.id} value={slot.id}>
+                    {slot.time}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </>
         )}
 
-        <Field label="Reason">
+        <Field label="Appointment type">
+          <select
+            className="h-11 w-full rounded-xl border border-transparent bg-input-fill px-3.5 text-sm"
+            value={mode}
+            onChange={(e) => setMode(e.target.value as ApiAppointment["mode"])}
+          >
+            <option value="In clinic">In clinic</option>
+            <option value="Video call">Video call</option>
+          </select>
+        </Field>
+
+        <Field label="Reason / follow-up details">
           <Textarea
             rows={3}
             value={reason}
             onChange={(e) => setReason(e.target.value)}
-            placeholder="Follow-up reason"
+            placeholder="Why the patient should return"
           />
         </Field>
 
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose}>
-            Cancel
+            Not now
           </Button>
           <Button onClick={() => void submit()} disabled={saving || loading || !slotId}>
-            {saving ? "Scheduling…" : "Schedule follow-up"}
+            {saving ? "Scheduling…" : "Schedule next visit"}
           </Button>
         </div>
       </Panel>

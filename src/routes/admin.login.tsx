@@ -63,9 +63,10 @@ function AdminLoginPage() {
       title="Super Admin"
       description="Sign in to manage doctors, patients and account status."
       footer={
-        <p>
+        <p className="text-sm text-muted-foreground">
+          Not an admin?{" "}
           <Link to="/" className="font-medium text-primary underline-offset-4 hover:underline">
-            Back to patient / doctor sign in
+            Sign in to the patient or doctor portal
           </Link>
         </p>
       }

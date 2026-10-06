@@ -1,5 +1,6 @@
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
+import { formatClinicDate, formatClinicTime } from "../utils/clinic-time.js";
 import type { PublicAppointment } from "./appointments.service.js";
 import { fetchCallRecordingUrl } from "./synthflow.client.js";
 
@@ -88,20 +89,11 @@ type VoiceCallListInclude = {
 };
 
 function formatDateLabel(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatClinicDate(date);
 }
 
 function formatTimeLabel(date: Date) {
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return formatClinicTime(date);
 }
 
 function isPlayableRecordingUrl(url: string | null | undefined) {
@@ -378,6 +370,8 @@ function mapPublicAppointment(row: {
     followUpOfId: row.followUpOfId ?? null,
     followUpOfReference: row.followUpOf?.reference ?? null,
     isFollowUp: Boolean(row.followUpOfId),
+    recordRequest: null,
+    invoice: null,
   };
 }
 

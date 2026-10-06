@@ -5,8 +5,10 @@ import {
   getWebhookCallId,
   handleAvailabilityAction,
   handleBookAction,
+  handleCheckAppointmentAction,
   handleDataWebhook,
   handleInboundWebhook,
+  handleVerifyOtpAction,
 } from "../services/synthflow.webhooks.service.js";
 import { synthflowWebhookUrls } from "../config/env.js";
 
@@ -90,11 +92,39 @@ export async function bookAction(req: Request, res: Response, next: NextFunction
   try {
     assertSignature(req, req.body);
     const result = await handleBookAction(req.body);
-    return res.status(result.success ? 200 : 400).json(result);
+    // Always 200 so Synthflow speaks `message` instead of treating a rule block as a tool crash.
+    return res.status(200).json(result);
   } catch (error) {
     if (error instanceof AppError) {
       return res.status(error.statusCode).json({
         success: false,
+        message: error.message,
+      });
+    }
+    return next(error);
+  }
+}
+
+export async function checkAppointmentAction(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertSignature(req, req.body);
+    const result = await handleCheckAppointmentAction(req.body);
+    return res.status(200).json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function verifyOtpAction(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertSignature(req, req.body);
+    const result = await handleVerifyOtpAction(req.body);
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(error.statusCode).json({
+        success: false,
+        appointment_confirmed: false,
         message: error.message,
       });
     }

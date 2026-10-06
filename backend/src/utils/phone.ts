@@ -7,11 +7,19 @@ export function digitsOnly(value: string | null | undefined) {
  * Normalize to E.164-ish `+` + digits when possible.
  * Leaves empty string unchanged.
  */
+/** Pakistan local mobiles are 03XXXXXXXXX. Store them as +92 without the leading 0. */
+function canonicalDigits(value: string | null | undefined) {
+  let digits = digitsOnly(value);
+  if (digits.length === 11 && digits.startsWith("0")) digits = `92${digits.slice(1)}`;
+  return digits;
+}
+
 export function normalizePhone(value: string | null | undefined) {
   const raw = (value ?? "").trim();
   if (!raw) return "";
-  const digits = digitsOnly(raw);
+  const digits = canonicalDigits(raw);
   if (!digits) return "";
+  if (digits.length === 12 && digits.startsWith("92")) return `+${digits}`;
   if (raw.startsWith("+")) return `+${digits}`;
   if (digits.length === 10) return `+1${digits}`;
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
@@ -19,8 +27,8 @@ export function normalizePhone(value: string | null | undefined) {
 }
 
 export function phonesMatch(a: string | null | undefined, b: string | null | undefined) {
-  const da = digitsOnly(a);
-  const db = digitsOnly(b);
+  const da = canonicalDigits(a);
+  const db = canonicalDigits(b);
   if (!da || !db) return false;
   if (da === db) return true;
   const a10 = da.length > 10 ? da.slice(-10) : da;

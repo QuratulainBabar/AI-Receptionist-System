@@ -21,6 +21,7 @@ const nav: NavItem[] = [
   { to: "/admin/voice-calls", label: "Voice calls", group: "Phone AI" },
   { to: "/admin/appointments", label: "Appointments", group: "Clinic" },
   { to: "/admin/doctors", label: "Doctors", group: "Users" },
+  { to: "/admin/subscriptions", label: "Subscriptions", group: "Billing" },
   { to: "/admin/patients", label: "Patients", group: "Users" },
 ];
 

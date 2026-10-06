@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import * as appointmentsService from "../services/appointments.service.js";
+import * as appointmentInvoicesService from "../services/appointment-invoices.service.js";
 import { AppError } from "../utils/AppError.js";
 
 const createBodySchema = z.object({
@@ -16,6 +17,7 @@ const statusBodySchema = z.object({
 const followUpBodySchema = z.object({
   slotId: z.string().min(1),
   reason: z.string().trim().max(1000).optional(),
+  mode: z.enum(["In clinic", "Video call"]).optional(),
 });
 
 export async function create(req: Request, res: Response, next: NextFunction) {
@@ -104,6 +106,25 @@ export async function updateStatusForDoctor(req: Request, res: Response, next: N
   }
 }
 
+export async function sendInvoiceForDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+    const appointmentId = String(req.params.appointmentId);
+    const result = await appointmentInvoicesService.sendInvoiceForDoctor(req.user.sub, appointmentId);
+    const appointment = await appointmentsService.getAppointmentForDoctor(appointmentId, req.user.sub);
+    res.json({
+      success: true,
+      appointment,
+      message: result.message,
+      paymentUrl: result.paymentUrl,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function createFollowUpForDoctor(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.user?.sub) {
@@ -111,16 +132,17 @@ export async function createFollowUpForDoctor(req: Request, res: Response, next:
     }
     const appointmentId = String(req.params.appointmentId);
     const body = followUpBodySchema.parse(req.body ?? {});
-    const appointment = await appointmentsService.createFollowUpAppointmentForDoctor({
+    const result = await appointmentsService.createFollowUpAppointmentForDoctor({
       doctorUserId: req.user.sub,
       parentAppointmentId: appointmentId,
       slotId: body.slotId,
       reason: body.reason,
+      mode: body.mode,
     });
     res.status(201).json({
       success: true,
-      appointment,
-      message: "Follow-up appointment scheduled.",
+      appointment: result.appointment,
+      message: result.message,
     });
   } catch (error) {
     next(error);

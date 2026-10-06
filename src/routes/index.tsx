@@ -41,16 +41,6 @@ function LoginPage() {
 
   function fill(index: number) {
     const demo = demoCredentials[index]!;
-    if (demo.role === "admin") {
-      if (typeof window !== "undefined") {
-        window.sessionStorage.setItem(
-          "ai-receptionist-admin-demo",
-          JSON.stringify({ email: demo.email, password: demo.password }),
-        );
-      }
-      void navigate({ to: "/admin/login" });
-      return;
-    }
     setEmail(demo.email);
     setPassword(demo.password);
     setError("");
@@ -61,9 +51,19 @@ function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const result = await authApi.login({ email: email.trim(), password });
+      const trimmedEmail = email.trim();
+      const isAdminDemo = demoCredentials.some(
+        (demo) => demo.role === "admin" && demo.email.toLowerCase() === trimmedEmail.toLowerCase(),
+      );
+      const result = isAdminDemo
+        ? await authApi.adminLogin({ email: trimmedEmail, password })
+        : await authApi.login({ email: trimmedEmail, password });
       saveAuth(result.user, result.token);
-      await navigate({ to: homeForRole(result.user.role) });
+      if (result.user.role === "doctor") {
+        await navigate({ to: "/doctor", search: { checkout: undefined } });
+      } else {
+        await navigate({ to: homeForRole(result.user.role) });
+      }
     } catch (err) {
       setError(formatApiError(err, "Unable to sign in."));
     } finally {
@@ -106,10 +106,7 @@ function LoginPage() {
           />
         </Field>
 
-        <div className="flex items-center justify-between gap-3 text-xs">
-          <Link to="/admin/login" className="font-medium text-primary underline-offset-4 hover:underline">
-            Super Admin sign in
-          </Link>
+        <div className="flex items-center justify-end gap-3 text-xs">
           <Link to="/forgot-password" className="font-medium text-primary underline-offset-4 hover:underline">
             Forgot password?
           </Link>

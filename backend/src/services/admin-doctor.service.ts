@@ -12,17 +12,22 @@ import {
   type UpdateDoctorProfileInput,
 } from "./doctor-profile.service.js";
 
+import { getCurrentSubscriptionForUser, latestSubscriptionByUserIds } from "./subscription.service.js";
+
 export type AdminDoctorListItem = ReturnType<typeof toPublicUser> & {
   specialty: string | null;
   clinic: string | null;
   fee: string | null;
   isVerified: boolean;
   verifiedAt: string | null;
+  subscriptionStatus: string | null;
+  subscriptionPlanName: string | null;
 };
 
 export type AdminDoctorCrm = {
   user: ReturnType<typeof toPublicUser>;
   profile: DoctorProfileDto | null;
+  subscription: Awaited<ReturnType<typeof getCurrentSubscriptionForUser>>;
 };
 
 export async function listDoctorsForAdmin(input: {
@@ -66,16 +71,21 @@ export async function listDoctorsForAdmin(input: {
     orderBy: { createdAt: "desc" },
   });
 
-  return users.map(
-    (user): AdminDoctorListItem => ({
+  const subscriptions = await latestSubscriptionByUserIds(users.map((user) => user.id));
+
+  return users.map((user): AdminDoctorListItem => {
+    const subscription = subscriptions.get(user.id);
+    return {
       ...toPublicUser(user),
       specialty: user.doctorProfile?.specialty.name ?? null,
       clinic: user.doctorProfile?.clinic ?? null,
       fee: user.doctorProfile?.fee ?? null,
       isVerified: user.doctorProfile?.isVerified ?? false,
       verifiedAt: user.doctorProfile?.verifiedAt?.toISOString() ?? null,
-    }),
-  );
+      subscriptionStatus: subscription?.statusLabel ?? null,
+      subscriptionPlanName: subscription?.planName ?? null,
+    };
+  });
 }
 
 export async function getDoctorCrmForAdmin(userId: string): Promise<AdminDoctorCrm> {
@@ -105,6 +115,7 @@ export async function getDoctorCrmForAdmin(userId: string): Promise<AdminDoctorC
   return {
     user: toPublicUser(withProfile),
     profile: toDoctorProfileDto(withProfile.doctorProfile),
+    subscription: await getCurrentSubscriptionForUser(userId),
   };
 }
 

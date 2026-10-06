@@ -9,6 +9,7 @@ import {
   listNotificationsForDoctor,
   type PublicDoctorNotification,
 } from "./notifications.service.js";
+import { getCurrentSubscriptionForUser } from "./subscription.service.js";
 
 export type DoctorDashboard = {
   doctorName: string;
@@ -20,6 +21,7 @@ export type DoctorDashboard = {
   patientsCount: number;
   todayAppointments: PublicAppointment[];
   latestNotifications: PublicDoctorNotification[];
+  subscription: Awaited<ReturnType<typeof getCurrentSubscriptionForUser>>;
 };
 
 function startOfDay(date: Date) {
@@ -63,10 +65,11 @@ export async function getDoctorDashboard(doctorUserId: string): Promise<DoctorDa
   const dayStart = startOfDay(new Date()).getTime();
   const dayEnd = endOfDay(new Date()).getTime();
 
-  const [appointments, notifications, patients] = await Promise.all([
+  const [appointments, notifications, patients, subscription] = await Promise.all([
     listAppointmentsForDoctor(doctorUserId),
     listNotificationsForDoctor(doctorUserId),
     listPatientsForDoctor(doctorUserId),
+    getCurrentSubscriptionForUser(doctorUserId),
   ]);
 
   const todayAppointments = appointments
@@ -87,5 +90,6 @@ export async function getDoctorDashboard(doctorUserId: string): Promise<DoctorDa
     patientsCount: patients.length,
     todayAppointments,
     latestNotifications: notifications.slice(0, 3),
+    subscription,
   };
 }

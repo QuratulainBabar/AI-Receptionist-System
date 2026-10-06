@@ -1,11 +1,16 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppointmentCard } from "@/components/shared/cards";
+import { AppointmentInvoiceAction } from "@/components/doctor/AppointmentInvoiceAction";
 import { Button, EmptyNote, PageHeader, Panel, SectionLabel, StatCard } from "@/components/ui/primitives";
 import { doctorDashboardApi, formatApiError, type ApiDoctorDashboard } from "@/lib/api";
+import { useDoctorAccess } from "@/lib/doctor-access";
 import { getSession } from "@/lib/session";
 
 export const Route = createFileRoute("/doctor/")({
+  validateSearch: (search: Record<string, unknown>) => ({
+    checkout: search["checkout"] === "success" ? ("success" as const) : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Doctor dashboard — AI Receptionist" },
@@ -22,6 +27,7 @@ const quickActions = [
   { to: "/doctor/patients", label: "Patient list" },
   { to: "/doctor/notifications", label: "Notifications" },
   { to: "/doctor/records", label: "History & reports" },
+  { to: "/doctor/subscription", label: "Subscription" },
 ] as const;
 
 function greetingForHour(hour: number) {
@@ -36,9 +42,12 @@ function firstNameFromDoctor(name: string) {
 
 function DoctorDashboard() {
   const session = getSession();
+  const access = useDoctorAccess();
+  const search = Route.useSearch();
   const [dashboard, setDashboard] = useState<ApiDoctorDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -78,19 +87,80 @@ function DoctorDashboard() {
         title={`${greeting}, ${firstName}`}
         description={description}
         actions={
-          <Link to="/doctor/schedule">
-            <Button>Open schedule</Button>
-          </Link>
+          access.ready ? (
+            <Link to="/doctor/schedule">
+              <Button>Open schedule</Button>
+            </Link>
+          ) : null
         }
       />
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
+      {message ? <p className="mb-4 text-sm text-primary">{message}</p> : null}
+      {search.checkout === "success" ? (
+        <p className="mb-4 text-sm text-primary">Payment received. Your clinic account is enrolled.</p>
+      ) : null}
+
+      {!access.ready ? (
+        <Panel className="mb-6 space-y-4 p-5">
+          <div>
+            <p className="text-sm font-medium">Finish setup to use the clinic</p>
+            <p className="text-xs text-muted-foreground">
+              {access.planName ? `${access.planName} is active.` : "Your plan is active."} Complete your profile and availability, then the rest of the portal opens.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-xl border border-border p-3">
+              <p className="text-sm font-medium">1. Profile</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {access.profileComplete ? "Specialty and clinic are saved." : "Add your specialty and clinic."}
+              </p>
+              <Link to="/doctor/profile">
+                <Button size="sm" className="mt-3" variant={access.profileComplete ? "outline" : "primary"}>
+                  {access.profileComplete ? "Review profile" : "Complete profile"}
+                </Button>
+              </Link>
+            </div>
+            <div className="rounded-xl border border-border p-3">
+              <p className="text-sm font-medium">2. Availability</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {access.availabilityComplete ? "Open slots are on your calendar." : "Save weekly hours so patients can book."}
+              </p>
+              <Link to="/doctor/availability">
+                <Button size="sm" className="mt-3" variant={access.availabilityComplete ? "outline" : "primary"}>
+                  {access.availabilityComplete ? "Review availability" : "Set availability"}
+                </Button>
+              </Link>
+            </div>
+          </div>
+          {access.upcomingModules.length ? (
+            <div>
+              <SectionLabel>Modules that open after setup</SectionLabel>
+              <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                {access.upcomingModules.map((mod) => (
+                  <li key={mod.id}>{mod.label}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {access.planFeatures.length ? (
+            <div>
+              <SectionLabel>Included with your plan</SectionLabel>
+              <ul className="mt-2 space-y-1 text-sm">
+                {access.planFeatures.map((feature) => (
+                  <li key={feature}>{feature}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </Panel>
+      ) : null}
 
       {loading ? (
         <EmptyNote>Loading your dashboard…</EmptyNote>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-3">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               label="Today's visits"
               value={String(dashboard?.todayVisitsCount ?? 0)}
@@ -106,14 +176,40 @@ function DoctorDashboard() {
               value={String(dashboard?.unreadAlerts ?? 0)}
               detail={`${dashboard?.patientsCount ?? 0} patients in your list`}
             />
+            <StatCard
+              label="Plan"
+              value={dashboard?.subscription?.planName ?? "None"}
+              detail={dashboard?.subscription?.statusLabel ?? "Subscribe to stay on the platform"}
+            />
           </div>
 
-          <div className="mt-6 grid gap-6 lg:grid-cols-3">
+          {access.ready ? <div className="mt-6 grid gap-6 lg:grid-cols-3">
             <section className="space-y-3 lg:col-span-2">
               <SectionLabel>Today's appointments</SectionLabel>
               {dashboard?.todayAppointments.length ? (
                 dashboard.todayAppointments.map((appointment) => (
-                  <AppointmentCard key={appointment.id} appointment={appointment} perspective="doctor" />
+                  <div key={appointment.id} className="space-y-2">
+                    <AppointmentCard appointment={appointment} perspective="doctor" />
+                    <div className="px-1">
+                      <AppointmentInvoiceAction
+                        appointment={appointment}
+                        onUpdated={(updated, note) => {
+                          setDashboard((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  todayAppointments: current.todayAppointments.map((row) =>
+                                    row.id === updated.id ? updated : row,
+                                  ),
+                                }
+                              : current,
+                          );
+                          setMessage(note);
+                          setError("");
+                        }}
+                      />
+                    </div>
+                  </div>
                 ))
               ) : (
                 <EmptyNote>
@@ -133,7 +229,7 @@ function DoctorDashboard() {
               <Panel className="p-4">
                 <SectionLabel>Quick actions</SectionLabel>
                 <div className="mt-3 grid grid-cols-2 gap-2">
-                  {quickActions.map((action) => (
+                  {quickActions.filter((action) => access.modules.some((mod) => mod.to === action.to)).map((action) => (
                     <Link key={action.to} to={action.to}>
                       <Button variant="outline" size="sm" className="h-auto w-full justify-start py-2.5 text-left">
                         {action.label}
@@ -165,7 +261,7 @@ function DoctorDashboard() {
                 </Link>
               </Panel>
             </aside>
-          </div>
+          </div> : null}
         </>
       )}
     </>

@@ -41,6 +41,7 @@ export type AdminStats = {
   voiceCalls?: number;
   appointments?: number;
   phoneBookings?: number;
+  activeSubscriptions?: number;
 };
 
 export type AdminVoiceCall = {
@@ -113,6 +114,8 @@ export type ClinicSynthflowSettings = {
     availabilityAction: string;
   };
   doctorsCount: number;
+  clinicDoctorName: string | null;
+  clinicDoctorId: string | null;
 };
 
 export type ApiSpecialty = {
@@ -173,6 +176,7 @@ export type ApiDoctorProfile = {
   location: string;
   weeklyHours: ApiWeeklyHourSlot[];
   weeklyHoursSummary: string;
+  timezone?: string;
   rating: number;
   reviews: number;
   isVerified?: boolean;
@@ -186,6 +190,90 @@ export type ApiAdminDoctor = ApiUser & {
   fee: string | null;
   isVerified: boolean;
   verifiedAt: string | null;
+  subscriptionStatus: string | null;
+  subscriptionPlanName: string | null;
+};
+
+export type ApiBillingCycle = "MONTHLY" | "YEARLY";
+export type ApiSubscriptionStatus = "ACTIVE" | "TRIALING" | "PAST_DUE" | "CANCELLED" | "EXPIRED";
+
+export type ApiSubscriptionPlan = {
+  id: string;
+  name: string;
+  description: string;
+  amountCents: number;
+  amountLabel: string;
+  currency: string;
+  billingCycle: ApiBillingCycle;
+  billingCycleLabel: string;
+  features: string[];
+  stripeProductId: string;
+  stripePriceId: string;
+  isActive: boolean;
+  sortOrder: number;
+  trialDays: number;
+  subscriberCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApiDoctorModule = {
+  id: string;
+  label: string;
+  to: string;
+  group: string;
+};
+
+export type ApiDoctorAccess = {
+  enrolled: boolean;
+  profileComplete: boolean;
+  availabilityComplete: boolean;
+  ready: boolean;
+  planName: string | null;
+  planFeatures: string[];
+  modules: ApiDoctorModule[];
+  upcomingModules: ApiDoctorModule[];
+  subscription: ApiSubscription | null;
+};
+
+export type ApiSubscription = {
+  id: string;
+  userId: string;
+  doctorName: string | null;
+  doctorEmail: string | null;
+  doctorReference: string | null;
+  planId: string;
+  planName: string;
+  amountCents: number;
+  amountLabel: string;
+  currency: string;
+  billingCycle: ApiBillingCycle;
+  billingCycleLabel: string;
+  status: ApiSubscriptionStatus;
+  statusLabel: string;
+  stripeCustomerId: string;
+  stripeSubscriptionId: string;
+  stripePriceId: string;
+  currentPeriodStart: string | null;
+  currentPeriodEnd: string | null;
+  cancelAtPeriodEnd: boolean;
+  canceledAt: string | null;
+  trialStart: string | null;
+  trialEnd: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ApiSubscriptionOverview = {
+  stripeConfigured: boolean;
+  plans: number;
+  activePlans: number;
+  active: number;
+  trialing: number;
+  pastDue: number;
+  cancelled: number;
+  expired: number;
+  currentSubscribers: number;
 };
 
 export type ApiAdminDoctorSlot = {
@@ -216,6 +304,27 @@ export type ApiDoctorAvailability = {
   timeSlots: ApiTimeSlot[];
 };
 
+export type ApiAppointmentRecordRequest = {
+  status: string;
+  smsSent: boolean;
+  smsError: string;
+  expiresAt: string;
+  createdAt: string;
+  recordsCount: number;
+};
+
+export type ApiAppointmentInvoice = {
+  status: "pending" | "sent" | "paid" | "failed";
+  amountCents: number;
+  amountLabel: string;
+  currency: string;
+  hostedInvoiceUrl: string;
+  phone: string;
+  smsError: string;
+  sentAt: string | null;
+  paidAt: string | null;
+};
+
 export type ApiAppointment = {
   id: string;
   reference: string;
@@ -236,6 +345,8 @@ export type ApiAppointment = {
   followUpOfId?: string | null;
   followUpOfReference?: string | null;
   isFollowUp?: boolean;
+  recordRequest?: ApiAppointmentRecordRequest | null;
+  invoice?: ApiAppointmentInvoice | null;
 };
 
 export type ApiAdminAppointmentDetail = ApiAppointment & {
@@ -263,6 +374,7 @@ export type ApiAdminAppointmentDetail = ApiAppointment & {
 export type ApiDoctorSlot = {
   id: string;
   startsAt: string;
+  startsAtLocal?: string;
   date: string;
   time: string;
   isBooked: boolean;
@@ -304,6 +416,37 @@ export type ApiMedicalRecord = {
   size: string;
   uploadedBy: string;
   mimeType: string;
+  appointmentId?: string | null;
+  appointmentReference?: string | null;
+  appointmentDate?: string | null;
+};
+
+export type ApiRecordGroup = {
+  appointmentId: string | null;
+  appointmentReference: string | null;
+  appointmentDate: string | null;
+  label: string;
+  uploadDates: Array<{
+    date: string;
+    records: ApiMedicalRecord[];
+  }>;
+};
+
+export type ApiRecordRequest = {
+  id: string;
+  appointmentId: string;
+  appointmentReference: string;
+  patientName: string;
+  doctorName: string;
+  phone: string;
+  status: string;
+  smsSent: boolean;
+  smsError: string;
+  expiresAt: string;
+  createdAt: string;
+  uploadUrl: string;
+  recordsCount: number;
+  message?: string;
 };
 
 export type ApiActivity = {
@@ -566,7 +709,12 @@ export const adminApi = {
     );
   },
   getDoctorCrm(userId: string) {
-    return request<{ success: boolean; user: ApiUser; profile: ApiDoctorProfile | null }>(
+    return request<{
+      success: boolean;
+      user: ApiUser;
+      profile: ApiDoctorProfile | null;
+      subscription: ApiSubscription | null;
+    }>(
       `/api/admin/doctors/${userId}/crm`,
       { method: "GET" },
       authHeader(),
@@ -637,6 +785,83 @@ export const adminApi = {
       authHeader(),
     );
   },
+  subscriptionOverview() {
+    return request<{ success: boolean; overview: ApiSubscriptionOverview }>(
+      "/api/admin/subscriptions/overview",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  listSubscriptionPlans() {
+    return request<{ success: boolean; plans: ApiSubscriptionPlan[] }>(
+      "/api/admin/subscriptions/plans",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  createSubscriptionPlan(body: {
+    name: string;
+    description?: string;
+    amountCents: number;
+    currency?: string;
+    billingCycle: ApiBillingCycle;
+    features: string[];
+    isActive?: boolean;
+    sortOrder?: number;
+    trialDays?: number;
+  }) {
+    return request<{ success: boolean; plan: ApiSubscriptionPlan; message?: string }>(
+      "/api/admin/subscriptions/plans",
+      { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  updateSubscriptionPlan(
+    planId: string,
+    body: Partial<{
+      name: string;
+      description: string;
+      amountCents: number;
+      currency: string;
+      billingCycle: ApiBillingCycle;
+      features: string[];
+      isActive: boolean;
+      sortOrder: number;
+      trialDays: number;
+    }>,
+  ) {
+    return request<{ success: boolean; plan: ApiSubscriptionPlan; message?: string }>(
+      `/api/admin/subscriptions/plans/${planId}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  setSubscriptionPlanActive(planId: string, isActive: boolean) {
+    return request<{ success: boolean; plan: ApiSubscriptionPlan; message?: string }>(
+      `/api/admin/subscriptions/plans/${planId}/status`,
+      { method: "PATCH", body: JSON.stringify({ isActive }) },
+      authHeader(),
+    );
+  },
+  listSubscriptions(params?: { q?: string; status?: string; planId?: string }) {
+    const search = new URLSearchParams();
+    if (params?.q) search.set("q", params.q);
+    if (params?.status) search.set("status", params.status);
+    if (params?.planId) search.set("planId", params.planId);
+    const qs = search.toString();
+    return request<{ success: boolean; subscriptions: ApiSubscription[] }>(
+      `/api/admin/subscriptions${qs ? `?${qs}` : ""}`,
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  assignSubscription(userId: string, planId: string) {
+    return request<{ success: boolean; subscription: ApiSubscription; message?: string }>(
+      "/api/admin/subscriptions/assign",
+      { method: "POST", body: JSON.stringify({ userId, planId }) },
+      authHeader(),
+    );
+  },
   getSynthflow() {
     return request<{ success: boolean; settings: ClinicSynthflowSettings }>(
       "/api/admin/synthflow",
@@ -665,6 +890,8 @@ export const adminApi = {
       synthflowAgentId: string;
       phoneNumber: string | null;
       doctorsCount: number;
+      clinicDoctorName: string | null;
+      clinicDoctorId: string | null;
       warning: string | null;
       settings: ClinicSynthflowSettings;
     }>("/api/admin/synthflow/agent", { method: "POST", body: JSON.stringify(body ?? {}) }, authHeader());
@@ -674,6 +901,9 @@ export const adminApi = {
       success: boolean;
       action: string;
       synthflowAgentId: string;
+      doctorsCount: number;
+      clinicDoctorName: string | null;
+      clinicDoctorId: string | null;
       warning: string | null;
       settings: ClinicSynthflowSettings;
     }>("/api/admin/synthflow/sync", { method: "POST", body: JSON.stringify({}) }, authHeader());
@@ -766,11 +996,30 @@ export const doctorAppointmentsApi = {
   },
   scheduleFollowUp(
     appointmentId: string,
-    body: { slotId: string; reason?: string },
+    body: { slotId: string; reason?: string; mode?: ApiAppointment["mode"] },
   ) {
     return request<{ success: boolean; appointment: ApiAppointment; message?: string }>(
       `/api/doctor/appointments/${appointmentId}/follow-up`,
       { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  requestRecords(appointmentId: string) {
+    return request<{ success: boolean; request: ApiRecordRequest; message?: string }>(
+      `/api/doctor/appointments/${appointmentId}/record-request`,
+      { method: "POST" },
+      authHeader(),
+    );
+  },
+  sendInvoice(appointmentId: string) {
+    return request<{
+      success: boolean;
+      appointment: ApiAppointment;
+      message?: string;
+      paymentUrl?: string;
+    }>(
+      `/api/doctor/appointments/${appointmentId}/invoice`,
+      { method: "POST" },
       authHeader(),
     );
   },
@@ -783,7 +1032,12 @@ export const doctorAvailabilityApi = {
     if (params?.to) search.set("to", params.to);
     if (params?.includeBooked === false) search.set("includeBooked", "false");
     const qs = search.toString();
-    return request<{ success: boolean; slots: ApiDoctorSlot[] }>(
+    return request<{
+      success: boolean;
+      slots: ApiDoctorSlot[];
+      clinicTimeZone?: string;
+      clinicTimeZoneLabel?: string;
+    }>(
       `/api/doctor/availability${qs ? `?${qs}` : ""}`,
       { method: "GET" },
       authHeader(),
@@ -863,6 +1117,41 @@ export type ApiDoctorDashboard = {
   patientsCount: number;
   todayAppointments: ApiAppointment[];
   latestNotifications: ApiDoctorNotification[];
+  subscription: ApiSubscription | null;
+};
+
+export const doctorSubscriptionApi = {
+  listPlans() {
+    return request<{ success: boolean; plans: ApiSubscriptionPlan[]; stripeConfigured: boolean }>(
+      "/api/doctor/subscription/plans",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  getMine() {
+    return request<{ success: boolean; subscription: ApiSubscription | null; stripeConfigured: boolean }>(
+      "/api/doctor/subscription",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  checkout(planId: string, returnOrigin?: string) {
+    return request<{ success: boolean; checkout: { url: string; sessionId: string } }>(
+      "/api/doctor/subscription/checkout",
+      { method: "POST", body: JSON.stringify({ planId, returnOrigin }) },
+      authHeader(),
+    );
+  },
+  access() {
+    return request<{ success: boolean; access: ApiDoctorAccess }>("/api/doctor/subscription/access", { method: "GET" }, authHeader());
+  },
+  confirm(sessionId: string) {
+    return request<{ success: boolean; enrolled: boolean; access: ApiDoctorAccess }>(
+      "/api/doctor/subscription/checkout/confirm",
+      { method: "POST", body: JSON.stringify({ sessionId }) },
+      authHeader(),
+    );
+  },
 };
 
 export const doctorDashboardApi = {
@@ -885,6 +1174,7 @@ export const doctorProfileApi = {
   },
   update(body: {
     specialtyId?: string;
+    specialty?: string;
     subSpecialty?: string;
     qualifications?: string[];
     certifications?: string[];
@@ -918,11 +1208,27 @@ export type ApiDoctorPatient = {
   isActive: boolean;
 };
 
+export type ApiPatientTimelineEvent = {
+  id: string;
+  kind: "visit" | "follow_up" | "status" | "report" | "prescription" | "note" | "transcription";
+  occurredAt: string;
+  dateLabel: string;
+  timeLabel: string;
+  title: string;
+  detail: string;
+  appointmentId: string | null;
+  appointmentReference: string | null;
+  status: string | null;
+  recordId: string | null;
+};
+
 export type ApiDoctorPatientFile = {
   patient: ApiDoctorPatient;
   appointments: ApiAppointment[];
   history: ApiMedicalHistory;
   records: ApiMedicalRecord[];
+  recordGroups: ApiRecordGroup[];
+  timeline?: ApiPatientTimelineEvent[];
 };
 
 export const doctorPatientsApi = {
@@ -937,9 +1243,33 @@ export const doctorPatientsApi = {
     );
   },
   get(patientId: string) {
-    return request<{ success: boolean } & ApiDoctorPatientFile>(
+    return request<{ success: boolean; message?: string } & ApiDoctorPatientFile>(
       `/api/doctor/patients/${patientId}`,
       { method: "GET" },
+      authHeader(),
+    );
+  },
+  addNote(patientId: string, body: { body: string; appointmentId?: string }) {
+    return request<{ success: boolean; message?: string } & ApiDoctorPatientFile>(
+      `/api/doctor/patients/${patientId}/notes`,
+      { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  addPrescription(
+    patientId: string,
+    body: { medication: string; dosage?: string; instructions?: string; appointmentId?: string },
+  ) {
+    return request<{ success: boolean; message?: string } & ApiDoctorPatientFile>(
+      `/api/doctor/patients/${patientId}/prescriptions`,
+      { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  requestRecords(appointmentId: string) {
+    return request<{ success: boolean; request: ApiRecordRequest; message?: string }>(
+      `/api/doctor/appointments/${appointmentId}/record-request`,
+      { method: "POST" },
       authHeader(),
     );
   },

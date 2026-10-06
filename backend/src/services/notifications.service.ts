@@ -1,6 +1,7 @@
 import type { Appointment, DoctorNotification, PatientMedicalRecord, User } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
+import { formatClinicDateTime } from "../utils/clinic-time.js";
 
 export type NotificationKind = "new" | "changed" | "cancelled";
 
@@ -15,17 +16,7 @@ export type PublicDoctorNotification = {
 type AppointmentWithPatient = Appointment & { patient: User };
 
 function formatNotificationDateTime(date: Date) {
-  const datePart = date.toLocaleDateString("en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-  const timePart = date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-  return `${datePart}, ${timePart}`;
+  return formatClinicDateTime(date);
 }
 
 function formatRelativeTime(date: Date, now = new Date()) {
@@ -144,12 +135,19 @@ export async function logAppointmentRescheduledForDoctor(
   });
 }
 
-export async function logReportUploadedForDoctors(record: PatientMedicalRecord & { user: User }) {
+export async function logReportUploadedForDoctors(
+  record: PatientMedicalRecord & { user: User },
+  extra?: { appointmentReference?: string | null },
+) {
   const doctors = await prisma.appointment.findMany({
     where: { patientId: record.userId },
     select: { doctorUserId: true },
     distinct: ["doctorUserId"],
   });
+
+  const detail = extra?.appointmentReference
+    ? `${record.fileName} uploaded for ${extra.appointmentReference}`
+    : `${record.fileName} added to their records`;
 
   await Promise.all(
     doctors.map(({ doctorUserId }) =>
@@ -159,7 +157,7 @@ export async function logReportUploadedForDoctors(record: PatientMedicalRecord &
         eventType: "report",
         relatedId: record.id,
         title: `Report uploaded — ${record.user.fullName}`,
-        detail: `${record.fileName} added to their records`,
+        detail,
         occurredAt: record.createdAt,
       }),
     ),

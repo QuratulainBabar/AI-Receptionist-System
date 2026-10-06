@@ -133,6 +133,15 @@ export function extractSynthflowFields(payload: unknown): Record<string, string>
     if (v && !emptyish(v)) fields[key.toLowerCase()] = v;
   }
 
+  // Custom actions post a flat JSON body (phone, doctor_name, slot_id, ...).
+  for (const [key, val] of Object.entries(root)) {
+    if (val != null && typeof val === "object") continue;
+    const v = asString(val).trim();
+    if (!v || emptyish(v)) continue;
+    const normalized = key.toLowerCase();
+    if (!fields[normalized]) fields[normalized] = v;
+  }
+
   const aliases: Record<string, string[]> = {
     patient_name: ["patient_name", "name", "full_name", "customer_name"],
     phone: ["phone", "phone_number", "customer_phone", "caller_phone"],
@@ -163,6 +172,7 @@ export type VoiceBookingFields = {
   slotId: string;
   reason: string;
   whenHint: Date | null;
+  otp: string;
 };
 
 export function extractVoiceBookingFields(payload: unknown): VoiceBookingFields {
@@ -177,15 +187,19 @@ export function extractVoiceBookingFields(payload: unknown): VoiceBookingFields 
     asString(fields.call_summary_feedback);
   const whenText = [fields.appointment_datetime, summary, transcript].filter(Boolean).join(" \n ");
   const slotIdRaw = pickFirst(fields, ["slot_id", "slotid"]);
+  const slotIsId = looksLikeRecordId(slotIdRaw);
   return {
     patientName: pickFirst(fields, ["patient_name", "name", "full_name"]),
     phone: pickFirst(fields, ["phone", "phone_number", "caller_phone"]),
     email: pickFirst(fields, ["email", "patient_email"]),
     doctorId: pickFirst(fields, ["doctor_id", "doctorid"]),
     doctorName: pickFirst(fields, ["doctor_name", "doctor"]),
-    slotId: looksLikeRecordId(slotIdRaw) ? slotIdRaw.trim() : "",
+    slotId: slotIsId ? slotIdRaw.trim() : "",
     reason:
       pickFirst(fields, ["reason", "visit_reason"]) || "Booked via AI voice receptionist",
-    whenHint: parseSpokenAppointmentTime(whenText),
+    whenHint: parseSpokenAppointmentTime(
+      [whenText, slotIsId ? "" : slotIdRaw].filter(Boolean).join(" \n "),
+    ),
+    otp: pickFirst(fields, ["otp", "code", "verification_code", "pin"]),
   };
 }

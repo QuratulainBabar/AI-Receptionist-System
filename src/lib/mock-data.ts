@@ -3,7 +3,8 @@
 export type Role = "patient" | "doctor";
 
 export const demoCredentials = [
-  { role: "patient" as const, email: "patient@example.com", password: "Patient123", label: "Patient" },
+  // Patient portal is paused. Demo patient stays commented until that work resumes.
+  // { role: "patient" as const, email: "patient@example.com", password: "Patient123", label: "Patient" },
   { role: "doctor" as const, email: "doctor@example.com", password: "Doctor123", label: "Doctor" },
   { role: "admin" as const, email: "admin@example.com", password: "Admin123", label: "Super Admin" },
 ];

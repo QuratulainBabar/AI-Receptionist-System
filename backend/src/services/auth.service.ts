@@ -174,6 +174,7 @@ export async function getAdminStats() {
     voiceCalls,
     appointments,
     phoneBookings,
+    activeSubscriptions,
   ] = await Promise.all([
     prisma.user.count({ where: { role: Role.DOCTOR } }),
     prisma.user.count({ where: { role: Role.PATIENT } }),
@@ -184,6 +185,7 @@ export async function getAdminStats() {
     prisma.voiceCall.count(),
     prisma.appointment.count(),
     prisma.voiceCall.count({ where: { appointmentId: { not: null } } }),
+    prisma.subscription.count({ where: { status: { in: ["ACTIVE", "TRIALING"] } } }),
   ]);
 
   return {
@@ -196,6 +198,7 @@ export async function getAdminStats() {
     voiceCalls,
     appointments,
     phoneBookings,
+    activeSubscriptions,
   };
 }
 

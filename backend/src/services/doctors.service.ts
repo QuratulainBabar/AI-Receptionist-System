@@ -2,6 +2,13 @@ import type { AvailabilitySlot, DoctorProfile, Specialty, User } from "@prisma/c
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { formatWeeklyHoursSummary, parseWeeklyHours } from "../utils/doctor-profile.js";
+import {
+  addCivilDays,
+  civilDateKey,
+  clinicTimeZone,
+  formatClinicTime,
+  wallTimeToUtc,
+} from "../utils/clinic-time.js";
 
 type DoctorWithRelations = DoctorProfile & {
   user: User;
@@ -61,27 +68,17 @@ function formatNextAvailable(date: Date | null) {
   if (!date) return "No upcoming slots";
 
   const now = new Date();
-  const startToday = new Date(now);
-  startToday.setHours(0, 0, 0, 0);
-  const startTomorrow = new Date(startToday);
-  startTomorrow.setDate(startTomorrow.getDate() + 1);
-  const startDayAfter = new Date(startTomorrow);
-  startDayAfter.setDate(startDayAfter.getDate() + 1);
+  const todayKey = civilDateKey(now);
+  const slotKey = civilDateKey(date);
+  const time = formatClinicTime(date);
 
-  const time = date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
+  if (slotKey === todayKey) return `Today, ${time}`;
+  if (slotKey === addCivilDays(todayKey, 1)) return `Tomorrow, ${time}`;
+
+  const weekday = date.toLocaleDateString("en-US", {
+    timeZone: clinicTimeZone(),
+    weekday: "short",
   });
-
-  if (date >= startToday && date < startTomorrow) {
-    return `Today, ${time}`;
-  }
-  if (date >= startTomorrow && date < startDayAfter) {
-    return `Tomorrow, ${time}`;
-  }
-
-  const weekday = date.toLocaleDateString("en-US", { weekday: "short" });
   return `${weekday}, ${time}`;
 }
 
@@ -200,10 +197,7 @@ export async function getDoctorByUserId(userId: string) {
 }
 
 function dateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return civilDateKey(date);
 }
 
 export async function getDoctorAvailability(userId: string, date?: string) {
@@ -217,10 +211,22 @@ export async function getDoctorAvailability(userId: string, date?: string) {
   }
 
   const now = new Date();
-  const rangeStart = new Date(now);
-  rangeStart.setHours(0, 0, 0, 0);
-  const rangeEnd = new Date(rangeStart);
-  rangeEnd.setDate(rangeEnd.getDate() + 14);
+  const todayKey = civilDateKey(now);
+  const rangeStart = wallTimeToUtc({
+    year: Number(todayKey.slice(0, 4)),
+    month: Number(todayKey.slice(5, 7)),
+    day: Number(todayKey.slice(8, 10)),
+    hour: 0,
+    minute: 0,
+  });
+  const endKey = addCivilDays(todayKey, 14);
+  const rangeEnd = wallTimeToUtc({
+    year: Number(endKey.slice(0, 4)),
+    month: Number(endKey.slice(5, 7)),
+    day: Number(endKey.slice(8, 10)),
+    hour: 0,
+    minute: 0,
+  });
 
   const slots = await prisma.availabilitySlot.findMany({
     where: {
@@ -240,15 +246,24 @@ export async function getDoctorAvailability(userId: string, date?: string) {
 
   const dates: PublicAvailabilityDate[] = [];
   for (let offset = 0; offset < 14; offset += 1) {
-    const day = new Date(rangeStart);
-    day.setDate(rangeStart.getDate() + offset);
-    const key = dateKey(day);
+    const key = addCivilDays(todayKey, offset);
+    const day = wallTimeToUtc({
+      year: Number(key.slice(0, 4)),
+      month: Number(key.slice(5, 7)),
+      day: Number(key.slice(8, 10)),
+      hour: 12,
+      minute: 0,
+    });
     const daySlots = byDay.get(key) ?? [];
     const openCount = daySlots.filter((slot) => !slot.isBooked && slot.startsAt > now).length;
     dates.push({
       id: key,
-      label: day.toLocaleDateString("en-US", { weekday: "short", day: "numeric" }),
-      month: day.toLocaleDateString("en-US", { month: "short" }),
+      label: day.toLocaleDateString("en-US", {
+        timeZone: clinicTimeZone(),
+        weekday: "short",
+        day: "numeric",
+      }),
+      month: day.toLocaleDateString("en-US", { timeZone: clinicTimeZone(), month: "short" }),
       slots: openCount,
     });
   }
@@ -258,11 +273,7 @@ export async function getDoctorAvailability(userId: string, date?: string) {
 
   const timeSlots: PublicTimeSlot[] = selectedSlots.map((slot) => ({
     id: slot.id,
-    time: slot.startsAt.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
-    }),
+    time: formatClinicTime(slot.startsAt),
     available: !slot.isBooked && slot.startsAt > now,
     startsAt: slot.startsAt.toISOString(),
   }));

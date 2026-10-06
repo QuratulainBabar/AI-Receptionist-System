@@ -1,3 +1,10 @@
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { getSession } from "@/lib/session";
+
+/*
+Patient portal is paused. Nothing from the patient dashboard is shown for now.
+The /patient route stays registered so existing patient sessions do not crash.
+
 import { createFileRoute, Outlet, redirect, useRouter } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell, type NavItem } from "@/components/layout/AppShell";
@@ -15,7 +22,7 @@ export const Route = createFileRoute("/patient")({
 });
 
 const nav: NavItem[] = [
-  { to: "/patient", label: "Dashboard", group: "Care" },
+  // { to: "/patient", label: "Dashboard", group: "Care" },
   { to: "/patient/chat", label: "AI Receptionist", group: "Care" },
   { to: "/patient/doctors", label: "Find a doctor", group: "Care" },
   { to: "/patient/book", label: "Book appointment", group: "Appointments" },
@@ -46,4 +53,20 @@ function PatientLayout() {
       <Outlet />
     </AppShell>
   );
+}
+*/
+
+export const Route = createFileRoute("/patient")({
+  beforeLoad: () => {
+    if (typeof window === "undefined") return;
+    const session = getSession();
+    if (!session?.token || session.role !== "patient") {
+      throw redirect({ to: "/" });
+    }
+  },
+  component: PatientLayout,
+});
+
+function PatientLayout() {
+  return null;
 }

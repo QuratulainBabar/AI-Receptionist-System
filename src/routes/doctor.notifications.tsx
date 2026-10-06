@@ -55,7 +55,7 @@ function DoctorNotifications() {
       <PageHeader
         eyebrow="Doctor"
         title="Notifications"
-        description="Appointment alerts from the receptionist — nothing is pushed in this preview."
+        description="Appointment alerts from the receptionist."
       />
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}

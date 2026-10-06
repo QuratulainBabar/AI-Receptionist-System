@@ -1,5 +1,7 @@
 import type { Appointment, FollowUpMessage, MessageChannel, MessageStatus, User } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
+import { scheduleAppointmentReminders } from "./appointment-reminders.service.js";
+import { formatClinicDateTime } from "../utils/clinic-time.js";
 
 export type PublicFollowUpMessage = {
   id: string;
@@ -32,25 +34,11 @@ function toPublicStatus(status: MessageStatus): PublicFollowUpMessage["status"] 
 }
 
 function formatSentAt(date: Date) {
-  return date.toLocaleString("en-GB", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).replace(",", "");
+  return formatClinicDateTime(date);
 }
 
 function formatVisitWhen(date: Date) {
-  return date.toLocaleString("en-GB", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return formatClinicDateTime(date);
 }
 
 function toPublicMessage(
@@ -76,29 +64,6 @@ function buildConfirmationContent(appointment: AppointmentWithDoctor) {
     subject: `Your appointment is confirmed — ${appointment.reference}`,
     preview: `${formatVisitWhen(appointment.startsAt)} with ${appointment.doctorUser.fullName} at ${appointment.clinic}.`,
     sentAt: appointment.createdAt,
-  };
-}
-
-function buildReminderContent(appointment: AppointmentWithDoctor) {
-  const reminderAt = new Date(appointment.startsAt);
-  reminderAt.setDate(reminderAt.getDate() - 1);
-  reminderAt.setHours(8, 0, 0, 0);
-
-  const visitTime = appointment.startsAt.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-
-  const isFutureReminder = reminderAt.getTime() > Date.now();
-
-  return {
-    kind: "reminder",
-    channel: "SMS" as const,
-    status: (isFutureReminder ? "SCHEDULED" : "DELIVERED") as MessageStatus,
-    subject: `Reminder: visit tomorrow at ${visitTime}`,
-    preview: "Please arrive 10 minutes early and bring your medication list.",
-    sentAt: reminderAt,
   };
 }
 
@@ -128,7 +93,7 @@ export async function createMessagesForAppointment(
     subject: string;
     preview: string;
     sentAt: Date;
-  }> = [buildConfirmationContent(appointment), buildReminderContent(appointment)];
+  }> = [buildConfirmationContent(appointment)];
 
   if (appointment.reason.toLowerCase().includes("blood pressure") || appointment.specialtyName === "Cardiologist" || appointment.specialtyName === "Cardiology") {
     payloads.push(buildRecheckContent(appointment));
@@ -160,6 +125,10 @@ export async function createMessagesForAppointment(
         sentAt: payload.sentAt,
       },
     });
+  }
+
+  if (appointment.status === "CONFIRMED") {
+    await scheduleAppointmentReminders(appointment.id);
   }
 }
 

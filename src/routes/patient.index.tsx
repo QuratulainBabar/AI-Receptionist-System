@@ -1,3 +1,9 @@
+import { createFileRoute } from "@tanstack/react-router";
+
+/*
+Patient dashboard is fully commented out.
+The /patient route stays registered so the patient portal still loads.
+
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { AppointmentCard } from "@/components/shared/cards";
@@ -155,4 +161,16 @@ function PatientDashboard() {
       )}
     </>
   );
+}
+*/
+
+export const Route = createFileRoute("/patient/")({
+  head: () => ({
+    meta: [{ title: "Patient portal — AI Receptionist" }],
+  }),
+  component: PatientDashboard,
+});
+
+function PatientDashboard() {
+  return null;
 }

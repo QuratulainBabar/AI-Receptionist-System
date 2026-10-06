@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { Role } from "@prisma/client";
 import { authenticate, requireRole } from "../middleware/auth.js";
+import { requireDoctorEnrollment } from "../middleware/enrollment.js";
 import * as doctorAvailabilityController from "../controllers/doctor-availability.controller.js";
 
 export const doctorAvailabilityRouter = Router();
 
-doctorAvailabilityRouter.use(authenticate, requireRole(Role.DOCTOR));
+doctorAvailabilityRouter.use(authenticate, requireRole(Role.DOCTOR), requireDoctorEnrollment);
 
 doctorAvailabilityRouter.get("/", doctorAvailabilityController.list);
 doctorAvailabilityRouter.post("/", doctorAvailabilityController.create);

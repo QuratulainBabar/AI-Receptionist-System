@@ -24,6 +24,11 @@ export function AppointmentCard({
             <p className="mt-2 font-mono text-[11px] text-foreground">
               {appointment.date} · {appointment.time} · {appointment.duration}
             </p>
+            {"isFollowUp" in appointment && appointment.isFollowUp ? (
+              <p className="mt-1 text-[11px] text-primary">
+                Follow-up of {appointment.followUpOfReference || "prior visit"}
+              </p>
+            ) : null}
           </div>
         </div>
         <Badge tone={statusTone[appointment.status]}>{appointment.status}</Badge>

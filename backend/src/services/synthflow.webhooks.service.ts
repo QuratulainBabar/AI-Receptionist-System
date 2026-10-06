@@ -2,13 +2,21 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
-import { formatWeeklyHoursSummary, parseWeeklyHours } from "../utils/doctor-profile.js";
 import { logPatientActivity, ActivityType } from "./activity.service.js";
 import { digitsOnly, normalizePhone } from "../utils/phone.js";
+import { formatClinicDateTime } from "../utils/clinic-time.js";
 import { findPatientByPhone } from "./patient-phone.service.js";
 import { emptyish, extractSynthflowFields, extractVoiceBookingFields } from "./synthflow-fields.service.js";
+import { findActiveAppointmentForMobile, type PublicAppointment } from "./appointments.service.js";
 import { processVoiceBooking } from "./voice-booking.service.js";
+import { verifyBookingOtp } from "./booking-otp.service.js";
 import { fetchCallRecordingUrl } from "./synthflow.client.js";
+import {
+  clinicDoctorProfileBlock,
+  formatOpenSlotLabels,
+  getClinicDoctor,
+} from "./clinic-doctor.service.js";
+import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
 import { formatDoctorDirectoryLine, formatDoctorSpokenBlurb } from "./doctor-profile.service.js";
 
 type JsonRecord = Record<string, unknown>;
@@ -58,100 +66,75 @@ function deepFindString(payload: unknown, keys: string[]): string {
 
 export { findPatientByPhone } from "./patient-phone.service.js";
 
-async function buildClinicContext() {
-  const now = new Date();
-  const doctors = await prisma.doctorProfile.findMany({
-    where: { user: { isActive: true, role: "DOCTOR" } },
-    include: {
-      user: true,
-      specialty: true,
-      availability: {
-        where: { isBooked: false, startsAt: { gt: now } },
-        orderBy: { startsAt: "asc" },
-        take: 4,
-      },
-    },
-    orderBy: { user: { fullName: "asc" } },
-    take: 100,
-  });
+async function ensureClinicDoctorWithSlots(openSlotsTake: number) {
+  let doctor = await getClinicDoctor({ openSlotsTake });
+  if (!doctor) return null;
+  if (doctor.availability.length === 0 && doctor.weeklyHours != null) {
+    await generateSlotsFromWeeklyHours(doctor.userId, { weeks: 2, allowEmpty: true });
+    doctor = (await getClinicDoctor({ openSlotsTake })) ?? doctor;
+  }
+  return doctor;
+}
 
-  const profileBlurbs: string[] = [];
-  const lines = doctors.map((doctor) => {
-    const slots = doctor.availability
-      .map((slot) => {
-        const when = slot.startsAt.toLocaleString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        });
-        return `${when} [slot:${slot.id}]`;
-      })
-      .join("; ");
-    const weeklyHoursSummary = formatWeeklyHoursSummary(parseWeeklyHours(doctor.weeklyHours));
-    profileBlurbs.push(
-      formatDoctorSpokenBlurb({
-        fullName: doctor.user.fullName,
-        specialty: doctor.specialty.name,
-        qualifications: doctor.qualifications,
-        certifications: doctor.certifications,
-        experienceYears: doctor.experienceYears,
-        about: doctor.about,
-        clinic: doctor.clinic,
-        fee: doctor.fee,
-        languages: doctor.languages,
-      }),
-    );
-    return formatDoctorDirectoryLine({
-      fullName: doctor.user.fullName,
-      doctorId: doctor.userId,
-      specialty: doctor.specialty.name,
-      subSpecialty: doctor.subSpecialty,
-      qualifications: doctor.qualifications,
-      certifications: doctor.certifications,
-      experienceYears: doctor.experienceYears,
-      about: doctor.about,
-      areasOfExpertise: doctor.areasOfExpertise,
-      clinic: doctor.clinic,
-      fee: doctor.fee,
-      consultationType: doctor.consultationType,
-      languages: doctor.languages,
-      location: doctor.location,
-      weeklyHoursSummary,
-      nextSlots: slots || "none",
-    });
+async function buildClinicContext() {
+  const doctor = await ensureClinicDoctorWithSlots(8);
+  if (!doctor) {
+    return {
+      clinic_name: "Qubetech AI Receptionist Clinic",
+      doctors_available: "0",
+      clinic_doctor_name: "",
+      clinic_doctor_specialty: "",
+      clinic_doctor_fee: "",
+      clinic_doctor_hospital: "",
+      clinic_doctor_experience_years: "",
+      clinic_doctor_hours: "",
+      doctors_directory: "No clinic doctor is configured yet.",
+      doctor_profiles: "none",
+      availability_summary: "No open slots.",
+      booking_instructions:
+        "This clinic has one doctor. After the caller gives a phone number, call check_existing_appointment first. If has_active_appointment is true, do not book. Otherwise call check_doctor_availability, then book_appointment for an open slot.",
+    };
+  }
+
+  const profile = clinicDoctorProfileBlock(doctor);
+  const spoken = formatDoctorSpokenBlurb({
+    fullName: profile.doctorName,
+    specialty: profile.specialty,
+    experienceYears: profile.experienceYears,
+    clinic: profile.hospital === "none" ? "" : profile.hospital,
+    fee: profile.fee === "none" ? "" : profile.fee,
+  });
+  const directoryLine = formatDoctorDirectoryLine({
+    fullName: profile.doctorName,
+    doctorId: profile.doctorId,
+    specialty: profile.specialty,
+    experienceYears: profile.experienceYears,
+    clinic: profile.hospital === "none" ? "" : profile.hospital,
+    fee: profile.fee === "none" ? "" : profile.fee,
+    weeklyHoursSummary: profile.weeklyHoursSummary,
+    nextSlots: profile.openSlots,
+  });
+  const openLabels = formatOpenSlotLabels(doctor.availability, {
+    withIds: false,
+    limit: 2,
   });
 
   return {
     clinic_name: "Qubetech AI Receptionist Clinic",
-    doctors_available: String(doctors.length),
-    doctors_directory: lines.join("\n") || "No doctors currently available.",
-    doctor_profiles: profileBlurbs.join("\n") || "none",
-    availability_summary:
-      lines
-        .map((line) => {
-          const name = line.match(/^Doctor: ([^|]+)/)?.[1]?.trim() || "";
-          const fee = line.match(/consultation_fee: ([^|]+)/)?.[1]?.trim() || "";
-          const slots = line.match(/next_slots: (.+)$/)?.[1]?.trim() || "none";
-          if (!name) return "";
-          if (!slots || slots === "none") return `${name}: no open slots`;
-          const firstTwo = slots
-            .split(";")
-            .map((part) => part.replace(/\s*\[slot:[^\]]+\]/g, "").trim())
-            .filter(Boolean)
-            .slice(0, 2)
-            .join("; ");
-          return `${name} AVAILABLE (${fee}): ${firstTwo}`;
-        })
-        .filter(Boolean)
-        .join(" | ") || "No open slots.",
+    doctors_available: "1",
+    clinic_doctor_name: profile.doctorName,
+    clinic_doctor_specialty: profile.specialty,
+    clinic_doctor_fee: profile.fee,
+    clinic_doctor_hospital: profile.hospital,
+    clinic_doctor_experience_years: String(profile.experienceYears),
+    clinic_doctor_hours: profile.weeklyHoursSummary,
+    doctors_directory: directoryLine,
+    doctor_profiles: spoken,
+    availability_summary: openLabels.length
+      ? `${profile.doctorName} AVAILABLE (${profile.fee}): ${openLabels.join("; ")}`
+      : `${profile.doctorName}: no open slots`,
     booking_instructions:
-<<<<<<< Updated upstream
-      "When a doctor is discussed, share experience, qualifications, and professional bio from doctor_profiles. You CAN check availability from availability_summary and doctors_directory next_slots. To book, confirm name, doctor, and slot_id, then call the book appointment action.",
-=======
-      "To book, confirm patient full name, preferred doctor, and one available slot_id. Then call the book appointment action with patient_id or phone, doctor_id, and slot_id. One active appointment per mobile: if booking fails because they already have a Pending or Confirmed appointment, tell them clearly they must complete or cancel it before booking another. Completed or Cancelled appointments allow a new booking. Share bio, qualifications, certifications, expertise, hospital, location, languages, and weekly hours ONLY if the caller asks about that doctor.",
->>>>>>> Stashed changes
+      "This clinic has one doctor. Introduce clinic_doctor_name and clinic_doctor_specialty, then call check_doctor_availability for open slots. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment with that doctor and a real slot_id. Do not read the otp aloud. Call send_booking_otp with otp and expires_seconds only. The SMS goes to the phone the caller is calling from. Then ask the caller to read the six digits and call verify_booking_otp. Confirm only when appointment_confirmed is true.",
   };
 }
 
@@ -174,6 +157,10 @@ export async function handleInboundWebhook(payload: unknown) {
 
   const patient = fromNumber ? await findPatientByPhone(fromNumber) : null;
   const clinic = await buildClinicContext();
+  const activeAppointment = await findActiveAppointmentForMobile({
+    phone: fromNumber,
+    patientId: patient?.id,
+  });
 
   const customVariables: Record<string, string> = {
     ...clinic,
@@ -184,6 +171,16 @@ export async function handleInboundWebhook(payload: unknown) {
     patient_name: patient?.fullName ?? "",
     patient_email: patient?.email ?? "",
     patient_reference: patient?.reference ?? "",
+    // Live DB sync for one-active-appointment rule (Pending/Confirmed).
+    active_appointment_found: activeAppointment ? "true" : "false",
+    active_appointment_reference: activeAppointment?.reference ?? "",
+    active_appointment_status: activeAppointment?.status ?? "",
+    active_appointment_doctor: activeAppointment?.doctorName ?? "",
+    active_appointment_when: activeAppointment
+      ? `${activeAppointment.date} at ${activeAppointment.time}`
+      : "",
+    active_appointment_summary: activeAppointment?.spokenSummary ?? "",
+    active_appointment_block_message: activeAppointment?.blockMessage ?? "",
   };
 
   const callId =
@@ -277,52 +274,12 @@ function extractExecutedValues(payload: unknown) {
 }
 
 async function maybeBookFromDataWebhook(
-  payload: unknown,
-  context: { fromNumber: string; patientId: string | null; callId: string },
-) {
-  const fields = extractVoiceBookingFields(payload);
-  const executed = extractExecutedValues(payload);
-
-  const doctorId =
-    fields.doctorId ||
-    executed.doctor_id ||
-    executed.doctorid ||
-    deepFindString(payload, ["doctor_id", "doctorId"]);
-  const slotId =
-    fields.slotId ||
-    executed.slot_id ||
-    executed.slotid ||
-    deepFindString(payload, ["slot_id", "slotId"]);
-  const reason =
-    fields.reason ||
-    executed.reason ||
-    deepFindString(payload, ["reason", "visit_reason"]) ||
-    "Booked via AI voice receptionist";
-
-  const phone = normalizePhone(fields.phone || context.fromNumber);
-
-  try {
-    const result = await processVoiceBooking({
-      patientId: context.patientId || undefined,
-      phone,
-      patientName: fields.patientName,
-      email: fields.email,
-      doctorId,
-      doctorName: fields.doctorName,
-      slotId: fields.slotId,
-      reason,
-      whenHint: fields.whenHint,
-      allowRegister: true,
-      synthflowCallId: context.callId || undefined,
-    });
-    return result?.appointment ?? null;
-  } catch (error) {
-    console.warn(
-      "[synthflow] Post-call booking skipped:",
-      error instanceof Error ? error.message : error,
-    );
-    return null;
-  }
+  _payload: unknown,
+  _context: { fromNumber: string; patientId: string | null; callId: string },
+): Promise<PublicAppointment | null> {
+  // The live call sends the OTP and confirms only after verify_booking_otp.
+  // Post-call payloads must not confirm the visit or text another code.
+  return null;
 }
 
 export async function handleDataWebhook(payload: unknown) {
@@ -501,101 +458,99 @@ function pickFirstFromExtracted(fields: Record<string, string>, keys: string[]) 
   return "";
 }
 
-export async function handleAvailabilityAction(body: unknown) {
-  const root = asRecord(body);
-  const specialty = pickString(root, ["specialty", "speciality", "department"]).toLowerCase();
-  const doctorNameRaw = pickString(root, ["doctor_name", "doctor", "doctorName"]);
-  const doctorId = pickString(root, ["doctor_id", "doctorId"]);
-  const doctorQuery = doctorNameRaw
-    .toLowerCase()
-    .replace(/^dr\.?\s*/i, "")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
+export async function handleAvailabilityAction(_body: unknown) {
+  const doctor = await ensureClinicDoctorWithSlots(6);
+  if (!doctor) {
+    return {
+      success: true,
+      spoken_summary:
+        "The clinic doctor profile is not set up yet. Ask the caller to try again later.",
+      doctors: [],
+    };
+  }
 
-  const now = new Date();
-  const doctors = await prisma.doctorProfile.findMany({
-    where: {
-      ...(doctorId ? { userId: doctorId } : {}),
-      user: { isActive: true, role: "DOCTOR" },
-      ...(specialty
-        ? { specialty: { name: { contains: specialty, mode: "insensitive" as const } } }
-        : {}),
-    },
-    include: {
-      user: true,
-      specialty: true,
-      availability: {
-        where: { isBooked: false, startsAt: { gt: now } },
-        orderBy: { startsAt: "asc" },
-        take: 6,
-      },
-    },
-    take: 40,
-  });
+  const profile = clinicDoctorProfileBlock(doctor);
+  const intro = formatDoctorSpokenBlurb({
+    fullName: profile.doctorName,
+    specialty: profile.specialty,
+    experienceYears: profile.experienceYears,
+    clinic: profile.hospital === "none" ? "" : profile.hospital,
+    fee: profile.fee === "none" ? "" : profile.fee,
+  }).replace(/^- /, "");
 
-  const matched = doctors.filter((doctor) => {
-    if (!doctorQuery) return true;
-    const hay = doctor.user.fullName
-      .toLowerCase()
-      .replace(/^dr\.?\s*/i, "")
-      .replace(/[^a-z0-9]+/g, " ")
-      .trim();
-    const parts = doctorQuery.split(" ").filter(Boolean);
-    return hay.includes(doctorQuery) || parts.every((part) => hay.includes(part));
-  });
-
-  const sourceDoctors = matched.length ? matched : doctors;
-  const rows = sourceDoctors.map((doctor) => ({
-    doctor_id: doctor.userId,
-    name: doctor.user.fullName,
-    specialty: doctor.specialty.name,
-    clinic: doctor.clinic,
-    fee: doctor.fee,
-    experience_years: doctor.experienceYears,
-    qualifications: doctor.qualifications,
-    professional_bio: doctor.about,
-    available: doctor.availability.length > 0,
-    slots: doctor.availability.map((slot) => ({
-      slot_id: slot.id,
-      starts_at: slot.startsAt.toISOString(),
-      label: slot.startsAt.toLocaleString("en-US", {
-        weekday: "short",
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-      }),
-    })),
+  const slots = doctor.availability.map((slot) => ({
+    slot_id: slot.id,
+    starts_at: slot.startsAt.toISOString(),
+    label: formatClinicDateTime(slot.startsAt),
   }));
-
-  const firstDoctor = sourceDoctors[0];
-  const first = rows[0];
-  const intro = firstDoctor
-    ? formatDoctorSpokenBlurb({
-        fullName: firstDoctor.user.fullName,
-        specialty: firstDoctor.specialty.name,
-        qualifications: firstDoctor.qualifications,
-        certifications: firstDoctor.certifications,
-        experienceYears: firstDoctor.experienceYears,
-        about: firstDoctor.about,
-        clinic: firstDoctor.clinic,
-        fee: firstDoctor.fee,
-        languages: firstDoctor.languages,
-      }).replace(/^- /, "")
-    : "";
-  const spoken_summary = first
-    ? first.available
-      ? `${intro} Next openings: ${first.slots
-          .slice(0, 2)
-          .map((slot) => slot.label)
-          .join("; ")}.`
-      : `${intro} There are no open slots right now.`
-    : "That doctor is not on the current clinic roster.";
+  const openings = slots.slice(0, 2);
+  const spoken_summary = slots.length
+    ? `${intro} Fee is ${profile.fee}. The next open times are ${openings
+        .map((slot) => slot.label)
+        .join(", and ")}. Say both times, then ask which one they want. Do not offer any other time.`
+    : `${intro} Fee is ${profile.fee}. There are no open times right now.`;
 
   return {
     success: true,
     spoken_summary,
-    doctors: rows,
+    doctor_id: profile.doctorId,
+    doctor_name: profile.doctorName,
+    specialty: profile.specialty,
+    hospital: profile.hospital,
+    fee: profile.fee,
+    experience_years: profile.experienceYears,
+    available_days_timings: profile.weeklyHoursSummary,
+    doctors: [
+      {
+        doctor_id: profile.doctorId,
+        name: profile.doctorName,
+        specialty: profile.specialty,
+        clinic: profile.hospital,
+        fee: profile.fee,
+        experience_years: profile.experienceYears,
+        available: slots.length > 0,
+        slots,
+      },
+    ],
+  };
+}
+
+export async function handleCheckAppointmentAction(body: unknown) {
+  const root = asRecord(body);
+  const fields = extractVoiceBookingFields(body);
+  const phone = normalizePhone(
+    pickString(root, ["phone", "phone_number", "caller_phone", "from_number"]) || fields.phone,
+  );
+
+  if (!phone) {
+    return {
+      success: true,
+      has_active_appointment: false,
+      can_book: false,
+      message: "Please repeat the phone number so I can check existing appointments.",
+    };
+  }
+
+  const active = await findActiveAppointmentForMobile({ phone });
+  if (active) {
+    return {
+      success: true,
+      has_active_appointment: true,
+      can_book: false,
+      new_appointment_booked: false,
+      reference: active.reference,
+      status: active.status,
+      doctor: active.doctorName,
+      when: `${active.date} at ${active.time}`,
+      message: `I did not book a new appointment. This number already has an active appointment: ${active.spokenSummary}. Please complete or cancel that one first. After it is completed or cancelled, this number can book a new appointment. If the caller asks whether today's request is confirmed, say no, the new appointment was not booked.`,
+    };
+  }
+
+  return {
+    success: true,
+    has_active_appointment: false,
+    can_book: true,
+    message: "This number has no active appointment. We can book a new one.",
   };
 }
 
@@ -603,33 +558,22 @@ export async function handleBookAction(body: unknown) {
   const root = asRecord(body);
   const fields = extractVoiceBookingFields(body);
   const doctorId = pickString(root, ["doctor_id", "doctorId"]) || fields.doctorId;
+  const doctorName =
+    pickString(root, ["doctor_name", "doctorName", "doctor"]) || fields.doctorName;
   const slotId = pickString(root, ["slot_id", "slotId"]) || fields.slotId;
   const reason =
     pickString(root, ["reason", "visit_reason"]) || fields.reason || "Booked via AI voice receptionist";
-  const phone = normalizePhone(
-    pickString(root, ["phone", "phone_number", "caller_phone", "from_number"]) || fields.phone,
-  );
+  const spokenPhone = normalizePhone(pickString(root, ["phone", "phone_number"]) || fields.phone);
+  const callerPhone = normalizePhone(pickString(root, ["caller_phone", "user_phone_number"]) || "");
+  // OTP SMS is delivered to the inbound caller. Store and verify against that number.
+  const phone = callerPhone || spokenPhone;
+  const smsTo = phone;
   const patientId = pickString(root, ["patient_id", "patientId"]);
   const patientName =
     pickString(root, ["patient_name", "full_name", "name"]) || fields.patientName;
   const email = pickString(root, ["email"]) || fields.email;
   const callId = pickString(root, ["call_id", "callId"]);
 
-<<<<<<< Updated upstream
-  const booked = await processVoiceBooking({
-    patientId: patientId || undefined,
-    phone,
-    patientName,
-    email,
-    doctorId,
-    doctorName: fields.doctorName,
-    slotId,
-    reason,
-    whenHint: fields.whenHint,
-    allowRegister: true,
-    synthflowCallId: callId || undefined,
-  });
-=======
   let booked: Awaited<ReturnType<typeof processVoiceBooking>>;
   try {
     booked = await processVoiceBooking({
@@ -638,9 +582,10 @@ export async function handleBookAction(body: unknown) {
       patientName,
       email,
       doctorId,
-      doctorName: fields.doctorName,
+      doctorName,
       slotId,
       reason,
+      whenHint: fields.whenHint,
       allowRegister: true,
       synthflowCallId: callId || undefined,
     });
@@ -653,7 +598,6 @@ export async function handleBookAction(body: unknown) {
     }
     throw error;
   }
->>>>>>> Stashed changes
 
   if (!booked) {
     return {
@@ -664,6 +608,17 @@ export async function handleBookAction(body: unknown) {
   }
 
   const { appointment, patient } = booked;
+
+  if (booked.alreadyConfirmed) {
+    return {
+      success: true,
+      otp_required: false,
+      appointment_confirmed: true,
+      message: `Appointment ${appointment.reference} is already confirmed with ${appointment.doctorName} on ${appointment.date} at ${appointment.time}.`,
+      patient_id: patient.id,
+      patient_reference: patient.reference,
+    };
+  }
 
   if (callId) {
     await prisma.voiceCall
@@ -679,7 +634,7 @@ export async function handleBookAction(body: unknown) {
           doctorUserId: appointment.doctorId,
           appointmentId: appointment.id,
           modelId: env.SYNTHFLOW_AGENT_ID,
-          summary: `Booked ${appointment.reference}`,
+          summary: `OTP pending for ${appointment.reference}; not confirmed`,
           startedAt: new Date(),
         },
         update: {
@@ -687,19 +642,52 @@ export async function handleBookAction(body: unknown) {
           patientId: patient.id,
           doctorUserId: appointment.doctorId,
           appointmentId: appointment.id,
-          summary: `Booked ${appointment.reference}`,
+          summary: `OTP pending for ${appointment.reference}; not confirmed`,
         },
       })
       .catch(() => undefined);
   }
 
+  console.log(
+    `[synthflow] Booking OTP issued for ${phone}; in-call SMS must text the inbound caller, not the clinic number`,
+  );
+
   return {
     success: true,
-    message: `Appointment ${appointment.reference} confirmed with ${appointment.doctorName} on ${appointment.date} at ${appointment.time}.`,
-    appointment,
+    otp_required: true,
+    appointment_confirmed: false,
+    otp: booked.otp,
+    expires_seconds: booked.expiresSeconds,
+    to_phone_number: smsTo,
+    message: `Do not read the otp aloud. Call send_booking_otp now with this otp and expires_seconds only. Do not set or change the SMS recipient. Synthflow texts the inbound caller on this call (${smsTo}). The code expires in ${booked.expiresSeconds} seconds and works once. Then ask the caller to read the six digits. This appointment is not confirmed until verify_booking_otp returns appointment_confirmed true.`,
     patient_id: patient.id,
     patient_reference: patient.reference,
   };
+}
+
+export async function handleVerifyOtpAction(body: unknown) {
+  const root = asRecord(body);
+  const fields = extractVoiceBookingFields(body);
+  const phone = normalizePhone(
+    pickString(root, ["phone", "phone_number"]) || fields.phone,
+  );
+  const callerPhone = normalizePhone(
+    pickString(root, ["caller_phone", "user_phone_number", "from_number"]) || "",
+  );
+  const otp = pickString(root, ["otp", "code", "verification_code", "pin"]) || fields.otp;
+
+  try {
+    return await verifyBookingOtp({ phone, otp, callerPhone });
+  } catch (error) {
+    if (error instanceof AppError) {
+      return {
+        success: false,
+        appointment_confirmed: false,
+        message: error.message,
+      };
+    }
+    throw error;
+  }
 }
 
 export function getWebhookCallId(payload: unknown) {

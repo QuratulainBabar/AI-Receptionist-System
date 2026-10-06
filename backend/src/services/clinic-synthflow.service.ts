@@ -13,12 +13,21 @@ import {
   createInformationExtractor,
   findActionIdByName,
   findAssistantByPhone,
+  getCustomActionUrl,
   isSynthflowConfigured,
+  synthflowRequest,
   toSynthflowLanguage,
+  synthflowPromptRulePrefix,
   updateAgent,
+  updateCustomActionUrl,
 } from "./synthflow.client.js";
+import {
+  clinicDoctorProfileBlock,
+  formatOpenSlotLabels,
+  getClinicDoctor,
+} from "./clinic-doctor.service.js";
+import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
 import { formatDoctorDirectoryLine, formatDoctorSpokenBlurb } from "./doctor-profile.service.js";
-import { formatWeeklyHoursSummary, parseWeeklyHours } from "../utils/doctor-profile.js";
 
 const SETTINGS_ID = "default";
 
@@ -39,26 +48,20 @@ const APPOINTMENT_EXTRACTORS = [
   {
     kind: "OPEN_QUESTION" as const,
     identifier: "doctor_id",
-    description: "What is the doctor_id if mentioned? Answer none if not mentioned.",
+    description: "What is the clinic doctor_id if mentioned? Answer none if not mentioned.",
     examples: ["cmu16ksa00001vgis6s1oq1m9", "none"],
   },
   {
     kind: "OPEN_QUESTION" as const,
     identifier: "doctor_name",
-    description: "Which doctor did the patient book with? Answer none if no doctor was chosen.",
-    examples: ["Dr. Daniel Osei", "none"],
+    description: "What is the clinic doctor's name if mentioned? Answer none if not mentioned.",
+    examples: ["Dr. Ahmed Khan", "none"],
   },
   {
     kind: "OPEN_QUESTION" as const,
     identifier: "slot_id",
     description: "What is the appointment slot_id if mentioned? Answer none if not mentioned.",
     examples: ["cmu2awlf40008vgfsoulh0ck4", "none"],
-  },
-  {
-    kind: "OPEN_QUESTION" as const,
-    identifier: "specialty",
-    description: "Which specialty did the patient need? Answer none if unclear.",
-    examples: ["Cardiology", "Dermatology", "none"],
   },
   {
     kind: "OPEN_QUESTION" as const,
@@ -94,34 +97,38 @@ function fallbackPrompt(clinicName: string) {
   return `You are the polite, calm, direct, and concise AI phone receptionist for ${clinicName}.
 
 PRIMARY MISSION:
-Help the caller find the right specialty and doctor, book an in-clinic appointment, state the consultation fee, collect name and phone, and confirm with one final summary.
+This clinic has one doctor. Introduce that doctor and specialty, offer real open slots, quote the consultation fee, collect name and phone, and confirm with one final summary.
 
 CRITICAL RULES:
 - Keep every response to 1-2 short sentences. Ask only one question per turn, then wait.
 - Never give medical advice or diagnoses.
-- Quote exact doctor fees from the clinic directory.
+- Never invent another doctor, specialty list, or time.
 - Appointments are 30 minutes, in clinic.
-- One active appointment per mobile: if booking fails because the caller already has a Pending or Confirmed appointment, tell them they must complete or cancel it before booking another. Completed or Cancelled allows a new booking.
-- Share detailed doctor profile information (bio, qualifications, certifications, expertise, hospital, location, languages, weekly hours) ONLY when the caller specifically asks about that doctor. For booking, use specialty, doctor name, fee, consultation type, and available slots unless more detail is requested.
+- One active appointment per mobile: if active_appointment_found is true, tell the caller using active_appointment_block_message and do not book again.
+- When asked about the doctor, share specialty, experience, hospital, and fee only.
 
-Use the live doctors directory injected for this call when available.`;
+Use the Clinic doctor profile injected on sync and on each call.`;
 }
 
-const DIRECTORY_HEADING = "## Live doctor directory";
-const ROSTER_HEADING = "## Current roster";
+const CLINIC_DOCTOR_HEADING = "## Clinic doctor";
 
 export function stripOutdatedDoctorLists(prompt: string) {
   let next = prompt.replace(/\r\n/g, "\n");
-  next = next.replace(/\n## Specialties[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|$)/, "\n");
-  next = next.replace(/\n## Doctors \(quote exact fee\)[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|$)/, "\n");
+  // Drop boot-time rule prefixes — Sync re-adds the current one-doctor versions.
   next = next.replace(
-    /\n## (Availability answers|Live openings|Doctor profiles|Current roster|Live doctor directory)[\s\S]*$/,
+    /^(BOOKING OTP RULE:|AVAILABILITY SPEAK RULE:|PHONE APPOINTMENT RULE)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
+    "",
+  );
+  next = next.replace(/\n## Specialties[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|\n## Clinic doctor|$)/, "\n");
+  next = next.replace(/\n## Doctors \(quote exact fee\)[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|\n## Clinic doctor|$)/, "\n");
+  next = next.replace(
+    /\n## (Availability answers|Live openings|Doctor profiles|Current roster|Live doctor directory|Clinic doctor)[\s\S]*$/g,
     "",
   );
   next = next.replace(/^\s*- (Cardiology|Dermatology|Neurology|Pediatrics|Orthopedics|General Medicine): ONLY .+$/gm, "");
   next = next.replace(
     /If caller asks generally "What specialties do you have\?", say: "We offer .+ Which one do you need\?"/,
-    "If caller asks generally what specialties you have, list ONLY specialties from the Current roster, then ask which one they need.",
+    "This clinic has one doctor. Introduce that doctor and specialty; do not list other specialties.",
   );
   return next.replace(/\n{3,}/g, "\n\n").trim();
 }
@@ -132,115 +139,75 @@ export function mergeDirectoryIntoPrompt(basePrompt: string, knowledge: string) 
 }
 
 export async function buildDoctorsDirectoryKnowledge() {
-  const now = new Date();
-  const doctors = await prisma.doctorProfile.findMany({
-    where: { user: { isActive: true, role: "DOCTOR" } },
-    include: {
-      user: true,
-      specialty: true,
-      availability: {
-        where: { isBooked: false, startsAt: { gt: now } },
-        orderBy: { startsAt: "asc" },
-        take: 4,
-      },
-    },
-    orderBy: { user: { fullName: "asc" } },
-    take: 100,
-  });
-
-  const bySpecialty = new Map<string, string[]>();
-  for (const doctor of doctors) {
-    const specialtyName = doctor.specialty.name;
-    const names = bySpecialty.get(specialtyName) ?? [];
-    names.push(doctor.user.fullName);
-    bySpecialty.set(specialtyName, names);
+  let doctor = await getClinicDoctor({ openSlotsTake: 8 });
+  if (!doctor) {
+    return {
+      doctorsCount: 0,
+      knowledge: [
+        `${CLINIC_DOCTOR_HEADING} (source of truth)`,
+        "No active doctor profile is configured in the Doctor Dashboard yet.",
+        "Do not invent a doctor. Ask the caller to try again after the clinic finishes setup.",
+      ].join("\n"),
+    };
   }
-  const rosterLines = [...bySpecialty.entries()].map(
-    ([specialty, names]) => `- ${specialty}: ${names.join(", ")}`,
-  );
-  const specialtyNames = [...bySpecialty.keys()];
 
-  const openingLines: string[] = [];
-  const profileBlurbs: string[] = [];
-  const lines = doctors.map((doctor) => {
-    const slotLabels = doctor.availability
-      .map((slot) => {
-        const when = slot.startsAt.toLocaleString("en-US", {
-          weekday: "short",
-          month: "short",
-          day: "numeric",
-          hour: "numeric",
-          minute: "2-digit",
-        });
-        return `${when} [slot:${slot.id}]`;
-      });
-    const slots = slotLabels.join("; ");
-    openingLines.push(
-      doctor.availability.length
-        ? `${doctor.user.fullName} (${doctor.specialty.name}, ${doctor.fee}): AVAILABLE — ${slotLabels.slice(0, 2).join("; ")}`
-        : `${doctor.user.fullName} (${doctor.specialty.name}): no open slots right now`,
-    );
-    profileBlurbs.push(
-      formatDoctorSpokenBlurb({
-        fullName: doctor.user.fullName,
-        specialty: doctor.specialty.name,
-        qualifications: doctor.qualifications,
-        certifications: doctor.certifications,
-        experienceYears: doctor.experienceYears,
-        about: doctor.about,
-        clinic: doctor.clinic,
-        fee: doctor.fee,
-        languages: doctor.languages,
-      }),
-    );
+  // Weekly hours alone are not enough — auto-materialize open slots so the agent has real times.
+  if (doctor.availability.length === 0 && doctor.weeklyHours != null) {
+    await generateSlotsFromWeeklyHours(doctor.userId, { weeks: 2, allowEmpty: true });
+    doctor = (await getClinicDoctor({ openSlotsTake: 8 })) ?? doctor;
+  }
 
-    const weeklyHoursSummary = formatWeeklyHoursSummary(parseWeeklyHours(doctor.weeklyHours));
-
-    return formatDoctorDirectoryLine({
-      fullName: doctor.user.fullName,
-      doctorId: doctor.userId,
-      specialty: doctor.specialty.name,
-      subSpecialty: doctor.subSpecialty,
-      qualifications: doctor.qualifications,
-      certifications: doctor.certifications,
-      experienceYears: doctor.experienceYears,
-      about: doctor.about,
-      areasOfExpertise: doctor.areasOfExpertise,
-      clinic: doctor.clinic,
-      fee: doctor.fee,
-      consultationType: doctor.consultationType,
-      languages: doctor.languages,
-      location: doctor.location,
-      weeklyHoursSummary,
-      nextSlots: slots || "none",
-    });
+  const profile = clinicDoctorProfileBlock(doctor);
+  const spoken = formatDoctorSpokenBlurb({
+    fullName: profile.doctorName,
+    specialty: profile.specialty,
+    experienceYears: profile.experienceYears,
+    clinic: profile.hospital === "none" ? "" : profile.hospital,
+    fee: profile.fee === "none" ? "" : profile.fee,
+  });
+  const openingLabels = formatOpenSlotLabels(doctor.availability, {
+    withIds: false,
+    limit: 2,
+  });
+  const directoryLine = formatDoctorDirectoryLine({
+    fullName: profile.doctorName,
+    doctorId: profile.doctorId,
+    specialty: profile.specialty,
+    experienceYears: profile.experienceYears,
+    clinic: profile.hospital === "none" ? "" : profile.hospital,
+    fee: profile.fee === "none" ? "" : profile.fee,
+    weeklyHoursSummary: profile.weeklyHoursSummary,
+    nextSlots: profile.openSlots,
   });
 
   return {
-    doctorsCount: doctors.length,
+    doctorsCount: 1,
+    clinicDoctorName: profile.doctorName,
+    clinicDoctorId: profile.doctorId,
     knowledge: [
-      "## Availability answers (mandatory)",
-      "You CAN check availability. Use Live openings below. NEVER say you cannot check availability or calendars.",
-      "If asked whether a doctor is available, share experience, qualifications, and bio, then yes/no, the next 1-2 times and fee, then ask if they want to book.",
+      `${CLINIC_DOCTOR_HEADING} (source of truth — one doctor only)`,
+      "This clinic has exactly ONE doctor. Never mention any other doctor or specialty menu.",
+      "IGNORE any older doctor names elsewhere in this prompt if they conflict with this Clinic doctor block.",
+      `Doctor name: ${profile.doctorName}`,
+      `doctor_id: ${profile.doctorId}`,
+      `Specialty: ${profile.specialty || "none"}`,
+      `Hospital name: ${profile.hospital}`,
+      `Consultation fee: ${profile.fee}`,
+      `Years of experience: ${profile.experienceYears}`,
+      `Available days and timings: ${profile.weeklyHoursSummary}`,
+      `Bookable open slots: ${profile.openSlots}`,
       "",
-      "## Live openings",
-      openingLines.join("\n") || "No open slots.",
+      "## How to use this profile",
+      `- When the caller wants an appointment, introduce ${profile.doctorName} and specialty ${profile.specialty || "the clinic specialty"}, then quote fee ${profile.fee}.`,
+      "- Offer ONLY bookable open slots listed above or returned by check_doctor_availability. Never invent a time.",
+      "- When the caller asks about the doctor, share specialty, years of experience, hospital, fee, and usual days/timings only. Do not invent bio or credentials.",
+      `- Spoken intro: ${spoken.replace(/^- /, "")}`,
+      openingLabels.length
+        ? `- Next open times to offer first: ${openingLabels.join(", and ")}`
+        : "- There are no open bookable slots right now.",
       "",
-      "## Doctor profiles (say these on the call)",
-      "When a doctor is named, chosen, or asked about, you MUST share experience, qualifications, and professional bio from this list. Use 2 short sentences, then fee and next slot.",
-      "Never invent qualifications or bio. If a field is missing, skip it.",
-      profileBlurbs.join("\n") || "- none",
-      "",
-      `${ROSTER_HEADING} (source of truth — ignore any older doctor names above)`,
-      `Specialties now available: ${specialtyNames.join(", ") || "none"}.`,
-      "List ONLY these doctors for each specialty:",
-      rosterLines.join("\n") || "- none",
-      "",
-      `${DIRECTORY_HEADING} (active profiles)`,
-      "Use doctor_id / slot_id and exact consultation_fee when booking.",
-      "When discussing a doctor, speak experience_years, qualifications, certifications, and professional_bio from the Doctor profiles section.",
-      "Then offer fee and next_slots.",
-      lines.join("\n") || "No doctors currently available.",
+      "## Compact directory line",
+      directoryLine,
     ].join("\n"),
   };
 }
@@ -273,38 +240,43 @@ const AVAILABILITY_ACTION_NAME = "check_doctor_availability";
 async function ensureAvailabilityCustomAction(existingIds: string[]) {
   const urls = synthflowWebhookUrls();
   let actionId = await findActionIdByName(AVAILABILITY_ACTION_NAME);
+  if (actionId) {
+    const current = await getCustomActionUrl(actionId).catch(() => null);
+    if (current !== urls.availabilityAction) {
+      await updateCustomActionUrl(actionId, urls.availabilityAction).catch((error) => {
+        console.warn(
+          "[synthflow] availability action URL refresh failed:",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    }
+  }
   if (!actionId) {
     try {
       const created = await createCustomAction({
         name: AVAILABILITY_ACTION_NAME,
         description:
-          "Check whether a named doctor has open appointment slots. Call this whenever the caller asks if a doctor is available or wants times.",
+          "Check the clinic doctor's open appointment slots. Call this whenever the caller asks for availability or wants times.",
         url: urls.availabilityAction,
         jsonBody: {
           doctor_name: "<doctor_name>",
           doctor_id: "<doctor_id>",
-          specialty: "<specialty>",
         },
         variables: [
           {
             name: "doctor_name",
-            description: "Doctor the caller asked about, for example Dr. Qurat ul Ain",
-            example: "Dr. Qurat ul Ain",
+            description: "Clinic doctor name if spoken, otherwise empty",
+            example: "Dr. Ahmed Khan",
           },
           {
             name: "doctor_id",
-            description: "doctor_id from the live directory if known, otherwise empty",
+            description: "doctor_id from the Clinic doctor profile if known, otherwise empty",
             example: "cmutnug6e0000t91wz8sug0jy",
-          },
-          {
-            name: "specialty",
-            description: "Specialty if mentioned, otherwise empty",
-            example: "General Physician",
           },
         ],
         prompt:
-          "Use spoken_summary from the response. First share experience, qualifications, and bio, then the next 1-2 times and fee. Never say you cannot check availability.",
-        messageError: "I can still see openings in our clinic directory. Let me share the next times.",
+          "Say spoken_summary exactly. Introduce the clinic doctor and specialty, then fee and the next open times. Never invent another doctor or time.",
+        messageError: "Let me check the clinic doctor's open times.",
       });
       actionId = created.action_id;
     } catch (error) {
@@ -324,12 +296,41 @@ const BOOK_ACTION_NAME = "book_appointment";
 async function ensureBookCustomAction(existingIds: string[]) {
   const urls = synthflowWebhookUrls();
   let actionId = await findActionIdByName(BOOK_ACTION_NAME);
+  if (actionId) {
+    const current = await getCustomActionUrl(actionId).catch(() => null);
+    if (current !== urls.bookAction) {
+      await updateCustomActionUrl(actionId, urls.bookAction).catch((error) => {
+        console.warn(
+          "[synthflow] book action URL refresh failed:",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    }
+    await synthflowRequest("PUT", `/actions/${encodeURIComponent(actionId)}`, {
+      CUSTOM_ACTION: {
+        json_body_stringified: JSON.stringify({
+          doctor_name: "<doctor_name>",
+          doctor_id: "<doctor_id>",
+          slot_id: "<slot_id>",
+          patient_name: "<patient_name>",
+          phone: "<phone>",
+          reason: "<reason>",
+          caller_phone: "<user_phone_number>",
+        }),
+      },
+    }).catch((error) => {
+      console.warn(
+        "[synthflow] book action caller phone refresh failed:",
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }
   if (!actionId) {
     try {
       const created = await createCustomAction({
         name: BOOK_ACTION_NAME,
         description:
-          "Create the clinic appointment after the caller confirms a doctor and time. Always send doctor_name plus slot_id from Live openings when possible.",
+          "Create the clinic appointment with the clinic's one doctor after the caller confirms a time. Send doctor_id/doctor_name plus slot_id from bookable open slots when possible.",
         url: urls.bookAction,
         jsonBody: {
           doctor_name: "<doctor_name>",
@@ -338,6 +339,7 @@ async function ensureBookCustomAction(existingIds: string[]) {
           patient_name: "<patient_name>",
           phone: "<phone>",
           reason: "<reason>",
+          caller_phone: "<user_phone_number>",
         },
         variables: [
           {
@@ -372,8 +374,9 @@ async function ensureBookCustomAction(existingIds: string[]) {
           },
         ],
         prompt:
-          "If success is true, confirm the appointment reference. If it failed, apologize and offer another slot_id from Live openings.",
-        messageError: "I could not save that booking yet. Let me offer another open time.",
+          "This does not confirm the appointment. If success is true, do not read otp aloud. Call send_booking_otp with otp and expires_seconds only. The SMS is sent to the phone the caller is calling from. Then ask the caller to read the six digits and call verify_booking_otp. If success is false, speak the response message and do not say the appointment is booked.",
+        messageError:
+          "Booking could not be completed. If you already have an active appointment, please complete or cancel it first.",
       });
       actionId = created.action_id;
     } catch (error) {
@@ -407,6 +410,8 @@ export type PublicClinicVoiceSettings = {
   synthflowConfigured: boolean;
   webhookUrls: ReturnType<typeof synthflowWebhookUrls>;
   doctorsCount: number;
+  clinicDoctorName: string | null;
+  clinicDoctorId: string | null;
 };
 
 async function getOrCreateSettings() {
@@ -428,7 +433,8 @@ async function getOrCreateSettings() {
 
 export async function getClinicVoiceSettings(): Promise<PublicClinicVoiceSettings> {
   const row = await getOrCreateSettings();
-  const { doctorsCount } = await buildDoctorsDirectoryKnowledge();
+  const { doctorsCount, clinicDoctorName, clinicDoctorId } =
+    await buildDoctorsDirectoryKnowledge();
   return {
     id: row.id,
     clinicName: row.clinicName,
@@ -443,6 +449,8 @@ export async function getClinicVoiceSettings(): Promise<PublicClinicVoiceSetting
     synthflowConfigured: isSynthflowConfigured(),
     webhookUrls: synthflowWebhookUrls(),
     doctorsCount,
+    clinicDoctorName: clinicDoctorName ?? null,
+    clinicDoctorId: clinicDoctorId ?? null,
   };
 }
 
@@ -489,6 +497,8 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     input?.firstMessage?.trim() ||
     settings.agentFirstMessage.trim() ||
     defaultGreeting(clinicName);
+  // Always prefer the one-to-one prompt from agent-prompt.md so Sync refreshes
+  // multi-doctor language left in older stored prompts.
   const filePrompt = loadDefaultPromptFromFile();
   const storedPrompt =
     input?.systemPrompt?.trim() ||
@@ -499,11 +509,18 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     stripOutdatedDoctorLists(storedPrompt) ||
     fallbackPrompt(clinicName);
 
-  const { knowledge, doctorsCount } = await buildDoctorsDirectoryKnowledge();
-  const fullPrompt = mergeDirectoryIntoPrompt(
-    stripOutdatedDoctorLists(basePrompt) || loadDefaultPromptFromFile() || fallbackPrompt(clinicName),
+  const { knowledge, doctorsCount, clinicDoctorName, clinicDoctorId } =
+    await buildDoctorsDirectoryKnowledge();
+  console.log(
+    `[synthflow] Syncing clinic doctor → ${clinicDoctorName || "none"} (${clinicDoctorId || "n/a"})`,
+  );
+  const bodyPrompt = mergeDirectoryIntoPrompt(
+    stripOutdatedDoctorLists(basePrompt) || filePrompt || fallbackPrompt(clinicName),
     knowledge,
   );
+  // Always push OTP/availability/phone rules with the one-doctor body so Fine-tuner
+  // never keeps an old multi-doctor prompt that only had rules prepended on boot.
+  const fullPrompt = `${synthflowPromptRulePrefix()}\n\n${bodyPrompt}`;
 
   const phone = normalizePhone(
     input?.phoneNumber || settings.phoneNumber || env.SYNTHFLOW_PHONE_NUMBER || "",
@@ -616,6 +633,8 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     synthflowAgentId: modelId,
     phoneNumber: phone || null,
     doctorsCount,
+    clinicDoctorName: clinicDoctorName ?? null,
+    clinicDoctorId: clinicDoctorId ?? null,
     webhookUrls: urls,
     warning: warnings.length ? warnings.join(" ") : null,
     settings: await getClinicVoiceSettings(),
@@ -627,9 +646,10 @@ export async function syncClinicDirectoryToSynthflow() {
   if (!settings.synthflowAgentId) {
     throw new AppError(400, "Create a Synthflow agent first");
   }
+  // Do not pass the previous full prompt (it may still name an old doctor).
+  // createOrUpdateClinicSynthflowAgent reloads agent-prompt.md + live Clinic doctor.
   return createOrUpdateClinicSynthflowAgent({
     firstMessage: settings.agentFirstMessage,
-    systemPrompt: settings.agentSystemPrompt,
     phoneNumber: settings.phoneNumber,
     language: settings.agentLanguage,
     voiceId: settings.agentVoiceId,

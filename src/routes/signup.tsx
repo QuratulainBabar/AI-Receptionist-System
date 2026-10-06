@@ -65,7 +65,14 @@ function SignupPage() {
         role,
       });
       saveAuth(result.user, result.token);
-      await navigate({ to: homeForRole(result.user.role) });
+      if (result.user.role === "doctor") {
+        await navigate({
+          to: "/doctor/onboarding",
+          search: { checkout: undefined, payment: undefined },
+        });
+      } else {
+        await navigate({ to: homeForRole(result.user.role) });
+      }
     } catch (err) {
       setError(formatApiError(err, "Unable to create account."));
     } finally {
@@ -113,7 +120,7 @@ function SignupPage() {
         <Field label="Full name">
           <Input
             className="border-border bg-card"
-            placeholder={role === "doctor" ? "Dr. Daniel Osei" : "Maya Okonkwo"}
+            placeholder="Enter your full name"
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
             required

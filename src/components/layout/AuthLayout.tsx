@@ -16,7 +16,7 @@ export function AuthLayout({
 }) {
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
-      <aside className="hidden flex-col justify-between bg-[oklch(0.32_0.045_245)] p-10 text-primary-foreground lg:flex">
+      <aside className="hidden flex-col justify-between bg-primary p-10 text-primary-foreground lg:flex">
         <div className="flex items-center gap-2.5">
           <div className="grid size-9 place-items-center rounded-xl bg-primary-foreground/15 font-display text-sm font-semibold">
             AR

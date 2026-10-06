@@ -75,6 +75,7 @@ function DoctorRecords() {
             appointments: result.appointments,
             history: result.history,
             records: result.records,
+            recordGroups: result.recordGroups ?? [],
           });
         }
       })
@@ -116,6 +117,20 @@ function DoctorRecords() {
   const patient = file?.patient;
   const history = file?.history;
   const records = file?.records ?? [];
+  const groups =
+    file?.recordGroups?.length
+      ? file.recordGroups
+      : records.length
+        ? [
+            {
+              appointmentId: null,
+              appointmentReference: null,
+              appointmentDate: null,
+              label: "Uploaded documents",
+              uploadDates: [{ date: "All uploads", records }],
+            },
+          ]
+        : [];
 
   return (
     <>
@@ -178,32 +193,44 @@ function DoctorRecords() {
             </Panel>
 
             <section>
-              <SectionLabel className="mb-3">Uploaded documents</SectionLabel>
-              {records.length === 0 ? (
+              <SectionLabel className="mb-3">Uploaded documents by appointment</SectionLabel>
+              {groups.length === 0 ? (
                 <EmptyNote>No uploaded documents for this patient yet.</EmptyNote>
               ) : (
-                <div className="space-y-2">
-                  {records.map((record) => (
-                    <Panel key={record.id} className="flex items-center gap-3 p-3.5">
-                      <div className="grid size-10 shrink-0 place-items-center rounded-md bg-secondary font-mono text-[10px] uppercase text-secondary-foreground">
-                        {record.name.split(".").pop()}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-medium">{record.name}</p>
-                        <p className="font-mono text-[10px] text-muted-foreground">
-                          {record.date} · {record.size} · {record.uploadedBy}
-                        </p>
-                      </div>
-                      <Badge tone="primary">{record.type}</Badge>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={openingId === record.id}
-                        onClick={() => void viewRecord(record.id)}
-                      >
-                        {openingId === record.id ? "Opening…" : "View"}
-                      </Button>
-                    </Panel>
+                <div className="space-y-5">
+                  {groups.map((group) => (
+                    <div key={group.appointmentId || group.label} className="space-y-2">
+                      <p className="text-[13px] font-semibold">{group.label}</p>
+                      {group.uploadDates.map((bucket) => (
+                        <div key={`${group.label}-${bucket.date}`} className="space-y-2">
+                          <p className="font-mono text-[11px] text-muted-foreground">
+                            Uploaded {bucket.date}
+                          </p>
+                          {bucket.records.map((record) => (
+                            <Panel key={record.id} className="flex items-center gap-3 p-3.5">
+                              <div className="grid size-10 shrink-0 place-items-center rounded-md bg-secondary font-mono text-[10px] uppercase text-secondary-foreground">
+                                {record.name.split(".").pop()}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[13px] font-medium">{record.name}</p>
+                                <p className="font-mono text-[10px] text-muted-foreground">
+                                  {record.date} · {record.size} · {record.uploadedBy}
+                                </p>
+                              </div>
+                              <Badge tone="primary">{record.type}</Badge>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={openingId === record.id}
+                                onClick={() => void viewRecord(record.id)}
+                              >
+                                {openingId === record.id ? "Opening…" : "View"}
+                              </Button>
+                            </Panel>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
                   ))}
                 </div>
               )}

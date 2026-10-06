@@ -49,7 +49,7 @@ type BadgeTone = "primary" | "success" | "warning" | "destructive" | "muted" | "
 
 const badgeTones: Record<BadgeTone, string> = {
   primary: "bg-primary/10 text-primary",
-  success: "bg-[oklch(0.95_0.03_175)] text-success",
+  success: "bg-success/10 text-success",
   warning: "bg-warning/18 text-warning-foreground",
   destructive: "bg-destructive/10 text-destructive",
   muted: "bg-muted text-muted-foreground",

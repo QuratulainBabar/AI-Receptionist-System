@@ -9,6 +9,9 @@ import {
   splitListInput,
   type WeeklyHourSlot,
 } from "../utils/doctor-profile.js";
+import { clinicTimeZone } from "../utils/clinic-time.js";
+
+const UNSPECIFIED_SPECIALTY_ID = "unspecified";
 
 export type DoctorProfileDto = {
   id: string;
@@ -31,6 +34,7 @@ export type DoctorProfileDto = {
   location: string;
   weeklyHours: WeeklyHourSlot[];
   weeklyHoursSummary: string;
+  timezone: string;
   rating: number;
   reviews: number;
   isVerified: boolean;
@@ -40,6 +44,8 @@ export type DoctorProfileDto = {
 
 export type UpdateDoctorProfileInput = {
   specialtyId?: string;
+  /** Free-text specialty for one-to-one clinics (creates/finds Specialty by name). */
+  specialty?: string;
   subSpecialty?: string;
   qualifications?: string[] | string;
   certifications?: string[] | string;
@@ -53,6 +59,45 @@ export type UpdateDoctorProfileInput = {
   location?: string;
   weeklyHours?: WeeklyHourSlot[] | unknown;
 };
+
+async function resolveSpecialtyId(input: { specialtyId?: string; specialty?: string }) {
+  const specialtyId = input.specialtyId?.trim();
+  if (specialtyId) {
+    const byId = await prisma.specialty.findUnique({ where: { id: specialtyId } });
+    if (!byId) throw new AppError(400, "Selected specialty was not found");
+    return byId.id;
+  }
+
+  const specialtyName = input.specialty?.trim();
+  if (!specialtyName) return undefined;
+
+  const existing = await prisma.specialty.findFirst({
+    where: { name: { equals: specialtyName, mode: "insensitive" } },
+  });
+  if (existing) return existing.id;
+
+  const idBase = specialtyName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .slice(0, 48) || "specialty";
+  let id = idBase;
+  let attempt = 0;
+  while (await prisma.specialty.findUnique({ where: { id } })) {
+    attempt += 1;
+    id = `${idBase}-${attempt}`;
+  }
+
+  const created = await prisma.specialty.create({
+    data: {
+      id,
+      name: specialtyName,
+      description: specialtyName,
+      sortOrder: 100,
+    },
+  });
+  return created.id;
+}
 
 function toDto(profile: {
   id: string;
@@ -69,6 +114,7 @@ function toDto(profile: {
   consultationType: string;
   languages: string[];
   location: string;
+  timezone?: string;
   weeklyHours: unknown;
   rating: number;
   reviews: number;
@@ -86,7 +132,10 @@ function toDto(profile: {
     email: profile.user.email,
     reference: profile.user.reference,
     specialtyId: profile.specialtyId,
-    specialty: profile.specialty.name,
+    specialty:
+      profile.specialtyId === UNSPECIFIED_SPECIALTY_ID || !profile.specialty.name.trim()
+        ? ""
+        : profile.specialty.name,
     subSpecialty: profile.subSpecialty,
     qualifications: profile.qualifications,
     certifications: profile.certifications,
@@ -100,6 +149,7 @@ function toDto(profile: {
     location: profile.location,
     weeklyHours,
     weeklyHoursSummary: formatWeeklyHoursSummary(weeklyHours),
+    timezone: clinicTimeZone(),
     rating: profile.rating,
     reviews: profile.reviews,
     isVerified: profile.isVerified,
@@ -109,6 +159,30 @@ function toDto(profile: {
 }
 
 export { toDto as toDoctorProfileDto };
+
+async function ensureUnspecifiedSpecialty() {
+  return prisma.specialty.upsert({
+    where: { id: UNSPECIFIED_SPECIALTY_ID },
+    create: {
+      id: UNSPECIFIED_SPECIALTY_ID,
+      name: "",
+      description: "Not set yet",
+      sortOrder: 999,
+    },
+    update: {},
+  });
+}
+
+export async function alignDoctorTimeZones() {
+  const zone = clinicTimeZone();
+  const result = await prisma.doctorProfile.updateMany({
+    where: { NOT: { timezone: zone } },
+    data: { timezone: zone },
+  });
+  if (result.count > 0) {
+    console.log(`[clinic-time] Aligned ${result.count} doctor profile(s) to ${zone}`);
+  }
+}
 
 export async function ensureDoctorProfileForUser(userId: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
@@ -122,22 +196,24 @@ export async function ensureDoctorProfileForUser(userId: string) {
   });
   if (existing) return existing;
 
-  const specialty =
-    (await prisma.specialty.findUnique({ where: { id: "general" } })) ||
-    (await prisma.specialty.findFirst({ orderBy: { sortOrder: "asc" } }));
-  if (!specialty) {
-    throw new AppError(400, "No specialties are configured. Seed specialties first.");
-  }
+  // New doctors start with an empty profile — only placeholders in the UI.
+  await ensureUnspecifiedSpecialty();
 
   return prisma.doctorProfile.create({
     data: {
       userId,
-      specialtyId: specialty.id,
+      specialtyId: UNSPECIFIED_SPECIALTY_ID,
       experienceYears: 0,
       clinic: "",
       fee: "",
       about: "",
-      languages: ["English"],
+      qualifications: [],
+      certifications: [],
+      areasOfExpertise: [],
+      languages: [],
+      location: "",
+      subSpecialty: "",
+      timezone: clinicTimeZone(),
       weeklyHours: defaultWeeklyHours() as unknown as Prisma.InputJsonValue,
     },
     include: { user: true, specialty: true },
@@ -178,13 +254,10 @@ export async function updateDoctorProfileForDoctor(
 ): Promise<DoctorProfileDto> {
   await requireDoctorProfile(doctorUserId, options);
 
-  const specialtyId = input.specialtyId?.trim();
-  if (specialtyId) {
-    const specialty = await prisma.specialty.findUnique({ where: { id: specialtyId } });
-    if (!specialty) {
-      throw new AppError(400, "Selected specialty was not found");
-    }
-  }
+  const specialtyId = await resolveSpecialtyId({
+    specialtyId: input.specialtyId,
+    specialty: input.specialty,
+  });
 
   const experienceYears =
     input.experienceYears == null
@@ -229,6 +302,7 @@ export async function updateDoctorProfileForDoctor(
     ...(consultationType ? { consultationType } : {}),
     ...(input.languages !== undefined ? { languages: splitListInput(input.languages) } : {}),
     ...(input.location !== undefined ? { location: String(input.location).trim() } : {}),
+    timezone: clinicTimeZone(),
     ...(weeklyHours !== undefined
       ? { weeklyHours: weeklyHours as unknown as Prisma.InputJsonValue }
       : {}),
@@ -251,35 +325,28 @@ export function formatDoctorDirectoryLine(input: {
   fullName: string;
   doctorId: string;
   specialty: string;
+  experienceYears?: number;
+  clinic: string;
+  fee: string;
+  weeklyHoursSummary?: string;
+  nextSlots?: string;
+  /** @deprecated unused — kept for call-site compatibility */
   subSpecialty?: string;
   qualifications?: string[];
   certifications?: string[];
-  experienceYears?: number;
   about?: string;
   areasOfExpertise?: string[];
-  clinic: string;
-  fee: string;
   consultationType?: string;
   languages?: string[];
   location?: string;
-  weeklyHoursSummary?: string;
-  nextSlots?: string;
 }) {
   return [
     `Doctor: ${input.fullName}`,
     `doctor_id: ${input.doctorId}`,
     `specialty: ${input.specialty}`,
-    `sub_specialty: ${input.subSpecialty?.trim() || "none"}`,
-    `qualifications: ${(input.qualifications || []).join(", ") || "none"}`,
-    `certifications: ${(input.certifications || []).join(", ") || "none"}`,
     `experience_years: ${input.experienceYears ?? 0}`,
-    `professional_bio: ${input.about?.trim() || "none"}`,
-    `areas_of_expertise: ${(input.areasOfExpertise || []).join(", ") || "none"}`,
     `hospital: ${input.clinic}`,
     `consultation_fee: ${input.fee}`,
-    `consultation_type: ${input.consultationType || "In clinic"}`,
-    `languages: ${(input.languages || []).join(", ") || "English"}`,
-    `location: ${input.location?.trim() || "none"}`,
     `available_days_timings: ${input.weeklyHoursSummary || "see next_slots"}`,
     `next_slots: ${input.nextSlots || "none"}`,
   ].join(" | ");
@@ -289,18 +356,15 @@ export function formatDoctorDirectoryLine(input: {
 export function formatDoctorSpokenBlurb(input: {
   fullName: string;
   specialty: string;
-  qualifications?: string[];
-  certifications?: string[];
   experienceYears?: number;
-  about?: string;
   clinic?: string;
   fee?: string;
+  /** @deprecated unused — kept for call-site compatibility */
+  qualifications?: string[];
+  certifications?: string[];
+  about?: string;
   languages?: string[];
 }) {
-  const quals = (input.qualifications || []).map((item) => item.trim()).filter(Boolean);
-  const certs = (input.certifications || []).map((item) => item.trim()).filter(Boolean);
-  const bio = input.about?.trim();
-  const languages = (input.languages || []).map((item) => item.trim()).filter(Boolean);
   const lead = [
     `${input.fullName} is a ${input.specialty}`,
     input.experienceYears ? `with ${input.experienceYears} years of experience` : "",
@@ -309,11 +373,7 @@ export function formatDoctorSpokenBlurb(input: {
     .join(" ");
   const parts = [
     lead,
-    quals.length ? `Qualifications: ${quals.join(", ")}` : "",
-    certs.length ? `Certifications: ${certs.join(", ")}` : "",
-    bio || "",
     input.clinic?.trim() ? `Hospital: ${input.clinic.trim()}` : "",
-    languages.length ? `Languages: ${languages.join(", ")}` : "",
     input.fee?.trim() ? `Fee ${input.fee.trim()}` : "",
   ].filter(Boolean);
   return `- ${parts.join(". ")}.`;

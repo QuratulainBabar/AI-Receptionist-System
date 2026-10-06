@@ -51,8 +51,6 @@ function AdminDashboard() {
     return () => window.removeEventListener("focus", onFocus);
   }, [loadStats]);
 
-  const inactiveTotal = (stats?.inactiveDoctors ?? 0) + (stats?.inactivePatients ?? 0);
-
   return (
     <>
       <PageHeader
@@ -69,6 +67,9 @@ function AdminDashboard() {
             </Link>
             <Link to="/admin/synthflow">
               <Button variant="outline">Synthflow</Button>
+            </Link>
+            <Link to="/admin/subscriptions">
+              <Button variant="outline">Subscriptions</Button>
             </Link>
             <Link to="/admin/patients">
               <Button>Patients</Button>
@@ -110,9 +111,9 @@ function AdminDashboard() {
               detail="Calls linked to APT"
             />
             <StatCard
-              label="Inactive accounts"
-              value={String(inactiveTotal)}
-              detail={`${stats?.inactiveDoctors ?? 0} doctors · ${stats?.inactivePatients ?? 0} patients`}
+              label="Subscriptions"
+              value={String(stats?.activeSubscriptions ?? "—")}
+              detail="Active or trialing doctors"
             />
           </div>
 

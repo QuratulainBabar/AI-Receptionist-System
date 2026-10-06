@@ -1,5 +1,17 @@
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
+import {
+  addCivilDays,
+  civilDateKey,
+  clinicTimeZone,
+  clinicTimeZoneLabel,
+  formatClinicDate,
+  formatClinicInput,
+  formatClinicTime,
+  parseClinicDateTime,
+  wallTimeToUtc,
+  weekdayNameForCivilDate,
+} from "../utils/clinic-time.js";
 import { parseWeeklyHours, WEEKDAYS } from "../utils/doctor-profile.js";
 
 const SLOT_MINUTES = 30;
@@ -7,6 +19,8 @@ const SLOT_MINUTES = 30;
 export type PublicDoctorSlot = {
   id: string;
   startsAt: string;
+  /** Clinic-zone wall clock (`YYYY-MM-DDTHH:mm`) for the doctor's time input. */
+  startsAtLocal: string;
   date: string;
   time: string;
   isBooked: boolean;
@@ -14,6 +28,13 @@ export type PublicDoctorSlot = {
   appointmentReference: string | null;
   patientName: string | null;
 };
+
+export function clinicClock() {
+  return {
+    clinicTimeZone: clinicTimeZone(),
+    clinicTimeZoneLabel: clinicTimeZoneLabel(),
+  };
+}
 
 async function requireDoctorProfile(doctorUserId: string, options?: { requireActive?: boolean }) {
   const profile = await prisma.doctorProfile.findUnique({
@@ -30,20 +51,11 @@ async function requireDoctorProfile(doctorUserId: string, options?: { requireAct
 }
 
 function formatDateLabel(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatClinicDate(date);
 }
 
 function formatTimeLabel(date: Date) {
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  return formatClinicTime(date);
 }
 
 function toPublicSlot(row: {
@@ -59,6 +71,7 @@ function toPublicSlot(row: {
   return {
     id: row.id,
     startsAt: row.startsAt.toISOString(),
+    startsAtLocal: formatClinicInput(row.startsAt),
     date: formatDateLabel(row.startsAt),
     time: formatTimeLabel(row.startsAt),
     isBooked: row.isBooked,
@@ -69,12 +82,11 @@ function toPublicSlot(row: {
 }
 
 function parseStartsAt(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
+  try {
+    return parseClinicDateTime(value);
+  } catch {
     throw new AppError(400, "Invalid date/time for the slot");
   }
-  date.setSeconds(0, 0);
-  return date;
 }
 
 function parseClock(value: string) {
@@ -88,8 +100,10 @@ function parseClock(value: string) {
   return { hour, minute };
 }
 
-function weekdayName(date: Date) {
-  return WEEKDAYS[(date.getDay() + 6) % 7]!;
+function weekdayName(dateKey: string) {
+  const name = weekdayNameForCivilDate(dateKey);
+  if (WEEKDAYS.includes(name as (typeof WEEKDAYS)[number])) return name;
+  return "";
 }
 
 export async function listSlotsForDoctor(
@@ -210,29 +224,37 @@ export async function generateSlotsFromWeeklyHours(
   const now = new Date();
   const dayCount = weeks * 7;
   const candidates: Date[] = [];
+  const todayKey = civilDateKey(now);
+  const zone = clinicTimeZone();
 
   for (let offset = 0; offset < dayCount; offset += 1) {
-    const day = new Date(now);
-    day.setHours(0, 0, 0, 0);
-    day.setDate(day.getDate() + offset);
-
-    const template = byDay.get(weekdayName(day));
+    const dateKey = addCivilDays(todayKey, offset);
+    const template = byDay.get(weekdayName(dateKey));
     if (!template?.enabled) continue;
 
     const start = parseClock(template.startTime);
     const end = parseClock(template.endTime);
     if (!start || !end) continue;
 
-    const cursor = new Date(day);
-    cursor.setHours(start.hour, start.minute, 0, 0);
-    const endAt = new Date(day);
-    endAt.setHours(end.hour, end.minute, 0, 0);
+    const [year, month, day] = dateKey.split("-").map(Number);
+    let minuteOfDay = start.hour * 60 + start.minute;
+    const endMinute = end.hour * 60 + end.minute;
 
-    while (cursor.getTime() + SLOT_MINUTES * 60_000 <= endAt.getTime()) {
-      if (cursor.getTime() > now.getTime()) {
-        candidates.push(new Date(cursor));
+    while (minuteOfDay + SLOT_MINUTES <= endMinute) {
+      const startsAt = wallTimeToUtc(
+        {
+          year: year!,
+          month: month!,
+          day: day!,
+          hour: Math.floor(minuteOfDay / 60),
+          minute: minuteOfDay % 60,
+        },
+        zone,
+      );
+      if (startsAt.getTime() > now.getTime()) {
+        candidates.push(startsAt);
       }
-      cursor.setMinutes(cursor.getMinutes() + SLOT_MINUTES);
+      minuteOfDay += SLOT_MINUTES;
     }
   }
 

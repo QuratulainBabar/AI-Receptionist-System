@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { FollowUpDialog } from "@/components/doctor/FollowUpDialog";
+import { AppointmentInvoiceAction } from "@/components/doctor/AppointmentInvoiceAction";
 import { Avatar, Badge, Button, EmptyNote, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
 import {
   doctorAppointmentsApi,
@@ -33,11 +34,26 @@ const STATUS_ACTIONS: Array<{ status: ApiAppointment["status"]; label: string }>
   { status: "cancelled", label: "Cancel" },
 ];
 
+function recordRequestLabel(appointment: ApiAppointment) {
+  const request = appointment.recordRequest;
+  if (!request) return null;
+  if (request.status === "uploaded") {
+    return `${request.recordsCount} record${request.recordsCount === 1 ? "" : "s"} uploaded`;
+  }
+  if (request.status === "expired") return "Upload link expired";
+  if (request.status === "opened") return "Patient opened upload link";
+  if (request.smsSent) return "Records requested · SMS sent";
+  if (request.smsError) return `Link created · SMS failed`;
+  return "Records requested";
+}
+
 function DoctorSchedule() {
   const [appointments, setAppointments] = useState<ApiAppointment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [requestingId, setRequestingId] = useState<string | null>(null);
   const [followUpFor, setFollowUpFor] = useState<ApiAppointment | null>(null);
 
   useEffect(() => {
@@ -73,11 +89,13 @@ function DoctorSchedule() {
     if (appointment.status === status) return;
     setBusyId(appointment.id);
     setError("");
+    setMessage("");
     try {
       const result = await doctorAppointmentsApi.updateStatus(appointment.id, status);
       setAppointments((current) =>
         current.map((row) => (row.id === appointment.id ? result.appointment : row)),
       );
+      if (status === "completed") setFollowUpFor(result.appointment);
     } catch (err) {
       setError(formatApiError(err, "Unable to update appointment status."));
     } finally {
@@ -85,8 +103,45 @@ function DoctorSchedule() {
     }
   }
 
+  async function requestRecords(appointment: ApiAppointment) {
+    setRequestingId(appointment.id);
+    setError("");
+    setMessage("");
+    try {
+      const result = await doctorAppointmentsApi.requestRecords(appointment.id);
+      setAppointments((current) =>
+        current.map((row) =>
+          row.id === appointment.id
+            ? {
+                ...row,
+                recordRequest: {
+                  status: result.request.status,
+                  smsSent: result.request.smsSent,
+                  smsError: result.request.smsError,
+                  expiresAt: result.request.expiresAt,
+                  createdAt: result.request.createdAt,
+                  recordsCount: result.request.recordsCount,
+                },
+              }
+            : row,
+        ),
+      );
+      const base = result.message || result.request.message || "Upload link sent to the patient.";
+      setMessage(
+        result.request.smsSent || !result.request.uploadUrl
+          ? base
+          : `${base} Link: ${result.request.uploadUrl}`,
+      );
+    } catch (err) {
+      setError(formatApiError(err, "Unable to request medical records."));
+    } finally {
+      setRequestingId(null);
+    }
+  }
+
   function renderCard(appointment: ApiAppointment) {
     const terminal = appointment.status === "completed" || appointment.status === "cancelled";
+    const requestLabel = recordRequestLabel(appointment);
     return (
       <Panel key={appointment.id} className="p-4">
         <div className="flex items-start justify-between gap-3">
@@ -102,6 +157,18 @@ function DoctorSchedule() {
                 <p className="mt-1 text-[11px] text-primary">
                   Follow-up of {appointment.followUpOfReference || "prior visit"}
                 </p>
+              ) : null}
+              {appointments.some((row) => row.followUpOfId === appointment.id) ? (
+                <p className="mt-1 text-[11px] text-primary">
+                  Next visit{" "}
+                  {appointments
+                    .filter((row) => row.followUpOfId === appointment.id)
+                    .map((row) => `${row.reference} · ${row.date} · ${row.time}`)
+                    .join(", ")}
+                </p>
+              ) : null}
+              {requestLabel ? (
+                <p className="mt-1 text-[11px] text-primary">{requestLabel}</p>
               ) : null}
             </div>
           </div>
@@ -130,10 +197,33 @@ function DoctorSchedule() {
           </span>
           <div className="flex flex-wrap gap-2">
             {appointment.status !== "cancelled" ? (
-              <Button size="sm" variant="soft" onClick={() => setFollowUpFor(appointment)}>
-                Schedule follow-up
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="soft"
+                  disabled={requestingId === appointment.id}
+                  onClick={() => void requestRecords(appointment)}
+                >
+                  {requestingId === appointment.id
+                    ? "Sending…"
+                    : appointment.recordRequest
+                      ? "Resend records request"
+                      : "Request medical records"}
+                </Button>
+                <Button size="sm" variant="soft" onClick={() => setFollowUpFor(appointment)}>
+                  Schedule next visit
+                </Button>
+              </>
             ) : null}
+            <AppointmentInvoiceAction
+              appointment={appointment}
+              onUpdated={(updated, note) => {
+                setAppointments((current) =>
+                  current.map((row) => (row.id === updated.id ? updated : row)),
+                );
+                setMessage(note);
+              }}
+            />
             <Link to="/doctor/patients/$patientId" params={{ patientId: appointment.patientId }}>
               <Button variant="outline" size="sm">
                 Patient file
@@ -150,7 +240,7 @@ function DoctorSchedule() {
       <PageHeader
         eyebrow="Doctor"
         title="Appointment schedule"
-        description="Update visit status and schedule follow-up appointments linked to a prior visit."
+        description="Update visit status, send invoices, and schedule follow-up appointments linked to a prior visit."
         actions={
           <>
             <Link to="/doctor/availability">
@@ -164,6 +254,7 @@ function DoctorSchedule() {
       />
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
+      {message ? <p className="mb-4 text-sm text-primary">{message}</p> : null}
 
       {loading ? (
         <EmptyNote>Loading appointments…</EmptyNote>
@@ -193,8 +284,9 @@ function DoctorSchedule() {
         <FollowUpDialog
           parent={followUpFor}
           onClose={() => setFollowUpFor(null)}
-          onCreated={(appointment) => {
+          onCreated={(appointment, note) => {
             setAppointments((current) => [...current, appointment]);
+            setMessage(note);
             setFollowUpFor(null);
           }}
         />

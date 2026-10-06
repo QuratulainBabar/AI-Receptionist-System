@@ -18,6 +18,7 @@ import {
   type ApiAdminDoctorSlot,
   type ApiDoctorProfile,
   type ApiSpecialty,
+  type ApiSubscription,
   type ApiUser,
   type ApiWeeklyHourSlot,
 } from "@/lib/api";
@@ -82,6 +83,7 @@ function AdminDoctorDetails() {
   const { userId } = Route.useParams();
   const [user, setUser] = useState<ApiUser | null>(null);
   const [profile, setProfile] = useState<ApiDoctorProfile | null>(null);
+  const [subscription, setSubscription] = useState<ApiSubscription | null>(null);
   const [form, setForm] = useState<FormState | null>(null);
   const [specialties, setSpecialties] = useState<ApiSpecialty[]>([]);
   const [openSlots, setOpenSlots] = useState<ApiAdminDoctorSlot[]>([]);
@@ -101,6 +103,7 @@ function AdminDoctorDetails() {
       ]);
       setUser(crm.user);
       setProfile(crm.profile);
+      setSubscription(crm.subscription);
       setForm(crm.profile ? profileToForm(crm.profile) : null);
       setSpecialties(specialtyResult.specialties);
       setOpenSlots(slotsResult.slots);
@@ -261,6 +264,55 @@ function AdminDoctorDetails() {
                 </dd>
               </div>
             </dl>
+          </Panel>
+
+          <Panel className="p-4">
+            <SectionLabel>Subscription</SectionLabel>
+            {subscription ? (
+              <dl className="mt-3 space-y-2 text-[13px]">
+                <div className="flex justify-between gap-2 border-b border-border pb-2">
+                  <dt className="text-muted-foreground">Plan</dt>
+                  <dd className="font-medium">{subscription.planName}</dd>
+                </div>
+                <div className="flex justify-between gap-2 border-b border-border pb-2">
+                  <dt className="text-muted-foreground">Amount</dt>
+                  <dd>
+                    {subscription.amountLabel} / {subscription.billingCycleLabel.toLowerCase()}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-2 border-b border-border pb-2">
+                  <dt className="text-muted-foreground">Status</dt>
+                  <dd>
+                    <Badge tone={subscription.status === "ACTIVE" || subscription.status === "TRIALING" ? "success" : "warning"}>
+                      {subscription.statusLabel}
+                    </Badge>
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-2 border-b border-border pb-2">
+                  <dt className="text-muted-foreground">Start date</dt>
+                  <dd>
+                    {subscription.currentPeriodStart
+                      ? new Date(subscription.currentPeriodStart).toLocaleDateString()
+                      : "—"}
+                  </dd>
+                </div>
+                <div className="flex justify-between gap-2">
+                  <dt className="text-muted-foreground">Next billing</dt>
+                  <dd>
+                    {subscription.currentPeriodEnd
+                      ? new Date(subscription.currentPeriodEnd).toLocaleDateString()
+                      : "—"}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <p className="mt-3 text-sm text-muted-foreground">No Stripe subscription on this doctor yet.</p>
+            )}
+            <Link to="/admin/subscriptions">
+              <Button variant="outline" size="sm" className="mt-3">
+                Manage subscriptions
+              </Button>
+            </Link>
           </Panel>
 
           <Panel className="space-y-3 p-4">

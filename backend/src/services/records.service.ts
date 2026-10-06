@@ -14,6 +14,9 @@ export type PublicMedicalRecord = {
   size: string;
   uploadedBy: string;
   mimeType: string;
+  appointmentId: string | null;
+  appointmentReference: string | null;
+  appointmentDate: string | null;
 };
 
 const UPLOAD_ROOT = path.resolve(process.cwd(), "uploads", "records");
@@ -54,7 +57,11 @@ export function inferCategory(fileName: string, mimeType: string) {
   return "Report";
 }
 
-function toPublic(record: PatientMedicalRecord): PublicMedicalRecord {
+function toPublic(
+  record: PatientMedicalRecord & {
+    appointment?: { id: string; reference: string; startsAt: Date } | null;
+  },
+): PublicMedicalRecord {
   return {
     id: record.id,
     name: record.fileName,
@@ -63,6 +70,9 @@ function toPublic(record: PatientMedicalRecord): PublicMedicalRecord {
     size: formatFileSize(record.sizeBytes),
     uploadedBy: record.uploadedBy,
     mimeType: record.mimeType,
+    appointmentId: record.appointmentId,
+    appointmentReference: record.appointment?.reference ?? null,
+    appointmentDate: record.appointment ? formatRecordDate(record.appointment.startsAt) : null,
   };
 }
 
@@ -73,6 +83,7 @@ export function absoluteStoragePath(storagePath: string) {
 export async function listRecordsForPatient(userId: string) {
   const rows = await prisma.patientMedicalRecord.findMany({
     where: { userId },
+    include: { appointment: { select: { id: true, reference: true, startsAt: true } } },
     orderBy: { createdAt: "desc" },
   });
   return rows.map(toPublic);
@@ -86,6 +97,8 @@ export async function createRecordForPatient(input: {
   storagePath: string;
   uploadedBy: string;
   category?: string;
+  appointmentId?: string | null;
+  recordRequestId?: string | null;
 }) {
   const record = await prisma.patientMedicalRecord.create({
     data: {
@@ -96,14 +109,19 @@ export async function createRecordForPatient(input: {
       storagePath: input.storagePath,
       uploadedBy: input.uploadedBy,
       category: input.category?.trim() || inferCategory(input.fileName, input.mimeType),
+      appointmentId: input.appointmentId || null,
+      recordRequestId: input.recordRequestId || null,
     },
+    include: { appointment: { select: { id: true, reference: true, startsAt: true } } },
   });
   await logReportUploaded(record);
   const recordWithUser = await prisma.patientMedicalRecord.findUniqueOrThrow({
     where: { id: record.id },
-    include: { user: true },
+    include: { user: true, appointment: { select: { reference: true } } },
   });
-  await logReportUploadedForDoctors(recordWithUser);
+  await logReportUploadedForDoctors(recordWithUser, {
+    appointmentReference: recordWithUser.appointment?.reference,
+  });
   return toPublic(record);
 }
 

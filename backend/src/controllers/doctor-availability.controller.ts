@@ -1,6 +1,7 @@
 import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import * as doctorAvailabilityService from "../services/doctor-availability.service.js";
+import { queueDirectorySync } from "../services/clinic-synthflow.service.js";
 import { AppError } from "../utils/AppError.js";
 
 const createBodySchema = z.object({
@@ -29,7 +30,7 @@ export async function list(req: Request, res: Response, next: NextFunction) {
       to,
       includeBooked,
     });
-    res.json({ success: true, slots });
+    res.json({ success: true, slots, ...doctorAvailabilityService.clinicClock() });
   } catch (error) {
     next(error);
   }
@@ -81,6 +82,7 @@ export async function generate(req: Request, res: Response, next: NextFunction) 
       req.user.sub,
       body,
     );
+    queueDirectorySync("doctor-generate-slots");
     res.json({
       success: true,
       ...result,

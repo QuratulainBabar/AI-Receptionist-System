@@ -4,7 +4,16 @@ import { AppError } from "../utils/AppError.js";
 import { normalizePhone } from "../utils/phone.js";
 import { findPatientIdsByPhone } from "./patient-phone.service.js";
 import { createMessagesForAppointment } from "./messages.service.js";
+import { cancelPendingReminders, scheduleAppointmentReminders } from "./appointment-reminders.service.js";
+import { clinicTimeZoneLabel, formatClinicDate, formatClinicDateTime, formatClinicInput, formatClinicTime } from "../utils/clinic-time.js";
+import { sendPatientReminderSms } from "./synthflow.client.js";
+import { recordAppointmentStatus } from "./patient-chart.service.js";
 import { logAppointmentBooked } from "./activity.service.js";
+import {
+  syncDoctorAppointmentInvoices,
+  toPublicAppointmentInvoice,
+  type PublicAppointmentInvoice,
+} from "./appointment-invoices.service.js";
 import {
   logAppointmentBookedForDoctor,
   logAppointmentCancelledForDoctor,
@@ -13,41 +22,14 @@ import {
 
 const ACTIVE_BOOKING_STATUSES: AppointmentStatus[] = ["PENDING", "CONFIRMED"];
 
-/**
- * One active appointment per mobile: PENDING/CONFIRMED block new bookings;
- * COMPLETED/CANCELLED do not.
- */
-async function assertNoActiveAppointmentForMobile(patientId: string, phoneHint?: string) {
-  const history = await prisma.patientMedicalHistory.findUnique({
-    where: { userId: patientId },
-    select: { phone: true },
-  });
-  const phone = normalizePhone(phoneHint || history?.phone || "");
-
-  const patientIds = new Set<string>([patientId]);
-  if (phone) {
-    for (const id of await findPatientIdsByPhone(phone)) {
-      patientIds.add(id);
-    }
-  }
-
-  const active = await prisma.appointment.findFirst({
-    where: {
-      patientId: { in: [...patientIds] },
-      status: { in: ACTIVE_BOOKING_STATUSES },
-    },
-    include: { doctorUser: true },
-    orderBy: { startsAt: "asc" },
-  });
-
-  if (!active) return;
-
-  const statusLabel = toPublicStatus(active.status);
-  throw new AppError(
-    409,
-    `You already have an active appointment (${active.reference}, ${statusLabel}) with ${active.doctorUser.fullName}. Please complete or cancel it before booking another one.`,
-  );
-}
+export type PublicAppointmentRecordRequest = {
+  status: string;
+  smsSent: boolean;
+  smsError: string;
+  expiresAt: string;
+  createdAt: string;
+  recordsCount: number;
+};
 
 export type PublicAppointment = {
   id: string;
@@ -69,12 +51,32 @@ export type PublicAppointment = {
   followUpOfId: string | null;
   followUpOfReference: string | null;
   isFollowUp: boolean;
+  recordRequest: PublicAppointmentRecordRequest | null;
+  invoice: PublicAppointmentInvoice | null;
 };
 
 type AppointmentWithPeople = Appointment & {
   patient: User;
   doctorUser: User;
   followUpOf?: { id: string; reference: string } | null;
+  recordRequest?: {
+    status: string;
+    smsSent: boolean;
+    smsError: string;
+    expiresAt: Date;
+    createdAt: Date;
+    _count?: { records: number };
+  } | null;
+  invoice?: {
+    status: import("@prisma/client").AppointmentInvoiceStatus;
+    amountCents: number;
+    currency: string;
+    hostedInvoiceUrl: string;
+    phone: string;
+    smsError: string;
+    sentAt: Date | null;
+    paidAt: Date | null;
+  } | null;
 };
 
 const STATUS_MAP: Record<PublicAppointment["status"], AppointmentStatus> = {
@@ -109,20 +111,121 @@ function toPublicMode(mode: AppointmentMode): PublicAppointment["mode"] {
 }
 
 function formatDateLabel(date: Date) {
-  return date.toLocaleDateString("en-US", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-    year: "numeric",
-  });
+  return formatClinicDate(date);
 }
 
 function formatTimeLabel(date: Date) {
-  return date.toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
+  return formatClinicTime(date);
+}
+
+export type ActiveAppointmentForMobile = {
+  id: string;
+  reference: string;
+  status: PublicAppointment["status"];
+  doctorName: string;
+  date: string;
+  time: string;
+  patientId: string;
+  spokenSummary: string;
+  blockMessage: string;
+};
+
+/**
+ * Find a Pending/Confirmed appointment for this mobile (and optional patient id).
+ * Completed/Cancelled are ignored.
+ */
+export async function findActiveAppointmentForMobile(input: {
+  phone?: string;
+  patientId?: string;
+  /** When false, an in-progress OTP hold also blocks a new booking (patient portal). */
+  ignoreOpenOtpHolds?: boolean;
+}): Promise<ActiveAppointmentForMobile | null> {
+  const patientIds = new Set<string>();
+  if (input.patientId) patientIds.add(input.patientId);
+
+  let phone = normalizePhone(input.phone || "");
+  if (!phone && input.patientId) {
+    const history = await prisma.patientMedicalHistory.findUnique({
+      where: { userId: input.patientId },
+      select: { phone: true },
+    });
+    phone = normalizePhone(history?.phone || "");
+  }
+
+  if (phone) {
+    for (const id of await findPatientIdsByPhone(phone)) {
+      patientIds.add(id);
+    }
+  }
+
+  if (patientIds.size === 0) return null;
+
+  await releaseExpiredOtpHolds();
+
+  const active = await prisma.appointment.findFirst({
+    where: {
+      patientId: { in: [...patientIds] },
+      status: { in: ACTIVE_BOOKING_STATUSES },
+      ...(input.ignoreOpenOtpHolds === false
+        ? {}
+        : { otps: { none: { usedAt: null } } }),
+    },
+    include: { doctorUser: true },
+    orderBy: { startsAt: "asc" },
   });
+
+  if (!active) return null;
+
+  const status = toPublicStatus(active.status);
+  const date = formatDateLabel(active.startsAt);
+  const time = formatTimeLabel(active.startsAt);
+  const spokenSummary = `${active.reference}, ${status}, with ${active.doctorUser.fullName} on ${date} at ${time}`;
+  return {
+    id: active.id,
+    reference: active.reference,
+    status,
+    doctorName: active.doctorUser.fullName,
+    date,
+    time,
+    patientId: active.patientId,
+    spokenSummary,
+    blockMessage: `You already have an active appointment (${spokenSummary}). Please complete or cancel it before booking another one.`,
+  };
+}
+
+/**
+ * One active appointment per mobile: PENDING/CONFIRMED block new bookings;
+ * COMPLETED/CANCELLED do not.
+ */
+async function assertNoActiveAppointmentForMobile(
+  patientId: string,
+  phoneHint?: string,
+  options?: { ignoreOpenOtpHolds?: boolean },
+) {
+  const active = await findActiveAppointmentForMobile({
+    patientId,
+    phone: phoneHint,
+    ignoreOpenOtpHolds: options?.ignoreOpenOtpHolds,
+  });
+  if (!active) return;
+  throw new AppError(409, active.blockMessage);
+}
+
+function toPublicRecordRequest(
+  row: AppointmentWithPeople["recordRequest"],
+): PublicAppointmentRecordRequest | null {
+  if (!row) return null;
+  const recordsCount = row._count?.records ?? 0;
+  const expired = row.expiresAt.getTime() < Date.now();
+  const status = recordsCount > 0 ? "uploaded" : expired ? "expired" : row.status;
+  return {
+    status,
+    smsSent: row.smsSent,
+    smsError: row.smsError,
+    expiresAt: row.expiresAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
+    recordsCount,
+  };
 }
 
 function toPublicAppointment(row: AppointmentWithPeople): PublicAppointment {
@@ -146,6 +249,8 @@ function toPublicAppointment(row: AppointmentWithPeople): PublicAppointment {
     followUpOfId: row.followUpOfId ?? null,
     followUpOfReference: row.followUpOf?.reference ?? null,
     isFollowUp: Boolean(row.followUpOfId),
+    recordRequest: toPublicRecordRequest(row.recordRequest),
+    invoice: toPublicAppointmentInvoice(row.invoice ?? null),
   };
 }
 
@@ -153,6 +258,19 @@ const appointmentInclude = {
   patient: true,
   doctorUser: true,
   followUpOf: { select: { id: true, reference: true } },
+  recordRequest: { include: { _count: { select: { records: true } } } },
+  invoice: {
+    select: {
+      status: true,
+      amountCents: true,
+      currency: true,
+      hostedInvoiceUrl: true,
+      phone: true,
+      smsError: true,
+      sentAt: true,
+      paidAt: true,
+    },
+  },
 } as const;
 
 async function generateAppointmentReference(
@@ -166,6 +284,16 @@ async function generateAppointmentReference(
   throw new AppError(500, "Could not generate an appointment reference");
 }
 
+async function bookingPhoneForPatient(patientId: string, explicit?: string) {
+  const direct = normalizePhone(explicit || "");
+  if (direct) return direct;
+  const history = await prisma.patientMedicalHistory.findUnique({
+    where: { userId: patientId },
+    select: { phone: true },
+  });
+  return normalizePhone(history?.phone || "");
+}
+
 export async function createAppointment(input: {
   patientId: string;
   doctorId: string;
@@ -173,13 +301,19 @@ export async function createAppointment(input: {
   reason?: string;
   /** Optional mobile used for the one-active-appointment rule (voice / Synthflow). */
   phone?: string;
+  /** Voice booking: claim the slot but stay pending until the OTP is verified. */
+  holdForOtp?: boolean;
 }) {
   const patient = await prisma.user.findUnique({ where: { id: input.patientId } });
   if (!patient || patient.role !== "PATIENT" || !patient.isActive) {
     throw new AppError(403, "Only active patients can book appointments");
   }
 
-  await assertNoActiveAppointmentForMobile(patient.id, input.phone);
+  await assertNoActiveAppointmentForMobile(patient.id, input.phone, {
+    ignoreOpenOtpHolds: Boolean(input.holdForOtp),
+  });
+
+  const bookingPhone = await bookingPhoneForPatient(patient.id, input.phone);
 
   const profile = await prisma.doctorProfile.findUnique({
     where: { userId: input.doctorId },
@@ -228,17 +362,98 @@ export async function createAppointment(input: {
         fee: profile.fee,
         clinic: profile.clinic,
         specialtyName: profile.specialty.name,
-        status: "CONFIRMED",
+        status: input.holdForOtp ? "PENDING" : "CONFIRMED",
+        bookingPhone,
       },
       include: appointmentInclude,
     });
   });
 
-  await createMessagesForAppointment(appointment);
-  await logAppointmentBooked(appointment);
-  await logAppointmentBookedForDoctor(appointment);
+  await recordAppointmentStatus({
+    appointmentId: appointment.id,
+    patientId: appointment.patientId,
+    doctorUserId: appointment.doctorUserId,
+    fromStatus: "",
+    toStatus: appointment.status,
+    occurredAt: appointment.createdAt,
+  });
+
+  if (!input.holdForOtp) {
+    await createMessagesForAppointment(appointment);
+    await logAppointmentBooked(appointment);
+    await logAppointmentBookedForDoctor(appointment);
+  }
 
   return toPublicAppointment(appointment);
+}
+
+export async function confirmHeldAppointment(appointmentId: string) {
+  const updated = await prisma.$transaction(async (tx) => {
+    const existing = await tx.appointment.findUnique({ where: { id: appointmentId } });
+    if (!existing || existing.status !== "PENDING") {
+      throw new AppError(409, "This appointment is not waiting for a verification code.");
+    }
+    return tx.appointment.update({
+      where: { id: appointmentId },
+      data: { status: "CONFIRMED" },
+      include: appointmentInclude,
+    });
+  });
+
+  await recordAppointmentStatus({
+    appointmentId: updated.id,
+    patientId: updated.patientId,
+    doctorUserId: updated.doctorUserId,
+    fromStatus: "PENDING",
+    toStatus: "CONFIRMED",
+  });
+  await createMessagesForAppointment(updated);
+  await logAppointmentBooked(updated);
+  await logAppointmentBookedForDoctor(updated);
+  return toPublicAppointment(updated);
+}
+
+export async function cancelOtpHold(appointmentId: string) {
+  const existing = await prisma.appointment.findUnique({ where: { id: appointmentId } });
+  if (!existing || existing.status !== "PENDING") return;
+
+  await prisma.$transaction(async (tx) => {
+    await tx.availabilitySlot.update({
+      where: { id: existing.slotId },
+      data: { isBooked: false },
+    });
+    // Remove the unconfirmed hold so this slot can be booked again.
+    await tx.appointment.delete({ where: { id: appointmentId } });
+  });
+}
+
+/** Drop pending voice holds whose code has expired so the slot can be booked again. */
+export async function releaseExpiredOtpHolds() {
+  const stale = await prisma.appointmentOtp.findMany({
+    where: {
+      usedAt: null,
+      expiresAt: { lt: new Date() },
+      appointment: { status: "PENDING" },
+    },
+    select: { id: true, appointmentId: true },
+  });
+
+  for (const row of stale) {
+    await prisma.appointmentOtp.update({
+      where: { id: row.id },
+      data: { usedAt: new Date() },
+    });
+    await cancelOtpHold(row.appointmentId);
+  }
+}
+
+export async function getPublicAppointmentById(appointmentId: string) {
+  const row = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: appointmentInclude,
+  });
+  if (!row) return null;
+  return toPublicAppointment(row);
 }
 
 export async function getAppointmentForPatient(appointmentId: string, patientId: string) {
@@ -269,6 +484,8 @@ export async function listAppointmentsForDoctor(doctorUserId: string) {
   if (!doctor || doctor.role !== "DOCTOR" || !doctor.isActive) {
     throw new AppError(403, "Only active doctors can view appointments");
   }
+
+  await syncDoctorAppointmentInvoices(doctorUserId);
 
   const rows = await prisma.appointment.findMany({
     where: { doctorUserId },
@@ -344,8 +561,22 @@ async function updateAppointmentStatus(
     });
   });
 
+  await recordAppointmentStatus({
+    appointmentId: updated.id,
+    patientId: updated.patientId,
+    doctorUserId: updated.doctorUserId,
+    fromStatus: existing.status,
+    toStatus: nextStatus,
+  });
+
   if (nextStatus === "CANCELLED") {
     await logAppointmentCancelledForDoctor(updated);
+    await cancelPendingReminders(updated.id);
+  } else if (nextStatus === "COMPLETED" || nextStatus === "PENDING") {
+    await cancelPendingReminders(updated.id);
+  } else if (nextStatus === "CONFIRMED") {
+    await createMessagesForAppointment(updated);
+    await scheduleAppointmentReminders(updated.id);
   }
 
   return toPublicAppointment(updated);
@@ -424,6 +655,8 @@ export async function rescheduleAppointmentForAdmin(appointmentId: string, slotI
   });
 
   await logAppointmentRescheduledForDoctor(updated, previousStartsAt);
+  await createMessagesForAppointment(updated);
+  await scheduleAppointmentReminders(updated.id);
 
   return toPublicAppointment(updated);
 }
@@ -454,7 +687,35 @@ export async function listOpenSlotsForDoctorAdmin(doctorUserId: string) {
     date: formatDateLabel(row.startsAt),
     time: formatTimeLabel(row.startsAt),
     isBooked: row.isBooked,
+    startsAtLocal: formatClinicInput(row.startsAt),
   }));
+}
+
+function toStoredMode(mode: PublicAppointment["mode"] | undefined, fallback: AppointmentMode): AppointmentMode {
+  if (mode === "Video call") return "VIDEO_CALL";
+  if (mode === "In clinic") return "IN_CLINIC";
+  return fallback;
+}
+
+async function sendNextVisitConfirmation(appointment: AppointmentWithPeople) {
+  const phone = normalizePhone(appointment.bookingPhone) || (await bookingPhoneForPatient(appointment.patientId));
+  if (!phone) {
+    return "Next visit saved. No booking mobile was on file, so the confirmation text was not sent.";
+  }
+  const when = `${formatClinicDateTime(appointment.startsAt)} ${clinicTimeZoneLabel(appointment.startsAt)}`;
+  const visitType = appointment.mode === "VIDEO_CALL" ? "Video call" : "In clinic";
+  const reason = appointment.reason.trim();
+  const body = `Qubetech: your next visit is confirmed. ${appointment.reference} with ${appointment.doctorUser.fullName} at ${appointment.clinic || "the clinic"} on ${when}. Type: ${visitType}.${reason ? ` Details: ${reason.slice(0, 180)}` : ""}`;
+  try {
+    await sendPatientReminderSms({ toPhone: phone, body, purpose: "confirmation" });
+    return `Next visit ${appointment.reference} is confirmed. A confirmation text was sent to the patient's booking mobile.`;
+  } catch (error) {
+    console.error(
+      "[appointments] Next-visit confirmation SMS failed:",
+      error instanceof Error ? error.message : error,
+    );
+    return `Next visit ${appointment.reference} is saved. The confirmation text could not be delivered.`;
+  }
 }
 
 export async function createFollowUpAppointmentForDoctor(input: {
@@ -462,6 +723,7 @@ export async function createFollowUpAppointmentForDoctor(input: {
   parentAppointmentId: string;
   slotId: string;
   reason?: string;
+  mode?: PublicAppointment["mode"];
 }) {
   const parent = await prisma.appointment.findUnique({
     where: { id: input.parentAppointmentId },
@@ -519,22 +781,32 @@ export async function createFollowUpAppointmentForDoctor(input: {
         doctorUserId: profile.userId,
         slotId: slot.id,
         startsAt: slot.startsAt,
-        durationMinutes: 30,
-        mode: parent.mode,
+        durationMinutes: parent.durationMinutes,
+        mode: toStoredMode(input.mode, parent.mode),
         reason,
         fee: profile.fee,
         clinic: profile.clinic,
         specialtyName: profile.specialty.name,
         status: "CONFIRMED",
         followUpOfId: parent.id,
+        bookingPhone: parent.bookingPhone || (await bookingPhoneForPatient(parent.patientId)),
       },
       include: appointmentInclude,
     });
   });
 
+  await recordAppointmentStatus({
+    appointmentId: appointment.id,
+    patientId: appointment.patientId,
+    doctorUserId: appointment.doctorUserId,
+    fromStatus: "",
+    toStatus: "CONFIRMED",
+    occurredAt: appointment.createdAt,
+  });
   await createMessagesForAppointment(appointment);
   await logAppointmentBooked(appointment);
   await logAppointmentBookedForDoctor(appointment);
+  const message = await sendNextVisitConfirmation(appointment);
 
-  return toPublicAppointment(appointment);
+  return { appointment: toPublicAppointment(appointment), message };
 }
