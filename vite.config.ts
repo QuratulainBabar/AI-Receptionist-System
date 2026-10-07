@@ -7,9 +7,31 @@
 import { defineConfig } from "@lovable.dev/vite-tanstack-config";
 
 export default defineConfig({
+  // Static React build in dist/, the same shape as a normal Vite app.
+  nitro: false,
   tanstackStart: {
-    // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
-    // nitro/vite builds from this
     server: { entry: "server" },
+    spa: {
+      enabled: true,
+      prerender: {
+        outputPath: "/index.html",
+      },
+    },
+  },
+  vite: {
+    environments: {
+      client: {
+        build: {
+          outDir: "dist",
+          emptyOutDir: true,
+        },
+      },
+      ssr: {
+        build: {
+          outDir: ".output/server",
+          emptyOutDir: true,
+        },
+      },
+    },
   },
 });
