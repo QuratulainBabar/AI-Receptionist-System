@@ -32,8 +32,8 @@ export function homeForRole(role: AuthRole) {
   return "/patient";
 }
 
-export function loginPathForRole(role: AuthRole) {
-  return role === "admin" ? "/admin/login" : "/";
+export function loginPathForRole(_role: AuthRole) {
+  return "/";
 }
 
 export function sessionFromUser(user: ApiUser, token: string): Session {

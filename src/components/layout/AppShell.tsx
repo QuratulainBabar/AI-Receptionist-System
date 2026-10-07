@@ -1,11 +1,63 @@
 import { Link, useNavigate, type LinkProps } from "@tanstack/react-router";
-import { ChevronDown, User } from "lucide-react";
+import {
+  ChevronDown,
+  User,
+  Bell,
+  MessageSquare,
+  Search,
+  Menu,
+  Home,
+  Calendar,
+  Users,
+  FileText,
+  Clock,
+  Settings,
+  UserCircle,
+  LogOut,
+  Activity,
+  Shield,
+  Phone,
+  CreditCard,
+  Stethoscope,
+} from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Badge, Button, SectionLabel } from "@/components/ui/primitives";
 import { clearSession, type Session } from "@/lib/session";
 
-export type NavItem = { to: string; label: string; group: string };
+export type NavItem = { to: string; label: string; group: string; icon?: string };
+
+const ICON_MAP: Record<string, ReactNode> = {
+  Dashboard: <Home className="size-[18px]" strokeWidth={2} />,
+  Appointments: <Calendar className="size-[18px]" strokeWidth={2} />,
+  Schedule: <Calendar className="size-[18px]" strokeWidth={2} />,
+  Patients: <Users className="size-[18px]" strokeWidth={2} />,
+  "Patient list": <Users className="size-[18px]" strokeWidth={2} />,
+  "History & Reports": <FileText className="size-[18px]" strokeWidth={2} />,
+  "History & reports": <FileText className="size-[18px]" strokeWidth={2} />,
+  Records: <FileText className="size-[18px]" strokeWidth={2} />,
+  Availability: <Clock className="size-[18px]" strokeWidth={2} />,
+  Notifications: <Bell className="size-[18px]" strokeWidth={2} />,
+  Profile: <UserCircle className="size-[18px]" strokeWidth={2} />,
+  Settings: <Settings className="size-[18px]" strokeWidth={2} />,
+  "Activity history": <Activity className="size-[18px]" strokeWidth={2} />,
+  Activity: <Activity className="size-[18px]" strokeWidth={2} />,
+  Synthflow: <Phone className="size-[18px]" strokeWidth={2} />,
+  "Voice calls": <Phone className="size-[18px]" strokeWidth={2} />,
+  Doctors: <Stethoscope className="size-[18px]" strokeWidth={2} />,
+  Subscriptions: <CreditCard className="size-[18px]" strokeWidth={2} />,
+  "Medical history": <FileText className="size-[18px]" strokeWidth={2} />,
+  "Reports & records": <FileText className="size-[18px]" strokeWidth={2} />,
+  "Manage doctors": <Stethoscope className="size-[18px]" strokeWidth={2} />,
+  "Manage patients": <Users className="size-[18px]" strokeWidth={2} />,
+  Subscription: <CreditCard className="size-[18px]" strokeWidth={2} />,
+  Billing: <CreditCard className="size-[18px]" strokeWidth={2} />,
+  Overview: <Shield className="size-[18px]" strokeWidth={2} />,
+};
+
+function getIcon(label: string): ReactNode {
+  return ICON_MAP[label] || <Activity className="size-[18px]" strokeWidth={2} />;
+}
 
 export function AppShell({
   brandSuffix,
@@ -23,10 +75,13 @@ export function AppShell({
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [notificationOpen, setNotificationOpen] = useState(false);
   const accountRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
   const groups = Array.from(new Set(nav.map((item) => item.group)));
 
-  const accountLinks = accountMenu ??
+  const accountLinks =
+    accountMenu ??
     (session.role === "patient"
       ? [
           { to: "/patient/history", label: "Medical history" },
@@ -45,23 +100,33 @@ export function AppShell({
           ]);
 
   function signOut() {
-    const loginPath = session.role === "admin" ? "/admin/login" : "/";
+    const loginPath = "/";
     clearSession();
     setAccountOpen(false);
     void navigate({ to: loginPath });
   }
 
   useEffect(() => {
-    if (!accountOpen) return;
+    if (!accountOpen && !notificationOpen) return;
 
     function onPointerDown(event: MouseEvent) {
-      if (!accountRef.current?.contains(event.target as Node)) {
+      if (accountOpen && accountRef.current && !accountRef.current.contains(event.target as Node)) {
         setAccountOpen(false);
+      }
+      if (
+        notificationOpen &&
+        notifRef.current &&
+        !notifRef.current.contains(event.target as Node)
+      ) {
+        setNotificationOpen(false);
       }
     }
 
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setAccountOpen(false);
+      if (event.key === "Escape") {
+        setAccountOpen(false);
+        setNotificationOpen(false);
+      }
     }
 
     document.addEventListener("mousedown", onPointerDown);
@@ -70,31 +135,59 @@ export function AppShell({
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [accountOpen]);
+  }, [accountOpen, notificationOpen]);
+
+  const notificationsCount = session.role === "doctor" ? 3 : 0;
 
   return (
-    <div className="flex h-dvh overflow-hidden">
+    <div className="flex h-dvh overflow-hidden bg-background">
       <aside
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex h-dvh w-64 shrink-0 flex-col border-r border-sidebar-border bg-sidebar/90 backdrop-blur-md transition-transform lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex h-dvh w-[268px] shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
         )}
+        style={{
+          background: "linear-gradient(180deg, #0B1E4B 0%, #0E2358 45%, #0F2556 100%)",
+          borderRight: "1px solid rgba(255,255,255,0.06)",
+          boxShadow: "4px 0 24px -8px rgba(11, 30, 75, 0.3)",
+        }}
       >
-        <div className="flex items-center gap-2.5 px-5 py-5">
-          <div className="grid size-9 place-items-center rounded-xl bg-primary font-display text-sm font-semibold text-primary-foreground">
-            AR
-          </div>
-          <div className="leading-tight">
-            <p className="font-display text-[15px] font-semibold">AI Receptionist</p>
-            <p className="label-mono">{brandSuffix}</p>
+        <div className="relative overflow-hidden">
+          <div
+            className="absolute inset-0 opacity-40 pointer-events-none"
+            style={{
+              backgroundImage:
+                "radial-gradient(circle at 80% 0%, rgba(59, 130, 246, 0.25) 0%, transparent 55%), radial-gradient(circle at 0% 100%, rgba(139, 92, 246, 0.18) 0%, transparent 50%)",
+            }}
+          />
+          <div className="relative flex items-center gap-3 px-6 py-5">
+            <div
+              className="grid size-11 shrink-0 place-items-center rounded-2xl text-white"
+              style={{
+                background: "linear-gradient(135deg, #3B82F6 0%, #2563EB 50%, #1D4ED8 100%)",
+                boxShadow: "0 6px 20px -6px rgba(59, 130, 246, 0.6)",
+              }}
+            >
+              <Stethoscope className="size-5.5" strokeWidth={2.2} />
+            </div>
+            <div className="leading-tight">
+              <p className="font-[--font-display] text-[15.5px] font-bold text-white tracking-tight">
+                AI Receptionist
+              </p>
+              <p className="text-[11px] font-medium text-[#60A5FA]/80 mt-0.5 uppercase tracking-[0.14em]">
+                {brandSuffix}
+              </p>
+            </div>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-3 pb-4">
+        <nav className="flex-1 overflow-y-auto px-4 pb-6 scrollbar-thin">
           {groups.map((group) => (
-            <div key={group} className="mb-3">
-              <SectionLabel className="px-3 pb-1.5">{group}</SectionLabel>
-              <div className="space-y-0.5">
+            <div key={group} className="mb-5 first:mt-1">
+              <p className="px-3 pb-2 text-[10.5px] font-bold uppercase tracking-[0.18em] text-[#64748B]/70">
+                {group}
+              </p>
+              <div className="space-y-1">
                 {nav
                   .filter((item) => item.group === group)
                   .map((item) => (
@@ -103,93 +196,320 @@ export function AppShell({
                       {...({ to: item.to } as LinkProps)}
                       onClick={() => setOpen(false)}
                       activeOptions={{ exact: item.label === "Dashboard" }}
-                      activeProps={{ className: "bg-primary text-primary-foreground shadow-sm" }}
-                      inactiveProps={{ className: "text-muted-foreground hover:bg-sidebar-accent hover:text-foreground" }}
-                      className="block rounded-xl px-3 py-2 text-[13px] font-medium transition-colors"
+                      activeProps={{ className: "sidebar-link-active" }}
+                      inactiveProps={{ className: "sidebar-link-hover" }}
+                      className="sidebar-link group"
                     >
-                      {item.label}
+                      <span className="grid size-[30px] shrink-0 place-items-center rounded-lg">
+                        {getIcon(item.label)}
+                      </span>
+                      <span className="flex-1 truncate">{item.label}</span>
+                      {item.label === "Notifications" && notificationsCount > 0 ? (
+                        <span
+                          className="grid min-w-[20px] h-5 px-1.5 place-items-center rounded-full text-[10.5px] font-bold text-white"
+                          style={{
+                            background: "linear-gradient(135deg, #EF4444 0%, #F43F5E 100%)",
+                            boxShadow: "0 2px 8px -2px rgba(239, 68, 68, 0.6)",
+                          }}
+                        >
+                          {notificationsCount}
+                        </span>
+                      ) : null}
                     </Link>
                   ))}
               </div>
             </div>
           ))}
         </nav>
+
+        <div
+          className="mx-4 mb-4 rounded-2xl p-4"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(99, 102, 241, 0.1) 100%)",
+            border: "1px solid rgba(59, 130, 246, 0.2)",
+          }}
+        >
+          <div className="flex items-center gap-3">
+            <div className="relative">
+              <div
+                className="grid size-10 shrink-0 place-items-center rounded-xl font-semibold text-white"
+                style={{
+                  background:
+                    "linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%)",
+                  border: "1px solid rgba(255,255,255,0.1)",
+                }}
+              >
+                <User className="size-5" strokeWidth={2} />
+              </div>
+              <span
+                className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2"
+                style={{
+                  backgroundColor: "#10B981",
+                  borderColor: "rgba(15, 37, 86, 1)",
+                  animation: "pulseDot 2s ease-in-out infinite",
+                }}
+              />
+            </div>
+            <div className="min-w-0 flex-1 leading-tight">
+              <p className="truncate text-[13px] font-semibold text-white">{session.name}</p>
+              <p className="truncate text-[11px] text-[#93C5FD]/80">{session.email}</p>
+            </div>
+          </div>
+        </div>
       </aside>
 
       {open ? (
         <button
           aria-label="Close menu"
           onClick={() => setOpen(false)}
-          className="fixed inset-0 z-30 bg-foreground/30 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/40 backdrop-blur-sm lg:hidden"
         />
       ) : null}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="z-20 flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border/70 bg-card/70 px-4 py-2 backdrop-blur-md md:px-8">
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" className="lg:hidden" onClick={() => setOpen(true)}>
-              Menu
-            </Button>
-            <Badge tone="primary">
-              {session.role === "patient" ? "Patient area" : session.role === "doctor" ? "Doctor area" : "Admin area"}
-            </Badge>
-          </div>
-
-          <div className="relative" ref={accountRef}>
+        <header className="glass-header z-20 flex min-h-[72px] shrink-0 items-center justify-between gap-3 px-4 py-3 md:px-8">
+          <div className="flex items-center gap-3 min-w-0">
             <button
               type="button"
-              aria-haspopup="menu"
-              aria-expanded={accountOpen}
-              onClick={() => setAccountOpen((value) => !value)}
-              className="flex items-center gap-2.5 rounded-2xl bg-secondary px-2.5 py-1.5 text-left transition-colors hover:bg-secondary/80"
+              className="grid size-10 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors lg:hidden"
+              onClick={() => setOpen(true)}
+              aria-label="Open menu"
             >
-              <span className="grid size-9 shrink-0 place-items-center rounded-full bg-card text-muted-foreground shadow-sm ring-1 ring-border">
-                <User className="size-4" strokeWidth={2} aria-hidden />
-              </span>
-              <span className="min-w-0">
-                <span className="block truncate text-[13px] font-medium text-foreground">{session.name}</span>
-              </span>
-              <ChevronDown
-                className={cn("size-4 shrink-0 text-muted-foreground transition-transform", accountOpen && "rotate-180")}
-                aria-hidden
+              <Menu className="size-5" strokeWidth={2} />
+            </button>
+            <div className="hidden md:flex items-center gap-2.5">
+              <Badge tone="primary" className="px-3 py-1.5 rounded-xl text-[11px]">
+                {session.role === "patient"
+                  ? "Patient Area"
+                  : session.role === "doctor"
+                    ? "Doctor Area"
+                    : "Super Admin"}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="relative hidden md:block w-[420px] max-w-[45vw]">
+              <Search
+                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+                strokeWidth={2}
               />
+              <input
+                type="text"
+                placeholder="Search patients, appointments..."
+                className="h-11 w-full rounded-2xl border border-border/70 bg-card/60 pl-11 pr-20 text-sm text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/30 focus:bg-card focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-sm"
+              />
+              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex h-6 items-center gap-0.5 rounded-lg border border-border/70 bg-muted px-1.5 font-mono text-[10.5px] font-semibold text-muted-foreground">
+                <span>⌘</span>
+                <span>K</span>
+              </kbd>
+            </div>
+
+            <div ref={notifRef} className="relative">
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={notificationOpen}
+                onClick={() => setNotificationOpen((v) => !v)}
+                className="relative grid size-11 shrink-0 place-items-center rounded-2xl border border-border/70 bg-card/60 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:shadow-sm"
+              >
+                <Bell className="size-[19px]" strokeWidth={2} />
+                {notificationsCount > 0 ? (
+                  <span
+                    className="absolute top-2 right-2 grid min-w-[18px] h-4.5 px-1 place-items-center rounded-full text-[10px] font-bold text-white"
+                    style={{
+                      background: "linear-gradient(135deg, #EF4444 0%, #F43F5E 100%)",
+                      boxShadow: "0 2px 6px -1px rgba(239, 68, 68, 0.55)",
+                    }}
+                  >
+                    {notificationsCount}
+                  </span>
+                ) : null}
+              </button>
+              {notificationOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+                >
+                  <div className="border-b border-border px-5 py-4">
+                    <h4 className="section-title text-[15px]">Notifications</h4>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Latest activity in your clinic
+                    </p>
+                  </div>
+                  <div className="max-h-80 overflow-y-auto scrollbar-thin">
+                    {[
+                      {
+                        title: "New appointment booked",
+                        detail: "Emma Watson booked a General Consultation",
+                        time: "2 min ago",
+                        dot: "#3B82F6",
+                      },
+                      {
+                        title: "Patient follow-up due",
+                        detail: "John Miller requires follow-up check",
+                        time: "1 hour ago",
+                        dot: "#F59E0B",
+                      },
+                      {
+                        title: "Report uploaded",
+                        detail: "Sophia Brown uploaded lab results",
+                        time: "3 hours ago",
+                        dot: "#10B981",
+                      },
+                    ].map((n, i) => (
+                      <div
+                        key={i}
+                        className="flex gap-3 border-b border-border/60 px-5 py-3.5 transition-colors hover:bg-muted/40 last:border-b-0 cursor-pointer"
+                      >
+                        <span
+                          className="mt-1.5 size-2 shrink-0 rounded-full"
+                          style={{ backgroundColor: n.dot }}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-semibold text-foreground truncate">
+                            {n.title}
+                          </p>
+                          <p className="mt-0.5 text-[12px] text-muted-foreground truncate">
+                            {n.detail}
+                          </p>
+                          <p className="mt-1 font-mono text-[10.5px] text-muted-foreground/80">
+                            {n.time}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="border-t border-border px-5 py-3 bg-muted/30">
+                    <Button variant="soft" size="sm" className="w-full rounded-xl">
+                      View all notifications
+                    </Button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <button
+              type="button"
+              className="relative hidden sm:grid size-11 shrink-0 place-items-center rounded-2xl border border-border/70 bg-card/60 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:shadow-sm"
+            >
+              <MessageSquare className="size-[19px]" strokeWidth={2} />
             </button>
 
-            {accountOpen ? (
-              <div
-                role="menu"
-                className="absolute right-0 z-50 mt-2 w-56 overflow-hidden rounded-xl border border-primary/35 bg-card shadow-panel"
+            <div className="relative" ref={accountRef}>
+              <button
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={accountOpen}
+                onClick={() => setAccountOpen((value) => !value)}
+                className="flex items-center gap-2.5 rounded-2xl border border-border/70 bg-card/60 pl-1.5 pr-3 py-1.5 text-left transition-all hover:bg-secondary hover:shadow-sm"
               >
-                <div className="border-b border-border px-3.5 py-2.5">
-                  <SectionLabel>My account</SectionLabel>
-                  <p className="mt-1 truncate text-[12px] text-muted-foreground">{session.email}</p>
-                </div>
-                <div className="border-b border-border py-1">
-                  {accountLinks.map((item) => (
-                    <Link
-                      key={item.to}
-                      {...({ to: item.to } as LinkProps)}
-                      role="menuitem"
-                      onClick={() => setAccountOpen(false)}
-                      className="block px-3.5 py-2 text-[13px] text-foreground transition-colors hover:bg-secondary"
-                    >
-                      {item.label}
-                    </Link>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  role="menuitem"
-                  onClick={signOut}
-                  className="w-full px-3.5 py-2.5 text-left text-[13px] font-medium text-destructive transition-colors hover:bg-destructive/8"
+                <span
+                  className="grid size-8 shrink-0 place-items-center rounded-xl font-semibold text-white text-[12px]"
+                  style={{
+                    background: "linear-gradient(135deg, #6366F1 0%, #4F46E5 50%, #4338CA 100%)",
+                    boxShadow: "0 2px 8px -2px rgba(99, 102, 241, 0.45)",
+                  }}
                 >
-                  Sign out
-                </button>
-              </div>
-            ) : null}
+                  {session.name
+                    .replace(/^Dr\.\s+/i, "")
+                    .split(" ")
+                    .slice(0, 2)
+                    .map((w) => w[0])
+                    .join("")
+                    .toUpperCase()}
+                </span>
+                <span className="hidden md:block min-w-0 leading-tight">
+                  <span className="block truncate text-[13px] font-semibold text-foreground">
+                    {session.name}
+                  </span>
+                  <span className="block truncate text-[11px] text-muted-foreground">
+                    {session.role === "doctor"
+                      ? "General Physician"
+                      : session.role === "admin"
+                        ? "Administrator"
+                        : "Patient"}
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "size-4 shrink-0 text-muted-foreground transition-transform",
+                    accountOpen && "rotate-180",
+                  )}
+                  aria-hidden
+                />
+              </button>
+
+              {accountOpen ? (
+                <div
+                  role="menu"
+                  className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+                >
+                  <div className="border-b border-border p-5 bg-muted/20">
+                    <div className="flex items-center gap-3.5">
+                      <span
+                        className="grid size-12 shrink-0 place-items-center rounded-2xl font-bold text-white"
+                        style={{
+                          background: "linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)",
+                        }}
+                      >
+                        {session.name
+                          .replace(/^Dr\.\s+/i, "")
+                          .split(" ")
+                          .slice(0, 2)
+                          .map((w) => w[0])
+                          .join("")
+                          .toUpperCase()}
+                      </span>
+                      <div className="min-w-0 flex-1 leading-tight">
+                        <p className="truncate text-[14px] font-bold text-foreground">
+                          {session.name}
+                        </p>
+                        <p className="truncate text-[12px] text-muted-foreground mt-0.5">
+                          {session.email}
+                        </p>
+                        <Badge tone="primary" className="mt-2 px-2.5 py-0.5 rounded-lg">
+                          {session.role.toUpperCase()}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="border-b border-border py-1.5">
+                    {accountLinks.map((item) => (
+                      <Link
+                        key={item.to}
+                        {...({ to: item.to } as LinkProps)}
+                        role="menuitem"
+                        onClick={() => setAccountOpen(false)}
+                        className="flex items-center gap-3 mx-1.5 my-0.5 px-3.5 py-2.5 rounded-xl text-[13px] font-medium text-foreground transition-colors hover:bg-secondary"
+                      >
+                        <span className="grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground">
+                          {getIcon(item.label)}
+                        </span>
+                        {item.label}
+                      </Link>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={signOut}
+                    className="flex items-center gap-3 mx-1.5 my-1.5 w-[calc(100%-12px)] px-3.5 py-3 rounded-xl text-left text-[13px] font-semibold text-destructive transition-colors hover:bg-destructive/8"
+                  >
+                    <span className="grid size-8 place-items-center rounded-lg bg-destructive/10 text-destructive">
+                      <LogOut className="size-4.5" strokeWidth={2} />
+                    </span>
+                    Sign out
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-8">{children}</main>
+        <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-8 scrollbar-thin">
+          <div className="mx-auto w-full max-w-[1480px]">{children}</div>
+        </main>
       </div>
     </div>
   );

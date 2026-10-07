@@ -9,7 +9,7 @@ export const Route = createFileRoute("/admin")({
     if (location.pathname === "/admin/login") return;
     const session = getSession();
     if (!session?.token || session.role !== "admin") {
-      throw redirect({ to: "/admin/login" });
+      throw redirect({ to: "/" });
     }
   },
   component: AdminLayout,
@@ -35,7 +35,7 @@ function AdminLayout() {
     if (isLogin) return;
     const current = getSession();
     if (!current?.token || current.role !== "admin") {
-      void router.navigate({ to: "/admin/login" });
+      void router.navigate({ to: "/" });
       return;
     }
     setSession(current);
