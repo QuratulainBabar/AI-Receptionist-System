@@ -11,7 +11,8 @@ concurrency:
 
 env:
   VITE_API_URL: https://aidoctor.toolkitpro.cloud/backend
-  DEPLOY_ROOT: /home/limiria/aidoctor.toolkitpro.cloud
+  FRONTEND_DIR: /home/limiria/public_html/aidoctor
+  APP_DIR: /home/limiria/aidoctor.toolkitpro.cloud/app
   NODE_VERSION: "20"
 
 jobs:
@@ -53,16 +54,15 @@ jobs:
           cp backend/package-lock.json deploy-backend/package-lock.json
           cp backend/ecosystem.config.cjs deploy-backend/ecosystem.config.cjs
 
-      - name: Deploy frontend to public_html
+      - name: Deploy frontend
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
-          # Use directory source so hidden files (e.g. .htaccess) are included
           source: dist/
-          target: ${{ env.DEPLOY_ROOT }}/public_html
+          target: ${{ env.FRONTEND_DIR }}
           strip_components: 1
           overwrite: true
 
@@ -74,7 +74,7 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           port: ${{ secrets.SSH_PORT || 22 }}
           source: deploy-backend/
-          target: ${{ env.DEPLOY_ROOT }}/app
+          target: ${{ env.APP_DIR }}
           strip_components: 1
           overwrite: true
 
@@ -87,12 +87,19 @@ jobs:
           port: ${{ secrets.SSH_PORT || 22 }}
           script: |
             set -e
-            APP_DIR="${{ env.DEPLOY_ROOT }}/app"
+            export PATH="/home/limiria/.npm-global/bin:/usr/local/bin:/usr/bin:$PATH"
+            APP_DIR="${{ env.APP_DIR }}"
+            FRONTEND_DIR="${{ env.FRONTEND_DIR }}"
             cd "$APP_DIR"
 
             if [ ! -f .env ]; then
               echo "Missing $APP_DIR/.env — create it on the server before deploy (see .github/DEPLOY.md)."
               exit 1
+            fi
+
+            # Ensure .htaccess from the frontend build is present (proxy + SPA)
+            if [ ! -f "$FRONTEND_DIR/.htaccess" ]; then
+              echo "Warning: $FRONTEND_DIR/.htaccess missing after frontend deploy"
             fi
 
             mkdir -p uploads

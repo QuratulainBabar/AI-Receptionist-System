@@ -1,8 +1,12 @@
-# SPA fallback for CyberPanel / OpenLiteSpeed (frontend routes).
-# /backend is handled by an OpenLiteSpeed proxy context (see .github/DEPLOY.md).
+# Live docroot: /home/limiria/public_html/aidoctor
+# Proxy /backend/* → Node (PM2 aidoctor-api on :4000), then SPA fallback.
 <IfModule mod_rewrite.c>
   RewriteEngine On
   RewriteBase /
+
+  RewriteCond %{THE_REQUEST} \s/+backend/([^\s?]*)
+  RewriteRule ^ http://127.0.0.1:4000/%1 [P,L]
+
   RewriteRule ^index\.html$ - [L]
   RewriteCond %{REQUEST_FILENAME} !-f
   RewriteCond %{REQUEST_FILENAME} !-d
