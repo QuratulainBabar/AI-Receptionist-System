@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { Check } from "lucide-react";
 import { Badge, Button, EmptyNote, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
+import { cn } from "@/lib/utils";
 import { doctorSubscriptionApi, formatApiError, type ApiSubscription, type ApiSubscriptionPlan } from "@/lib/api";
 
 export const Route = createFileRoute("/doctor/subscription")({
@@ -76,7 +78,6 @@ function DoctorSubscriptionPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Billing"
         title="Your subscription"
         description="Your plan is active. Stripe remains the source of truth for payment and renewal dates."
       />
@@ -125,14 +126,28 @@ function DoctorSubscriptionPage() {
               {plans.map((plan) => {
                 const current = subscription?.planId === plan.id && ["ACTIVE", "TRIALING", "PAST_DUE"].includes(subscription.status);
                 return (
-                  <Panel key={plan.id} className="flex flex-col p-5">
+                  <Panel
+                    key={plan.id}
+                    className={cn(
+                      "flex flex-col p-5 ring-1 ring-slate-300",
+                      current && "ring-2 ring-blue-500",
+                    )}
+                  >
                     <p className="text-sm font-semibold">{plan.name}</p>
                     <p className="mt-1 text-2xl font-semibold">{plan.amountLabel}</p>
                     <p className="text-xs text-muted-foreground">per {plan.billingCycleLabel.toLowerCase().replace("ly", "")}</p>
                     <p className="mt-3 text-sm text-muted-foreground">{plan.description || "Clinic subscription plan"}</p>
-                    <ul className="mt-4 flex-1 space-y-2 text-sm">
+                    <ul className="mt-4 flex-1 space-y-2.5 text-sm">
                       {plan.features.map((feature) => (
-                        <li key={feature}>{feature}</li>
+                        <li key={feature} className="flex items-start gap-2.5">
+                          <span
+                            className="mt-0.5 grid size-4 shrink-0 place-items-center rounded-full text-white"
+                            style={{ background: "linear-gradient(135deg, #10B981, #059669)" }}
+                          >
+                            <Check className="size-2.5" strokeWidth={3} />
+                          </span>
+                          <span className="leading-snug text-foreground">{feature}</span>
+                        </li>
                       ))}
                     </ul>
                     <Button

@@ -17,6 +17,7 @@ import { doctorActivityRouter } from "./routes/doctor-activity.js";
 import { doctorDashboardRouter } from "./routes/doctor-dashboard.js";
 import { doctorProfileRouter } from "./routes/doctor-profile.js";
 import { doctorAvailabilityRouter } from "./routes/doctor-availability.js";
+import { doctorSynthflowRouter } from "./routes/doctor-synthflow.js";
 import { synthflowRouter } from "./routes/synthflow.js";
 import {
   doctorRecordRequestsRouter,
@@ -26,7 +27,7 @@ import * as recordRequestsController from "./controllers/record-requests.control
 import { errorHandler } from "./middleware/errorHandler.js";
 import { env, synthflowWebhookUrls } from "./config/env.js";
 import { syncAgentWebhooksOnBoot } from "./services/synthflow.client.js";
-import { resolveBootAgentId } from "./services/clinic-synthflow.service.js";
+import { resolveBootAgentId, syncClinicDirectoryToSynthflow } from "./services/clinic-synthflow.service.js";
 import {
   adminSubscriptionsRouter,
   doctorSubscriptionsRouter,
@@ -78,6 +79,7 @@ app.use("/api/doctor/activity", doctorActivityRouter);
 app.use("/api/doctor/dashboard", doctorDashboardRouter);
 app.use("/api/doctor/profile", doctorProfileRouter);
 app.use("/api/doctor/availability", doctorAvailabilityRouter);
+app.use("/api/doctor/synthflow", doctorSynthflowRouter);
 app.use("/api/admin/subscriptions", adminSubscriptionsRouter);
 app.use("/api/doctor/subscription", doctorSubscriptionsRouter);
 app.use("/api/webhooks/synthflow", synthflowRouter);
@@ -128,6 +130,15 @@ app.listen(env.PORT, () => {
   console.log(`  Data Webhook URL:    ${urls.data}`);
   void warnIfPublicApiUnreachable();
   void resolveBootAgentId()
-    .then((agentId) => syncAgentWebhooksOnBoot(agentId))
+    .then(async (agentId) => {
+      await syncAgentWebhooksOnBoot(agentId);
+      if (!env.SYNTHFLOW_SYNC_WEBHOOKS) return;
+      await syncClinicDirectoryToSynthflow().catch((error) => {
+        console.warn(
+          "[synthflow] Could not refresh the receptionist prompt:",
+          error instanceof Error ? error.message : error,
+        );
+      });
+    })
     .catch(() => syncAgentWebhooksOnBoot());
 });

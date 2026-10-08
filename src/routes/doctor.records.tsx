@@ -135,7 +135,6 @@ function DoctorRecords() {
   return (
     <>
       <PageHeader
-        eyebrow="Doctor"
         title="History & reports"
         description={
           patient

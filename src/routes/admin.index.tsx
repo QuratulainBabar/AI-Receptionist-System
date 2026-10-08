@@ -29,16 +29,11 @@ import { adminApi, formatApiError, type AdminStats, type AdminVoiceCall } from "
 import { initials } from "@/lib/mock-data";
 import {
   Stethoscope,
-  Users,
   Calendar,
   PhoneCall,
   CreditCard,
-  DollarSign,
-  Activity,
   ArrowRight,
   Phone,
-  Shield,
-  CheckCircle2,
   AlertCircle,
   Clock,
 } from "lucide-react";
@@ -124,61 +119,25 @@ function AdminDashboard() {
       label: "Doctors",
       value: String(stats?.doctors ?? "—"),
       icon: "doctors" as const,
-      trend: "+12%",
-      trendLabel: "this month",
-      trendPositive: true,
-      detail: `${stats?.activeDoctors ?? 0} active`,
       miniChart: [32, 38, 45, 52, 60, 75, 95],
     },
     {
       label: "Patients",
       value: String(stats?.patients ?? "—"),
       icon: "patients" as const,
-      trend: "+18%",
-      trendLabel: "this month",
-      trendPositive: true,
-      detail: `${stats?.activePatients ?? 0} active`,
       miniChart: [420, 540, 680, 820, 980, 1120, 1248],
     },
     {
       label: "Voice Calls",
       value: String(stats?.voiceCalls ?? "—"),
       icon: "calls" as const,
-      trend: "+24%",
-      trendLabel: "this week",
-      trendPositive: true,
-      detail: `${stats?.phoneBookings ?? 0} with booking`,
       miniChart: [80, 110, 150, 190, 240, 310, 385],
     },
     {
       label: "Appointments",
       value: String(stats?.appointments ?? "—"),
       icon: "appointments" as const,
-      trend: "+15%",
-      trendLabel: "this week",
-      trendPositive: true,
-      detail: "All channels",
       miniChart: [180, 220, 280, 340, 420, 500, 580],
-    },
-    {
-      label: "Phone Bookings",
-      value: String(stats?.phoneBookings ?? "—"),
-      icon: "bookings" as const,
-      trend: "+32%",
-      trendLabel: "this month",
-      trendPositive: true,
-      detail: "Calls linked to APT",
-      miniChart: [24, 38, 56, 78, 102, 135, 168],
-    },
-    {
-      label: "Subscriptions",
-      value: String(stats?.activeSubscriptions ?? "—"),
-      icon: "subscriptions" as const,
-      trend: "+9.5%",
-      trendLabel: "this month",
-      trendPositive: true,
-      detail: "Active or trialing",
-      miniChart: [28, 35, 42, 50, 60, 72, 84],
     },
   ];
 
@@ -186,16 +145,14 @@ function AdminDashboard() {
     <>
       <div className="mb-7 flex flex-wrap items-end justify-between gap-5">
         <div className="min-w-0 max-w-3xl">
-          <p className="label-mono text-blue-600/80 mb-1">Super Admin Console</p>
           <h1
-            className="font-[--font-display] font-extrabold tracking-tight text-foreground text-balance flex items-center gap-3 flex-wrap"
+            className="font-jakarta font-extrabold tracking-tight text-foreground text-balance"
             style={{
               fontSize: "clamp(1.75rem, 3vw, 2.25rem)",
               letterSpacing: "-0.03em",
             }}
           >
             Platform Analytics
-            <Shield className="size-8" strokeWidth={2.2} style={{ color: "#1D4ED8" }} />
           </h1>
           <p
             className="mt-2.5 text-[14.5px] leading-relaxed max-w-2xl"
@@ -216,12 +173,6 @@ function AdminDashboard() {
             <Button variant="outline" size="md" className="rounded-xl">
               <Calendar className="size-4.5" strokeWidth={2} />
               Appointments
-            </Button>
-          </Link>
-          <Link to="/admin/synthflow">
-            <Button variant="outline" size="md" className="rounded-xl">
-              <Activity className="size-4.5" strokeWidth={2} />
-              Synthflow
             </Button>
           </Link>
           <Link to="/admin/subscriptions">
@@ -245,17 +196,13 @@ function AdminDashboard() {
         <EmptyNote>Loading dashboard…</EmptyNote>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             {kpiData.map((k) => (
               <StatCard
                 key={k.label}
                 label={k.label}
                 value={k.value}
                 icon={k.icon}
-                trend={k.trend}
-                trendLabel={k.trendLabel}
-                trendPositive={k.trendPositive}
-                detail={k.detail}
                 miniChart={k.miniChart}
               />
             ))}
@@ -630,120 +577,6 @@ function AdminDashboard() {
                 ))}
               </div>
             </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {[
-              {
-                title: "Voice Calls",
-                desc: "Review inbound AI receptionist calls and see which calls produced a booking.",
-                to: "/admin/voice-calls",
-                icon: <PhoneCall className="size-5" strokeWidth={2.3} />,
-                tone: "primary",
-              },
-              {
-                title: "Appointments",
-                desc: "Browse all appointment references, doctors, patients, and visit reasons.",
-                to: "/admin/appointments",
-                icon: <Calendar className="size-5" strokeWidth={2.3} />,
-                tone: "info",
-              },
-              {
-                title: "Doctors",
-                desc: "Search accounts, review details and activate or deactivate access.",
-                to: "/admin/doctors",
-                icon: <Stethoscope className="size-5" strokeWidth={2.3} />,
-                tone: "success",
-              },
-              {
-                title: "Patients",
-                desc: "Browse patient accounts and manage active status and records.",
-                to: "/admin/patients",
-                icon: <Users className="size-5" strokeWidth={2.3} />,
-                tone: "accent",
-              },
-              {
-                title: "Subscriptions",
-                desc: "Manage Stripe subscription plans, pricing and billing status.",
-                to: "/admin/subscriptions",
-                icon: <DollarSign className="size-5" strokeWidth={2.3} />,
-                tone: "warning",
-              },
-              {
-                title: "Synthflow AI",
-                desc: "Configure voice AI agent settings, phone numbers and call flow.",
-                to: "/admin/synthflow",
-                icon: <Activity className="size-5" strokeWidth={2.3} />,
-                tone: "primary",
-              },
-              {
-                title: "Billing Overview",
-                desc: "Track platform revenue, MRR, churn and payment issues.",
-                to: "/admin/subscriptions",
-                icon: <CreditCard className="size-5" strokeWidth={2.3} />,
-                tone: "success",
-              },
-              {
-                title: "Platform Health",
-                desc: "System status, API health, call success rates and error monitoring.",
-                to: "/admin/voice-calls",
-                icon: <CheckCircle2 className="size-5" strokeWidth={2.3} />,
-                tone: "info",
-              },
-            ].map((card, i) => (
-              <Link key={i} to={card.to}>
-                <div
-                  className="group h-full rounded-2xl p-5 transition-all duration-300 hover:-translate-y-1 cursor-pointer"
-                  style={{
-                    background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
-                    border: "1px solid #EEF2F7",
-                    boxShadow:
-                      "0 1px 2px 0 rgba(15,23,42,0.03), 0 8px 20px -16px rgba(15,23,42,0.12)",
-                  }}
-                >
-                  <div
-                    className="grid size-11 place-items-center rounded-2xl mb-4 transition-transform group-hover:scale-110"
-                    style={{
-                      background:
-                        card.tone === "primary"
-                          ? "linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(59, 130, 246, 0.06))"
-                          : card.tone === "success"
-                            ? "linear-gradient(135deg, rgba(16, 185, 129, 0.14), rgba(16, 185, 129, 0.06))"
-                            : card.tone === "warning"
-                              ? "linear-gradient(135deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.06))"
-                              : card.tone === "accent"
-                                ? "linear-gradient(135deg, rgba(139, 92, 246, 0.14), rgba(139, 92, 246, 0.06))"
-                                : "linear-gradient(135deg, rgba(14, 165, 233, 0.14), rgba(14, 165, 233, 0.06))",
-                      color:
-                        card.tone === "primary"
-                          ? "#1D4ED8"
-                          : card.tone === "success"
-                            ? "#047857"
-                            : card.tone === "warning"
-                              ? "#B45309"
-                              : card.tone === "accent"
-                                ? "#6D28D9"
-                                : "#0369A1",
-                    }}
-                  >
-                    {card.icon}
-                  </div>
-                  <h4 className="font-[--font-display] text-[14.5px] font-extrabold tracking-tight text-foreground mb-1.5">
-                    {card.title}
-                  </h4>
-                  <p
-                    className="text-[12.5px] leading-relaxed text-muted-foreground mb-4"
-                    style={{ color: "#64748B" }}
-                  >
-                    {card.desc}
-                  </p>
-                  <span className="inline-flex items-center gap-1.5 text-[12.5px] font-bold text-blue-600 transition-all group-hover:gap-2.5">
-                    Open module
-                    <ArrowRight className="size-4" strokeWidth={2.5} />
-                  </span>
-                </div>
-              </Link>
-            ))}
           </div>
         </>
       )}

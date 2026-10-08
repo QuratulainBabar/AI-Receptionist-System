@@ -1,7 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { formatClinicDate, formatClinicTime } from "../utils/clinic-time.js";
-import type { PublicAppointment } from "./appointments.service.js";
+import { excludeUnconfirmedVoiceHold, type PublicAppointment } from "./appointments.service.js";
 import { fetchCallRecordingUrl } from "./synthflow.client.js";
 
 export type AdminVoiceCallAppointment = {
@@ -287,17 +287,24 @@ export async function listAppointmentsForAdmin(input: { q?: string; limit?: numb
   const q = input.q?.trim();
 
   const rows = await prisma.appointment.findMany({
-    where: q
-      ? {
-          OR: [
-            { reference: { contains: q, mode: "insensitive" } },
-            { reason: { contains: q, mode: "insensitive" } },
-            { patient: { fullName: { contains: q, mode: "insensitive" } } },
-            { patient: { reference: { contains: q, mode: "insensitive" } } },
-            { doctorUser: { fullName: { contains: q, mode: "insensitive" } } },
-          ],
-        }
-      : undefined,
+    where: {
+      AND: [
+        excludeUnconfirmedVoiceHold,
+        ...(q
+          ? [
+              {
+                OR: [
+                  { reference: { contains: q, mode: "insensitive" as const } },
+                  { reason: { contains: q, mode: "insensitive" as const } },
+                  { patient: { fullName: { contains: q, mode: "insensitive" as const } } },
+                  { patient: { reference: { contains: q, mode: "insensitive" as const } } },
+                  { doctorUser: { fullName: { contains: q, mode: "insensitive" as const } } },
+                ],
+              },
+            ]
+          : []),
+      ],
+    },
     include: {
       patient: true,
       doctorUser: true,

@@ -1,4 +1,5 @@
 import { env, synthflowWebhookUrls } from "../config/env.js";
+import { greetingWithOpeningLine } from "./clinic-doctor.service.js";
 import { normalizePhone } from "../utils/phone.js";
 
 type SynthflowJson = Record<string, unknown>;
@@ -248,30 +249,36 @@ export async function updateCustomActionUrl(actionId: string, url: string) {
  * Keep book/availability custom actions pointed at the current PUBLIC_API_URL.
  * Existing actions keep stale ngrok tunnels unless refreshed.
  */
+const OPENING_RULE = `OPENING RULE:
+The greeting already includes the clinic welcome, the doctor's name, and the consultation fee only when that doctor has a fee.
+Do not add specialty, years of experience, qualifications, certifications, bio, languages, hospital, or any other profile detail.
+If the greeting did not already say the doctor's name, say only opening_doctor_line, then ask how you can help.
+If the caller asks about the doctor, repeat only the name and, when a fee is set, the consultation fee. If there is no fee, say only the name.`;
+
 const AVAILABILITY_SPEAK_RULE = `AVAILABILITY SPEAK RULE:
-This clinic has one doctor. When the caller asks for a time or wants to book, call check_doctor_availability.
-Say spoken_summary exactly. It is synced from the Doctor Dashboard. Include the fee and both open times.
-Do not invent a time or another doctor. Do not offer only one time when two are listed. Then ask which of those times they want, and wait.`;
+When the caller wants to book or asks for a time, call check_doctor_availability.
+Say spoken_summary exactly. It lists only currently open appointment times from the Doctor Dashboard availability.
+Do not add the doctor's specialty, experience, qualifications, bio, languages, hospital, fee, or any other profile detail.
+Do not invent a time. Then wait for the caller to choose one of those times.`;
 
 const PHONE_APPOINTMENT_RULE = `PHONE APPOINTMENT RULE (FOLLOW BEFORE ANY BOOKING):
 Call check_existing_appointment only after the caller says a phone number. Do not call it when they say their name.
 If has_active_appointment is true, say exactly: I did not book a new appointment. This number already has an active appointment. Please complete or cancel that one first.
 If the caller asks "is my appointment confirmed?", say no. The new appointment was not booked. Only the older appointment is still confirmed.
-If has_active_appointment is false, or the previous appointment is Completed or Cancelled, continue and book.
-Never say a new appointment is confirmed unless verify_booking_otp returns appointment_confirmed true.`;
+If has_active_appointment is false, or the previous appointment is Completed or Cancelled, continue.
+Never say a new appointment is booked or confirmed unless verify_booking_otp returns appointment_confirmed true.`;
 
 const BOOKING_OTP_RULE = `BOOKING OTP RULE:
-After the caller picks a time with the clinic doctor, and you have their name, phone, and reason, call book_appointment.
-Do not read the otp value aloud. Immediately call send_booking_otp with otp and expires_seconds from that response.
-Do not pass to_phone_number. send_booking_otp always texts the phone the caller is calling from on this live call.
-If send_booking_otp fails, say the text was not delivered. Do not ask for a code.
-Then ask the caller to read the six digits. Call verify_booking_otp with the booking phone and the digits they speak.
-Say the appointment is confirmed only when appointment_confirmed is true.
-If the code is wrong, expired, or already used, say the appointment is not confirmed and that time was released. Never invent a code.`;
+The appointment is not booked and not confirmed until the caller says the correct 6-digit verification code and verify_booking_otp returns appointment_confirmed true.
+After the caller picks a real open time and you have their name, phone, and reason, call book_appointment. That only holds the time. It does not book or confirm.
+Do not read the otp value aloud. Do not pass to_phone_number. Ask the caller to say the six-digit verification code.
+Then call verify_booking_otp with the booking phone and the digits they speak.
+If appointment_confirmed is false, say the appointment is not booked and not confirmed.
+Never invent a code. Never say the visit is booked before that check succeeds.`;
 
 /** Prefix rules baked into every Sync so Fine-tuner matches live calls. */
 export function synthflowPromptRulePrefix() {
-  return `${BOOKING_OTP_RULE}\n\n${AVAILABILITY_SPEAK_RULE}\n\n${PHONE_APPOINTMENT_RULE}`;
+  return `${OPENING_RULE}\n\n${BOOKING_OTP_RULE}\n\n${AVAILABILITY_SPEAK_RULE}\n\n${PHONE_APPOINTMENT_RULE}`;
 }
 
 export async function syncCustomActionWebhookUrls(modelId?: string) {
@@ -281,7 +288,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "book_appointment",
       url: urls.bookAction,
       prompt:
-        "This does not confirm the appointment. If success is true, do not read otp aloud. Call send_booking_otp immediately with otp and expires_seconds from this response. Do not set the SMS recipient. The code is texted to the phone the caller is calling from. Then ask the caller to read the six digits and call verify_booking_otp. If success is false, say the message exactly and do not say the appointment is booked.",
+        "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Do not read otp aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not say the appointment is booked.",
       message_error: "Say the response message if one is present. Otherwise say the booking could not be saved.",
       jsonBody: {
         doctor_name: "<doctor_name>",
@@ -297,7 +304,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "check_doctor_availability",
       url: urls.availabilityAction,
       prompt:
-        "Say spoken_summary exactly, including the fee and both open times. Do not invent a time and do not mention only one time when two are listed. Then ask which of those times they want and wait.",
+        "Say spoken_summary exactly. It lists only open appointment times. Do not mention specialty, experience, qualifications, bio, languages, hospital, fee, or any other profile detail. Do not invent a time. Then ask which of those times they want and wait.",
       message_error: "Let me read the open times from the clinic schedule.",
     },
     {
@@ -323,7 +330,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "verify_booking_otp",
       url: urls.verifyOtpAction,
       prompt:
-        "Say the message exactly. If appointment_confirmed is true, tell the caller the appointment is confirmed and read the reference, doctor, date, and time. If appointment_confirmed is false, say the appointment is not confirmed. Do not invent a confirmation.",
+        "Say the message exactly. If appointment_confirmed is true, tell the caller the appointment is confirmed and read the reference, doctor, date, and time. If appointment_confirmed is false, say the appointment is not booked and not confirmed. Do not invent a confirmation.",
       message_error: "I could not check that code. The appointment is not confirmed.",
       jsonBody: { phone: "<phone>", otp: "<otp>", caller_phone: "<user_phone_number>" },
       create: {
@@ -505,7 +512,7 @@ async function ensureBookingOtpSmsAction() {
 function stripStaleMultiDoctorPrompt(prompt: string) {
   let next = prompt.replace(/\r\n/g, "\n");
   next = next.replace(
-    /^(BOOKING OTP RULE:|AVAILABILITY SPEAK RULE:|PHONE APPOINTMENT RULE)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
+    /^(OPENING RULE:|BOOKING OTP RULE:|AVAILABILITY SPEAK RULE:|PHONE APPOINTMENT RULE)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
     "",
   );
   next = next.replace(
@@ -580,6 +587,19 @@ async function ensurePhoneAppointmentRule(modelId: string) {
     prompt = `${BOOKING_OTP_RULE}\n\n${prompt}`.trim();
     changed = true;
   }
+  if (prompt.includes("OPENING RULE")) {
+    const refreshed = prompt.replace(
+      /OPENING RULE:[\s\S]*?(?=\n\n[A-Z]|\n\nYou are|$)/,
+      OPENING_RULE,
+    );
+    if (refreshed !== prompt) {
+      prompt = refreshed;
+      changed = true;
+    }
+  } else {
+    prompt = `${OPENING_RULE}\n\n${prompt}`.trim();
+    changed = true;
+  }
   if (prompt.includes("unless book_appointment returns success true")) {
     prompt = prompt.replaceAll(
       "unless book_appointment returns success true",
@@ -587,17 +607,24 @@ async function ensurePhoneAppointmentRule(modelId: string) {
     );
     changed = true;
   }
+  const greetingMessage = greetingWithOpeningLine(
+    typeof agent.greeting_message === "string" ? agent.greeting_message : "",
+  );
+  if (greetingMessage !== agent.greeting_message) changed = true;
+  if (agent.greeting_message_mode !== "agent_static") changed = true;
   if (!changed) {
-    console.log("[synthflow] System prompt already includes the phone, availability, and OTP rules");
+    console.log("[synthflow] System prompt already includes the opening, phone, availability, and OTP rules");
     return;
   }
   await updateAgent(modelId, {
     agent: {
       ...agent,
       prompt,
+      greeting_message: greetingMessage,
+      greeting_message_mode: "agent_static",
     },
   });
-  console.log("[synthflow] Phone appointment rule added to the live system prompt");
+  console.log("[synthflow] Opening, phone, availability, and OTP rules added to the live system prompt");
 }
 
 export async function attachActions(modelId: string, actionIds: string[]) {

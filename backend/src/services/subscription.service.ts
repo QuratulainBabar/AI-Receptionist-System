@@ -274,16 +274,17 @@ export async function getCurrentSubscriptionForUser(userId: string) {
 type DoctorModule = { id: string; label: string; to: string; group: string };
 
 const CLINICAL_MODULES: DoctorModule[] = [
-  { id: "schedule", label: "Appointment schedule", to: "/doctor/schedule", group: "Today" },
+  { id: "schedule", label: "Appointments", to: "/doctor/schedule", group: "Today" },
   { id: "notifications", label: "Notifications", to: "/doctor/notifications", group: "Today" },
-  { id: "patients", label: "Patient list", to: "/doctor/patients", group: "Patients" },
-  { id: "records", label: "History & reports", to: "/doctor/records", group: "Patients" },
-  { id: "activity", label: "Activity history", to: "/doctor/activity", group: "Patients" },
+  { id: "patients", label: "Patient List", to: "/doctor/patients", group: "Clinical" },
+  { id: "records", label: "Reports", to: "/doctor/records", group: "Clinical" },
+  { id: "activity", label: "Activity History", to: "/doctor/activity", group: "Clinical" },
 ];
 
 function modulesForPlan(ready: boolean): DoctorModule[] {
   const practice: DoctorModule[] = [
     { id: "dashboard", label: "Dashboard", to: "/doctor", group: "Today" },
+    { id: "synthflow", label: "Synthflow", to: "/doctor/synthflow", group: "Phone AI" },
     { id: "profile", label: "My profile", to: "/doctor/profile", group: "Practice" },
     { id: "availability", label: "Availability", to: "/doctor/availability", group: "Practice" },
     { id: "subscription", label: "Subscription", to: "/doctor/subscription", group: "Practice" },
@@ -292,8 +293,9 @@ function modulesForPlan(ready: boolean): DoctorModule[] {
   return [
     practice[0]!,
     ...CLINICAL_MODULES.filter((mod) => mod.group === "Today"),
-    ...practice.slice(1),
-    ...CLINICAL_MODULES.filter((mod) => mod.group === "Patients"),
+    ...CLINICAL_MODULES.filter((mod) => mod.group === "Clinical"),
+    practice[1]!,
+    ...practice.slice(2),
   ];
 }
 

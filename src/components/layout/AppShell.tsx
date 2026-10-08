@@ -1,7 +1,7 @@
 import { Link, useNavigate, type LinkProps } from "@tanstack/react-router";
 import {
   ChevronDown,
-  User,
+  ChevronRight,
   Bell,
   MessageSquare,
   Search,
@@ -22,7 +22,8 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
-import { Badge, Button, SectionLabel } from "@/components/ui/primitives";
+import { Button } from "@/components/ui/primitives";
+import { doctorNotificationsApi, type ApiDoctorNotification } from "@/lib/api";
 import { clearSession, type Session } from "@/lib/session";
 
 export type NavItem = { to: string; label: string; group: string; icon?: string };
@@ -33,14 +34,17 @@ const ICON_MAP: Record<string, ReactNode> = {
   Schedule: <Calendar className="size-[18px]" strokeWidth={2} />,
   Patients: <Users className="size-[18px]" strokeWidth={2} />,
   "Patient list": <Users className="size-[18px]" strokeWidth={2} />,
+  "Patient List": <Users className="size-[18px]" strokeWidth={2} />,
   "History & Reports": <FileText className="size-[18px]" strokeWidth={2} />,
   "History & reports": <FileText className="size-[18px]" strokeWidth={2} />,
   Records: <FileText className="size-[18px]" strokeWidth={2} />,
   Availability: <Clock className="size-[18px]" strokeWidth={2} />,
   Notifications: <Bell className="size-[18px]" strokeWidth={2} />,
   Profile: <UserCircle className="size-[18px]" strokeWidth={2} />,
+  "My profile": <UserCircle className="size-[18px]" strokeWidth={2} />,
   Settings: <Settings className="size-[18px]" strokeWidth={2} />,
   "Activity history": <Activity className="size-[18px]" strokeWidth={2} />,
+  "Activity History": <Activity className="size-[18px]" strokeWidth={2} />,
   Activity: <Activity className="size-[18px]" strokeWidth={2} />,
   Synthflow: <Phone className="size-[18px]" strokeWidth={2} />,
   "Voice calls": <Phone className="size-[18px]" strokeWidth={2} />,
@@ -76,6 +80,7 @@ export function AppShell({
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
+  const [notifications, setNotifications] = useState<ApiDoctorNotification[]>([]);
   const accountRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const groups = Array.from(new Set(nav.map((item) => item.group)));
@@ -90,14 +95,11 @@ export function AppShell({
         ]
       : session.role === "doctor"
         ? [
-            { to: "/doctor/patients", label: "Patient list" },
-            { to: "/doctor/records", label: "History & reports" },
-            { to: "/doctor/activity", label: "Activity history" },
+            { to: "/doctor/patients", label: "Patient List" },
+            { to: "/doctor/records", label: "Reports" },
+            { to: "/doctor/activity", label: "Activity History" },
           ]
-        : [
-            { to: "/admin/doctors", label: "Manage doctors" },
-            { to: "/admin/patients", label: "Manage patients" },
-          ]);
+        : []);
 
   function signOut() {
     const loginPath = "/";
@@ -137,7 +139,33 @@ export function AppShell({
     };
   }, [accountOpen, notificationOpen]);
 
-  const notificationsCount = session.role === "doctor" ? 3 : 0;
+  useEffect(() => {
+    if (session.role !== "doctor") return;
+    let cancelled = false;
+
+    async function loadNotifications() {
+      try {
+        const result = await doctorNotificationsApi.list();
+        if (!cancelled) setNotifications(result.notifications);
+      } catch {
+        // Keep the last known list if a refresh fails.
+      }
+    }
+
+    void loadNotifications();
+    const timer = window.setInterval(() => {
+      void loadNotifications();
+    }, 30_000);
+    window.addEventListener("focus", loadNotifications);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", loadNotifications);
+    };
+  }, [session.role]);
+
+  const notificationsCount = session.role === "doctor" ? notifications.length : 0;
+  const notificationBadge = notificationsCount > 99 ? "99+" : String(notificationsCount);
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
@@ -174,19 +202,18 @@ export function AppShell({
               <p className="font-[--font-display] text-[15.5px] font-bold text-white tracking-tight">
                 AI Receptionist
               </p>
-              <p className="text-[11px] font-medium text-[#60A5FA]/80 mt-0.5 uppercase tracking-[0.14em]">
-                {brandSuffix}
-              </p>
+              {brandSuffix ? (
+                <p className="text-[11px] font-medium text-[#60A5FA]/80 mt-0.5 uppercase tracking-[0.14em]">
+                  {brandSuffix}
+                </p>
+              ) : null}
             </div>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-4 pb-6 scrollbar-thin">
+        <nav className="flex-1 overflow-y-auto px-4 pb-5 sidebar-scroll scroll-clip">
           {groups.map((group) => (
-            <div key={group} className="mb-5 first:mt-1">
-              <p className="px-3 pb-2 text-[10.5px] font-bold uppercase tracking-[0.18em] text-[#64748B]/70">
-                {group}
-              </p>
+            <div key={group} className="mb-1 first:mt-1.5">
               <div className="space-y-1">
                 {nav
                   .filter((item) => item.group === group)
@@ -212,7 +239,7 @@ export function AppShell({
                             boxShadow: "0 2px 8px -2px rgba(239, 68, 68, 0.6)",
                           }}
                         >
-                          {notificationsCount}
+                          {notificationBadge}
                         </span>
                       ) : null}
                     </Link>
@@ -221,42 +248,6 @@ export function AppShell({
             </div>
           ))}
         </nav>
-
-        <div
-          className="mx-4 mb-4 rounded-2xl p-4"
-          style={{
-            background:
-              "linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(99, 102, 241, 0.1) 100%)",
-            border: "1px solid rgba(59, 130, 246, 0.2)",
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <div className="relative">
-              <div
-                className="grid size-10 shrink-0 place-items-center rounded-xl font-semibold text-white"
-                style={{
-                  background:
-                    "linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%)",
-                  border: "1px solid rgba(255,255,255,0.1)",
-                }}
-              >
-                <User className="size-5" strokeWidth={2} />
-              </div>
-              <span
-                className="absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2"
-                style={{
-                  backgroundColor: "#10B981",
-                  borderColor: "rgba(15, 37, 86, 1)",
-                  animation: "pulseDot 2s ease-in-out infinite",
-                }}
-              />
-            </div>
-            <div className="min-w-0 flex-1 leading-tight">
-              <p className="truncate text-[13px] font-semibold text-white">{session.name}</p>
-              <p className="truncate text-[11px] text-[#93C5FD]/80">{session.email}</p>
-            </div>
-          </div>
-        </div>
       </aside>
 
       {open ? (
@@ -278,33 +269,26 @@ export function AppShell({
             >
               <Menu className="size-5" strokeWidth={2} />
             </button>
-            <div className="hidden md:flex items-center gap-2.5">
-              <Badge tone="primary" className="px-3 py-1.5 rounded-xl text-[11px]">
-                {session.role === "patient"
-                  ? "Patient Area"
-                  : session.role === "doctor"
-                    ? "Doctor Area"
-                    : "Super Admin"}
-              </Badge>
-            </div>
           </div>
 
           <div className="flex items-center gap-2 md:gap-3">
-            <div className="relative hidden md:block w-[420px] max-w-[45vw]">
-              <Search
-                className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
-                strokeWidth={2}
-              />
-              <input
-                type="text"
-                placeholder="Search patients, appointments..."
-                className="h-11 w-full rounded-2xl border border-border/70 bg-card/60 pl-11 pr-20 text-sm text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/30 focus:bg-card focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-sm"
-              />
-              <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex h-6 items-center gap-0.5 rounded-lg border border-border/70 bg-muted px-1.5 font-mono text-[10.5px] font-semibold text-muted-foreground">
-                <span>⌘</span>
-                <span>K</span>
-              </kbd>
-            </div>
+            {session.role === "patient" ? (
+              <div className="relative hidden md:block w-[420px] max-w-[45vw]">
+                <Search
+                  className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
+                  strokeWidth={2}
+                />
+                <input
+                  type="text"
+                  placeholder="Search patients, appointments..."
+                  className="h-11 w-full rounded-2xl border border-border/70 bg-card/60 pl-11 pr-20 text-sm text-foreground placeholder:text-muted-foreground/70 transition-all focus:border-primary/30 focus:bg-card focus:outline-none focus:ring-4 focus:ring-primary/10 shadow-sm"
+                />
+                <kbd className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 flex h-6 items-center gap-0.5 rounded-lg border border-border/70 bg-muted px-1.5 font-mono text-[10.5px] font-semibold text-muted-foreground">
+                  <span>⌘</span>
+                  <span>K</span>
+                </kbd>
+              </div>
+            ) : null}
 
             <div ref={notifRef} className="relative">
               <button
@@ -323,7 +307,7 @@ export function AppShell({
                       boxShadow: "0 2px 6px -1px rgba(239, 68, 68, 0.55)",
                     }}
                   >
-                    {notificationsCount}
+                    {notificationBadge}
                   </span>
                 ) : null}
               </button>
@@ -339,63 +323,67 @@ export function AppShell({
                     </p>
                   </div>
                   <div className="max-h-80 overflow-y-auto scrollbar-thin">
-                    {[
-                      {
-                        title: "New appointment booked",
-                        detail: "Emma Watson booked a General Consultation",
-                        time: "2 min ago",
-                        dot: "#3B82F6",
-                      },
-                      {
-                        title: "Patient follow-up due",
-                        detail: "John Miller requires follow-up check",
-                        time: "1 hour ago",
-                        dot: "#F59E0B",
-                      },
-                      {
-                        title: "Report uploaded",
-                        detail: "Sophia Brown uploaded lab results",
-                        time: "3 hours ago",
-                        dot: "#10B981",
-                      },
-                    ].map((n, i) => (
-                      <div
-                        key={i}
-                        className="flex gap-3 border-b border-border/60 px-5 py-3.5 transition-colors hover:bg-muted/40 last:border-b-0 cursor-pointer"
-                      >
-                        <span
-                          className="mt-1.5 size-2 shrink-0 rounded-full"
-                          style={{ backgroundColor: n.dot }}
-                        />
-                        <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-semibold text-foreground truncate">
-                            {n.title}
-                          </p>
-                          <p className="mt-0.5 text-[12px] text-muted-foreground truncate">
-                            {n.detail}
-                          </p>
-                          <p className="mt-1 font-mono text-[10.5px] text-muted-foreground/80">
-                            {n.time}
-                          </p>
+                    {notifications.length === 0 ? (
+                      <p className="px-5 py-6 text-sm text-muted-foreground">
+                        No notifications yet.
+                      </p>
+                    ) : (
+                      notifications.slice(0, 6).map((note) => (
+                        <div
+                          key={note.id}
+                          className="flex gap-3 border-b border-border/60 px-5 py-3.5 transition-colors hover:bg-muted/40 last:border-b-0"
+                        >
+                          <span
+                            className="mt-1.5 size-2 shrink-0 rounded-full"
+                            style={{
+                              backgroundColor:
+                                note.kind === "cancelled"
+                                  ? "#EF4444"
+                                  : note.kind === "changed"
+                                    ? "#F59E0B"
+                                    : "#3B82F6",
+                            }}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[13px] font-semibold text-foreground truncate">
+                              {note.title}
+                            </p>
+                            <p className="mt-0.5 text-[12px] text-muted-foreground truncate">
+                              {note.detail}
+                            </p>
+                            <p className="mt-1 font-mono text-[10.5px] text-muted-foreground/80">
+                              {note.time}
+                            </p>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
-                  <div className="border-t border-border px-5 py-3 bg-muted/30">
-                    <Button variant="soft" size="sm" className="w-full rounded-xl">
-                      View all notifications
-                    </Button>
-                  </div>
+                  {session.role === "doctor" ? (
+                    <div className="border-t border-border px-5 py-3 bg-muted/30">
+                      <Link
+                        to="/doctor/notifications"
+                        onClick={() => setNotificationOpen(false)}
+                        className="block"
+                      >
+                        <Button variant="soft" size="sm" className="w-full rounded-xl">
+                          View all notifications
+                        </Button>
+                      </Link>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
 
-            <button
-              type="button"
-              className="relative hidden sm:grid size-11 shrink-0 place-items-center rounded-2xl border border-border/70 bg-card/60 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:shadow-sm"
-            >
-              <MessageSquare className="size-[19px]" strokeWidth={2} />
-            </button>
+            {session.role === "patient" ? (
+              <button
+                type="button"
+                className="relative hidden sm:grid size-11 shrink-0 place-items-center rounded-2xl border border-border/70 bg-card/60 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:shadow-sm"
+              >
+                <MessageSquare className="size-[19px]" strokeWidth={2} />
+              </button>
+            ) : null}
 
             <div className="relative" ref={accountRef}>
               <button
@@ -424,13 +412,11 @@ export function AppShell({
                   <span className="block truncate text-[13px] font-semibold text-foreground">
                     {session.name}
                   </span>
-                  <span className="block truncate text-[11px] text-muted-foreground">
-                    {session.role === "doctor"
-                      ? "General Physician"
-                      : session.role === "admin"
-                        ? "Administrator"
-                        : "Patient"}
-                  </span>
+                  {session.role !== "admin" ? (
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {session.role === "doctor" ? "General Physician" : "Patient"}
+                    </span>
+                  ) : null}
                 </span>
                 <ChevronDown
                   className={cn(
@@ -469,12 +455,10 @@ export function AppShell({
                         <p className="truncate text-[12px] text-muted-foreground mt-0.5">
                           {session.email}
                         </p>
-                        <Badge tone="primary" className="mt-2 px-2.5 py-0.5 rounded-lg">
-                          {session.role.toUpperCase()}
-                        </Badge>
                       </div>
                     </div>
                   </div>
+                  {accountLinks.length > 0 ? (
                   <div className="border-b border-border py-1.5">
                     {accountLinks.map((item) => (
                       <Link
@@ -491,6 +475,7 @@ export function AppShell({
                       </Link>
                     ))}
                   </div>
+                  ) : null}
                   <button
                     type="button"
                     role="menuitem"

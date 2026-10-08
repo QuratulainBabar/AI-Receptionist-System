@@ -11,16 +11,16 @@ import {
   SectionLabel,
   Textarea,
 } from "@/components/ui/primitives";
-import { adminApi, formatApiError, type ClinicSynthflowSettings } from "@/lib/api";
+import { doctorSynthflowApi, formatApiError, type ClinicSynthflowSettings } from "@/lib/api";
 
-export const Route = createFileRoute("/admin/synthflow")({
+export const Route = createFileRoute("/doctor/synthflow")({
   head: () => ({
     meta: [{ title: "Synthflow configuration — AI Receptionist" }],
   }),
-  component: AdminSynthflowConfig,
+  component: DoctorSynthflowConfig,
 });
 
-function AdminSynthflowConfig() {
+function DoctorSynthflowConfig() {
   const [settings, setSettings] = useState<ClinicSynthflowSettings | null>(null);
   const [clinicName, setClinicName] = useState("");
   const [phoneNumber, setPhoneNumber] = useState("");
@@ -49,7 +49,7 @@ function AdminSynthflowConfig() {
     setLoading(true);
     setError("");
     try {
-      const result = await adminApi.getSynthflow();
+      const result = await doctorSynthflowApi.getSynthflow();
       applySettings(result.settings);
     } catch (err) {
       setError(formatApiError(err, "Unable to load Synthflow settings."));
@@ -67,9 +67,7 @@ function AdminSynthflowConfig() {
     setError("");
     setNotice("");
     try {
-      // Never persist the textarea prompt — it can still hold an old multi-doctor copy.
-      // Prompt is only updated by Create/Update agent or Sync doctor profile.
-      const result = await adminApi.updateSynthflow({
+      const result = await doctorSynthflowApi.updateSynthflow({
         clinicName,
         phoneNumber,
         synthflowAgentId: agentId.trim() || null,
@@ -90,16 +88,14 @@ function AdminSynthflowConfig() {
     setError("");
     setNotice("");
     try {
-      // Save clinic/phone only — do not persist the textarea prompt (may name an old doctor).
-      // Backend reloads agent-prompt.md and injects the live Clinic doctor on create/update.
-      await adminApi.updateSynthflow({
+      await doctorSynthflowApi.updateSynthflow({
         clinicName,
         phoneNumber,
         synthflowAgentId: agentId.trim() || null,
         agentLanguage: language,
         agentFirstMessage: firstMessage,
       });
-      const result = await adminApi.createOrUpdateSynthflowAgent({
+      const result = await doctorSynthflowApi.createOrUpdateSynthflowAgent({
         firstMessage,
         phoneNumber,
         language,
@@ -126,7 +122,7 @@ function AdminSynthflowConfig() {
     setError("");
     setNotice("");
     try {
-      const result = await adminApi.syncSynthflowDirectory();
+      const result = await doctorSynthflowApi.syncSynthflowDirectory();
       applySettings(result.settings);
       const doctorName =
         result.clinicDoctorName || result.settings.clinicDoctorName || "clinic doctor";
@@ -156,9 +152,8 @@ function AdminSynthflowConfig() {
   return (
     <>
       <PageHeader
-        eyebrow="Phone AI"
         title="Synthflow configuration"
-        description="Clinic phone receptionist for a one-to-one doctor setup — Sync pushes the Doctor Dashboard profile and open slots to the agent."
+        description="Clinic phone receptionist for a one-to-one doctor setup — Sync pushes your Doctor Dashboard profile and open slots to the agent."
         actions={
           <Button variant="outline" type="button" onClick={() => void load()} disabled={loading}>
             Refresh
@@ -178,7 +173,7 @@ function AdminSynthflowConfig() {
               <div>
                 <SectionLabel>Status</SectionLabel>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Dedicated clinic inbound agent. Patients call; AI books with the single Doctor Dashboard doctor.
+                  Dedicated clinic inbound agent. Patients call; AI books appointments with your practice.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -254,7 +249,7 @@ function AdminSynthflowConfig() {
             </Field>
             <Field
               label="Last synced system prompt (read-only)"
-              hint="This is what Sync last pushed (one clinic doctor + open slots). Click Sync doctor profile to refresh — do not paste old multi-doctor text here."
+              hint="This is what Sync last pushed (your profile + open slots). Click Sync doctor profile to refresh."
             >
               <Textarea
                 value={systemPrompt}
@@ -274,7 +269,7 @@ function AdminSynthflowConfig() {
             <SectionLabel>3. Create / update Synthflow agent</SectionLabel>
             <p className="text-sm text-muted-foreground">
               Creates or updates the inbound agent, sets inbound + data webhooks, attaches appointment
-              extractors, and injects the clinic’s one doctor profile plus real open slots.
+              extractors, and injects your doctor profile plus real open slots.
             </p>
             <div className="flex flex-wrap gap-2">
               <Button

@@ -948,6 +948,54 @@ export const doctorsApi = {
   },
 };
 
+export const doctorSynthflowApi = {
+  getSynthflow() {
+    return request<{ success: boolean; settings: ClinicSynthflowSettings }>(
+      "/api/doctor/synthflow",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  updateSynthflow(body: Partial<ClinicSynthflowSettings>) {
+    return request<{ success: boolean; settings: ClinicSynthflowSettings }>(
+      "/api/doctor/synthflow",
+      { method: "PUT", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  createOrUpdateSynthflowAgent(body?: {
+    firstMessage?: string;
+    systemPrompt?: string;
+    phoneNumber?: string;
+    language?: string;
+    voiceId?: string;
+    synthflowAgentId?: string;
+  }) {
+    return request<{
+      success: boolean;
+      action: string;
+      synthflowAgentId: string;
+      doctorsCount: number;
+      clinicDoctorName: string | null;
+      clinicDoctorId: string | null;
+      warning: string | null;
+      settings: ClinicSynthflowSettings;
+    }>("/api/doctor/synthflow/agent", { method: "POST", body: JSON.stringify(body ?? {}) }, authHeader());
+  },
+  syncSynthflowDirectory() {
+    return request<{
+      success: boolean;
+      action: string;
+      synthflowAgentId: string;
+      doctorsCount: number;
+      clinicDoctorName: string | null;
+      clinicDoctorId: string | null;
+      warning: string | null;
+      settings: ClinicSynthflowSettings;
+    }>("/api/doctor/synthflow/sync", { method: "POST", body: JSON.stringify({}) }, authHeader());
+  },
+};
+
 export const appointmentsApi = {
   create(payload: { doctorId: string; slotId: string; reason?: string }) {
     return request<{ success: boolean; appointment: ApiAppointment }>(

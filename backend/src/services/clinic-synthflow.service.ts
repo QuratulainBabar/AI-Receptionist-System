@@ -23,11 +23,12 @@ import {
 } from "./synthflow.client.js";
 import {
   clinicDoctorProfileBlock,
+  consultationFeeToSpeak,
   formatOpenSlotLabels,
   getClinicDoctor,
+  greetingWithOpeningLine,
 } from "./clinic-doctor.service.js";
 import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
-import { formatDoctorDirectoryLine, formatDoctorSpokenBlurb } from "./doctor-profile.service.js";
 
 const SETTINGS_ID = "default";
 
@@ -97,17 +98,19 @@ function fallbackPrompt(clinicName: string) {
   return `You are the polite, calm, direct, and concise AI phone receptionist for ${clinicName}.
 
 PRIMARY MISSION:
-This clinic has one doctor. Introduce that doctor and specialty, offer real open slots, quote the consultation fee, collect name and phone, and confirm with one final summary.
+This clinic has one doctor. The greeting already says that doctor's name and the consultation fee when one is set. When the caller wants to book, offer only real open slots, collect name and phone, and confirm only after the verification code succeeds.
 
 CRITICAL RULES:
 - Keep every response to 1-2 short sentences. Ask only one question per turn, then wait.
 - Never give medical advice or diagnoses.
 - Never invent another doctor, specialty list, or time.
+- Never read experience, qualifications, bio, languages, hospital, or other profile details.
 - Appointments are 30 minutes, in clinic.
 - One active appointment per mobile: if active_appointment_found is true, tell the caller using active_appointment_block_message and do not book again.
-- When asked about the doctor, share specialty, experience, hospital, and fee only.
+- If asked about the doctor, say only the name and the consultation fee when a fee is set.
+- Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.
 
-Use the Clinic doctor profile injected on sync and on each call.`;
+Use the Clinic doctor name and open slots injected on sync and on each call.`;
 }
 
 const CLINIC_DOCTOR_HEADING = "## Clinic doctor";
@@ -116,7 +119,7 @@ export function stripOutdatedDoctorLists(prompt: string) {
   let next = prompt.replace(/\r\n/g, "\n");
   // Drop boot-time rule prefixes — Sync re-adds the current one-doctor versions.
   next = next.replace(
-    /^(BOOKING OTP RULE:|AVAILABILITY SPEAK RULE:|PHONE APPOINTMENT RULE)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
+    /^(OPENING RULE:|BOOKING OTP RULE:|AVAILABILITY SPEAK RULE:|PHONE APPOINTMENT RULE)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
     "",
   );
   next = next.replace(/\n## Specialties[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|\n## Clinic doctor|$)/, "\n");
@@ -158,26 +161,10 @@ export async function buildDoctorsDirectoryKnowledge() {
   }
 
   const profile = clinicDoctorProfileBlock(doctor);
-  const spoken = formatDoctorSpokenBlurb({
-    fullName: profile.doctorName,
-    specialty: profile.specialty,
-    experienceYears: profile.experienceYears,
-    clinic: profile.hospital === "none" ? "" : profile.hospital,
-    fee: profile.fee === "none" ? "" : profile.fee,
-  });
+  const fee = consultationFeeToSpeak(profile.fee);
   const openingLabels = formatOpenSlotLabels(doctor.availability, {
-    withIds: false,
-    limit: 2,
-  });
-  const directoryLine = formatDoctorDirectoryLine({
-    fullName: profile.doctorName,
-    doctorId: profile.doctorId,
-    specialty: profile.specialty,
-    experienceYears: profile.experienceYears,
-    clinic: profile.hospital === "none" ? "" : profile.hospital,
-    fee: profile.fee === "none" ? "" : profile.fee,
-    weeklyHoursSummary: profile.weeklyHoursSummary,
-    nextSlots: profile.openSlots,
+    withIds: true,
+    limit: 8,
   });
 
   return {
@@ -185,29 +172,22 @@ export async function buildDoctorsDirectoryKnowledge() {
     clinicDoctorName: profile.doctorName,
     clinicDoctorId: profile.doctorId,
     knowledge: [
-      `${CLINIC_DOCTOR_HEADING} (source of truth — one doctor only)`,
-      "This clinic has exactly ONE doctor. Never mention any other doctor or specialty menu.",
+      `${CLINIC_DOCTOR_HEADING} (internal — do not read this block aloud)`,
+      "This clinic has exactly ONE doctor. Never mention any other doctor.",
       "IGNORE any older doctor names elsewhere in this prompt if they conflict with this Clinic doctor block.",
+      "The greeting already says the doctor name and the consultation fee when a fee is set. Do not add specialty, experience, qualifications, bio, languages, hospital, or other profile details.",
       `Doctor name: ${profile.doctorName}`,
-      `doctor_id: ${profile.doctorId}`,
-      `Specialty: ${profile.specialty || "none"}`,
-      `Hospital name: ${profile.hospital}`,
-      `Consultation fee: ${profile.fee}`,
-      `Years of experience: ${profile.experienceYears}`,
-      `Available days and timings: ${profile.weeklyHoursSummary}`,
-      `Bookable open slots: ${profile.openSlots}`,
+      `doctor_id (for actions only — never speak this id): ${profile.doctorId}`,
+      `Consultation fee (say only in the greeting, and only when set): ${fee || "none"}`,
+      `Bookable open slots (do not recite until the caller wants to book; then call check_doctor_availability and say only those times): ${
+        openingLabels.length ? openingLabels.join("; ") : "none"
+      }`,
       "",
       "## How to use this profile",
-      `- When the caller wants an appointment, introduce ${profile.doctorName} and specialty ${profile.specialty || "the clinic specialty"}, then quote fee ${profile.fee}.`,
-      "- Offer ONLY bookable open slots listed above or returned by check_doctor_availability. Never invent a time.",
-      "- When the caller asks about the doctor, share specialty, years of experience, hospital, fee, and usual days/timings only. Do not invent bio or credentials.",
-      `- Spoken intro: ${spoken.replace(/^- /, "")}`,
-      openingLabels.length
-        ? `- Next open times to offer first: ${openingLabels.join(", and ")}`
-        : "- There are no open bookable slots right now.",
-      "",
-      "## Compact directory line",
-      directoryLine,
+      "- On the opening, say only the doctor name and the consultation fee when one is set.",
+      "- When the caller wants an appointment, say ONLY the open times from check_doctor_availability. Do not add profile details.",
+      "- If the caller asks about the doctor, repeat only the name and the fee when a fee is set.",
+      "- Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
     ].join("\n"),
   };
 }
@@ -275,7 +255,7 @@ async function ensureAvailabilityCustomAction(existingIds: string[]) {
           },
         ],
         prompt:
-          "Say spoken_summary exactly. Introduce the clinic doctor and specialty, then fee and the next open times. Never invent another doctor or time.",
+          "Say spoken_summary exactly. It lists only open appointment times. Do not mention specialty, experience, qualifications, bio, languages, hospital, fee, or any other profile detail. Never invent a time.",
         messageError: "Let me check the clinic doctor's open times.",
       });
       actionId = created.action_id;
@@ -374,7 +354,7 @@ async function ensureBookCustomAction(existingIds: string[]) {
           },
         ],
         prompt:
-          "This does not confirm the appointment. If success is true, do not read otp aloud. Call send_booking_otp with otp and expires_seconds only. The SMS is sent to the phone the caller is calling from. Then ask the caller to read the six digits and call verify_booking_otp. If success is false, speak the response message and do not say the appointment is booked.",
+          "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Do not read otp aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. Confirm only when appointment_confirmed is true. If success is false, speak the response message and do not say the appointment is booked.",
         messageError:
           "Booking could not be completed. If you already have an active appointment, please complete or cancel it first.",
       });
@@ -493,10 +473,9 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
 
   const settings = await getOrCreateSettings();
   const clinicName = settings.clinicName;
-  const greeting =
-    input?.firstMessage?.trim() ||
-    settings.agentFirstMessage.trim() ||
-    defaultGreeting(clinicName);
+  const greeting = greetingWithOpeningLine(
+    input?.firstMessage?.trim() || settings.agentFirstMessage.trim() || defaultGreeting(clinicName),
+  );
   // Always prefer the one-to-one prompt from agent-prompt.md so Sync refreshes
   // multi-doctor language left in older stored prompts.
   const filePrompt = loadDefaultPromptFromFile();
@@ -532,6 +511,7 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
   const agentConfig = {
     prompt: fullPrompt,
     greeting_message: greeting,
+    greeting_message_mode: "agent_static",
     llm: "gpt-4.1-Mini",
     language: lang,
     ...(voiceId ? { voice_id: voiceId } : {}),

@@ -126,7 +126,6 @@ function AdminAppointmentsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Clinic"
         title="Appointments"
         description="Manage booking status, cancellations, and reschedules — including visits booked by the phone AI."
       />

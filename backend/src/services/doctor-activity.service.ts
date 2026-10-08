@@ -1,4 +1,5 @@
 import type { Appointment, PatientMedicalRecord, User } from "@prisma/client";
+import { excludeUnconfirmedVoiceHold } from "./appointments.service.js";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 
@@ -115,7 +116,7 @@ export async function listActivitiesForDoctor(doctorUserId: string) {
   }
 
   const appointments = await prisma.appointment.findMany({
-    where: { doctorUserId },
+    where: { AND: [{ doctorUserId }, excludeUnconfirmedVoiceHold] },
     include: { patient: true },
     orderBy: { createdAt: "desc" },
   });

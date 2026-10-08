@@ -1,7 +1,7 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
-import { Button, Field, Input, SectionLabel, Badge } from "@/components/ui/primitives";
+import { Button, Field, Input, SectionLabel } from "@/components/ui/primitives";
 import { authApi, formatApiError } from "@/lib/api";
 import { demoCredentials } from "@/lib/mock-data";
 import { getSession, homeForRole, saveAuth } from "@/lib/session";
@@ -89,7 +89,7 @@ function LoginPage() {
         </p>
       }
     >
-      <form className="space-y-5" onSubmit={submit}>
+      <form className="space-y-2.5" onSubmit={submit}>
         <Field label="Email address" required>
           <div className="relative">
             <Mail
@@ -103,7 +103,7 @@ function LoginPage() {
               placeholder="you@clinic.com"
               autoComplete="username"
               required
-              className="!pl-11"
+              className="!h-10 !rounded-lg !pl-10 !text-[12px]"
             />
           </div>
         </Field>
@@ -125,7 +125,7 @@ function LoginPage() {
               placeholder="Enter your password"
               autoComplete="current-password"
               required
-              className="!pl-11 !pr-12"
+              className="!h-10 !rounded-lg !pl-10 !pr-12 !text-[12px]"
             />
             <button
               type="button"
@@ -165,7 +165,7 @@ function LoginPage() {
               </div>
             </div>
             <span className="text-[13px] font-medium text-muted-foreground">
-              Remember me for 30 days
+              Remember me
             </span>
           </label>
           <Link
@@ -193,7 +193,7 @@ function LoginPage() {
         <Button
           type="submit"
           size="lg"
-          className="w-full rounded-xl text-[14px]"
+          className="!h-10 w-full rounded-lg text-[13px]"
           disabled={loading}
         >
           {loading ? (
@@ -224,8 +224,8 @@ function LoginPage() {
         </Button>
       </form>
 
-      <div className="mt-8">
-        <div className="flex items-center gap-4 mb-5">
+      <div className="mt-4">
+        <div className="mb-3 flex items-center gap-4">
           <div className="flex-1 h-px bg-border" />
           <SectionLabel className="!text-[10.5px]">Or try demo instantly</SectionLabel>
           <div className="flex-1 h-px bg-border" />
@@ -261,22 +261,7 @@ function LoginPage() {
                 className="flex items-center justify-between gap-3 rounded-xl p-3.5 transition-all hover:-translate-y-0.5 hover:shadow-sm bg-white/80 border border-border/60"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2 mb-1">
-                    <p className="text-[13.5px] font-bold text-foreground">Demo {demo.label}</p>
-                    <Badge
-                      tone={
-                        demo.role === "admin"
-                          ? "accent"
-                          : demo.role === "doctor"
-                            ? "primary"
-                            : "info"
-                      }
-                      className="px-2 py-0.5 rounded-md text-[10px]"
-                      dot
-                    >
-                      {demo.role}
-                    </Badge>
-                  </div>
+                  <p className="text-[13.5px] font-bold text-foreground">Demo {demo.label}</p>
                   <p className="font-mono text-[11.5px] text-muted-foreground/80 leading-relaxed">
                     {demo.email}
                     <br />

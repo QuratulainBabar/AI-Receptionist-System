@@ -172,6 +172,7 @@ async function ensureNotificationsForDoctor(doctorUserId: string) {
   });
 
   for (const appointment of appointments) {
+    if (appointment.status === "PENDING") continue;
     await logAppointmentBookedForDoctor(appointment);
 
     if (appointment.status === "CANCELLED") {

@@ -1,4 +1,4 @@
-import { createHmac, randomInt, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
@@ -53,8 +53,14 @@ export function parseSpokenOtp(raw: string) {
   return digits.length === 6 ? digits : "";
 }
 
+/**
+ * Temporary testing OTP. The visit is not confirmed unless the caller says this code.
+ * Replace with a random one-time code when SMS OTP testing is finished.
+ */
+export const TEMP_TEST_BOOKING_OTP = "000000";
+
 function generateCode() {
-  return randomInt(0, 1_000_000).toString().padStart(6, "0");
+  return TEMP_TEST_BOOKING_OTP;
 }
 
 async function storeCode(input: { phone: string; appointmentId: string }) {
@@ -151,7 +157,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
       success: false,
       appointment_confirmed: false,
       message:
-        "That code is not valid. The appointment is not confirmed. Please read the six digits from the text message.",
+        "That code is not valid. The appointment is not booked and not confirmed. Please say the six-digit verification code.",
     };
   }
 
@@ -177,9 +183,9 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
       appointment_confirmed: false,
       message: latest?.usedAt
         ? held
-          ? "That code was already used. The appointment is not confirmed, and that time has been released."
-          : "That code was already used. The appointment is not confirmed."
-        : "There is no verification code waiting for this number. The appointment is not confirmed.",
+          ? "That code was already used. The appointment is not booked and not confirmed, and that time has been released."
+          : "That code was already used. The appointment is not booked and not confirmed."
+        : "There is no verification code waiting for this number. The appointment is not booked and not confirmed.",
     };
   }
 
@@ -189,7 +195,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     return {
       success: false,
       appointment_confirmed: false,
-      message: "That code has expired. The appointment is not confirmed, and that time has been released.",
+      message: "That code has expired. The appointment is not booked and not confirmed, and that time has been released.",
     };
   }
 
@@ -202,7 +208,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     return {
       success: false,
       appointment_confirmed: false,
-      message: "That code is incorrect. The appointment is not confirmed, and that time has been released.",
+      message: "That code is incorrect. The appointment is not booked and not confirmed, and that time has been released.",
     };
   }
 
@@ -215,7 +221,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     return {
       success: false,
       appointment_confirmed: false,
-      message: "That code was already used. The appointment is not confirmed.",
+      message: "That code was already used. The appointment is not booked and not confirmed.",
     };
   }
 
@@ -228,6 +234,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
       doctor: appointment.doctorName,
       date: appointment.date,
       time: appointment.time,
+      appointment_booked: true,
       message: `The code is correct. Your appointment is confirmed. Reference ${appointment.reference} with ${appointment.doctorName} on ${appointment.date} at ${appointment.time}.`,
     };
   } catch (error) {
@@ -237,8 +244,8 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
       appointment_confirmed: false,
       message:
         error instanceof AppError
-          ? `${error.message} The appointment is not confirmed.`
-          : "The code could not be verified. The appointment is not confirmed.",
+          ? `${error.message} The appointment is not booked and not confirmed.`
+          : "The code could not be verified. The appointment is not booked and not confirmed.",
     };
   }
 }

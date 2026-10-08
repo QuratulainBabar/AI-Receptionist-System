@@ -40,7 +40,7 @@ function DoctorActivity() {
 
   return (
     <>
-      <PageHeader eyebrow="Doctor" title="Activity history" description="Most recent first." />
+      <PageHeader title="Activity history" description="Most recent first." />
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
 

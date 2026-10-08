@@ -13,11 +13,12 @@ import { verifyBookingOtp } from "./booking-otp.service.js";
 import { fetchCallRecordingUrl } from "./synthflow.client.js";
 import {
   clinicDoctorProfileBlock,
+  consultationFeeToSpeak,
   formatOpenSlotLabels,
   getClinicDoctor,
+  openingDoctorLine,
 } from "./clinic-doctor.service.js";
 import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
-import { formatDoctorDirectoryLine, formatDoctorSpokenBlurb } from "./doctor-profile.service.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -83,58 +84,32 @@ async function buildClinicContext() {
       clinic_name: "Qubetech AI Receptionist Clinic",
       doctors_available: "0",
       clinic_doctor_name: "",
-      clinic_doctor_specialty: "",
       clinic_doctor_fee: "",
-      clinic_doctor_hospital: "",
-      clinic_doctor_experience_years: "",
-      clinic_doctor_hours: "",
-      doctors_directory: "No clinic doctor is configured yet.",
-      doctor_profiles: "none",
-      availability_summary: "No open slots.",
+      opening_doctor_line: "",
+      availability_summary: "No open slots. Do not invent a time.",
       booking_instructions:
-        "This clinic has one doctor. After the caller gives a phone number, call check_existing_appointment first. If has_active_appointment is true, do not book. Otherwise call check_doctor_availability, then book_appointment for an open slot.",
+        "This clinic has one doctor. Say only the doctor name and the consultation fee when a fee is set. When the caller wants to book, call check_doctor_availability and say only those open times. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment for a real slot_id. Do not read the otp aloud. Ask for the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
     };
   }
 
   const profile = clinicDoctorProfileBlock(doctor);
-  const spoken = formatDoctorSpokenBlurb({
-    fullName: profile.doctorName,
-    specialty: profile.specialty,
-    experienceYears: profile.experienceYears,
-    clinic: profile.hospital === "none" ? "" : profile.hospital,
-    fee: profile.fee === "none" ? "" : profile.fee,
-  });
-  const directoryLine = formatDoctorDirectoryLine({
-    fullName: profile.doctorName,
-    doctorId: profile.doctorId,
-    specialty: profile.specialty,
-    experienceYears: profile.experienceYears,
-    clinic: profile.hospital === "none" ? "" : profile.hospital,
-    fee: profile.fee === "none" ? "" : profile.fee,
-    weeklyHoursSummary: profile.weeklyHoursSummary,
-    nextSlots: profile.openSlots,
-  });
+  const fee = consultationFeeToSpeak(profile.fee);
   const openLabels = formatOpenSlotLabels(doctor.availability, {
     withIds: false,
-    limit: 2,
+    limit: 8,
   });
 
   return {
     clinic_name: "Qubetech AI Receptionist Clinic",
     doctors_available: "1",
     clinic_doctor_name: profile.doctorName,
-    clinic_doctor_specialty: profile.specialty,
-    clinic_doctor_fee: profile.fee,
-    clinic_doctor_hospital: profile.hospital,
-    clinic_doctor_experience_years: String(profile.experienceYears),
-    clinic_doctor_hours: profile.weeklyHoursSummary,
-    doctors_directory: directoryLine,
-    doctor_profiles: spoken,
+    clinic_doctor_fee: fee,
+    opening_doctor_line: openingDoctorLine(profile.doctorName, fee),
     availability_summary: openLabels.length
-      ? `${profile.doctorName} AVAILABLE (${profile.fee}): ${openLabels.join("; ")}`
-      : `${profile.doctorName}: no open slots`,
+      ? "When the caller wants to book, call check_doctor_availability and say only those open times. Do not read this variable aloud."
+      : `${profile.doctorName} has no open slots right now.`,
     booking_instructions:
-      "This clinic has one doctor. Introduce clinic_doctor_name and clinic_doctor_specialty, then call check_doctor_availability for open slots. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment with that doctor and a real slot_id. Do not read the otp aloud. Call send_booking_otp with otp and expires_seconds only. The SMS goes to the phone the caller is calling from. Then ask the caller to read the six digits and call verify_booking_otp. Confirm only when appointment_confirmed is true.",
+      "Say only the doctor name and the consultation fee when a fee is set. Do not mention specialty, experience, qualifications, bio, languages, hospital, or other profile details. When the caller wants to book, call check_doctor_availability and say only spoken_summary. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment with that doctor and a real slot_id. Do not read the otp aloud. Ask the caller to say the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
   };
 }
 
@@ -450,6 +425,14 @@ export async function handleDataWebhook(payload: unknown) {
   };
 }
 
+function speakOpenSlots(labels: string[]) {
+  if (labels.length === 0) return "There are no open appointment times right now.";
+  if (labels.length === 1) return `The open appointment time is ${labels[0]}. Would you like that time?`;
+  const head = labels.slice(0, -1).join(", ");
+  const last = labels[labels.length - 1];
+  return `The open appointment times are ${head}, and ${last}. Which time would you like?`;
+}
+
 function pickFirstFromExtracted(fields: Record<string, string>, keys: string[]) {
   for (const key of keys) {
     const value = fields[key];
@@ -459,7 +442,7 @@ function pickFirstFromExtracted(fields: Record<string, string>, keys: string[]) 
 }
 
 export async function handleAvailabilityAction(_body: unknown) {
-  const doctor = await ensureClinicDoctorWithSlots(6);
+  const doctor = await ensureClinicDoctorWithSlots(8);
   if (!doctor) {
     return {
       success: true,
@@ -470,48 +453,18 @@ export async function handleAvailabilityAction(_body: unknown) {
   }
 
   const profile = clinicDoctorProfileBlock(doctor);
-  const intro = formatDoctorSpokenBlurb({
-    fullName: profile.doctorName,
-    specialty: profile.specialty,
-    experienceYears: profile.experienceYears,
-    clinic: profile.hospital === "none" ? "" : profile.hospital,
-    fee: profile.fee === "none" ? "" : profile.fee,
-  }).replace(/^- /, "");
-
   const slots = doctor.availability.map((slot) => ({
     slot_id: slot.id,
-    starts_at: slot.startsAt.toISOString(),
     label: formatClinicDateTime(slot.startsAt),
   }));
-  const openings = slots.slice(0, 2);
-  const spoken_summary = slots.length
-    ? `${intro} Fee is ${profile.fee}. The next open times are ${openings
-        .map((slot) => slot.label)
-        .join(", and ")}. Say both times, then ask which one they want. Do not offer any other time.`
-    : `${intro} Fee is ${profile.fee}. There are no open times right now.`;
+  const spoken_summary = speakOpenSlots(slots.map((slot) => slot.label));
 
   return {
     success: true,
     spoken_summary,
     doctor_id: profile.doctorId,
     doctor_name: profile.doctorName,
-    specialty: profile.specialty,
-    hospital: profile.hospital,
-    fee: profile.fee,
-    experience_years: profile.experienceYears,
-    available_days_timings: profile.weeklyHoursSummary,
-    doctors: [
-      {
-        doctor_id: profile.doctorId,
-        name: profile.doctorName,
-        specialty: profile.specialty,
-        clinic: profile.hospital,
-        fee: profile.fee,
-        experience_years: profile.experienceYears,
-        available: slots.length > 0,
-        slots,
-      },
-    ],
+    slots,
   };
 }
 
@@ -655,11 +608,13 @@ export async function handleBookAction(body: unknown) {
   return {
     success: true,
     otp_required: true,
+    appointment_booked: false,
     appointment_confirmed: false,
     otp: booked.otp,
     expires_seconds: booked.expiresSeconds,
     to_phone_number: smsTo,
-    message: `Do not read the otp aloud. Call send_booking_otp now with this otp and expires_seconds only. Do not set or change the SMS recipient. Synthflow texts the inbound caller on this call (${smsTo}). The code expires in ${booked.expiresSeconds} seconds and works once. Then ask the caller to read the six digits. This appointment is not confirmed until verify_booking_otp returns appointment_confirmed true.`,
+    message:
+      "The appointment is not booked yet. Do not read the otp aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. Confirm only when appointment_confirmed is true. If the code is wrong, say the appointment is not booked and that time was released.",
     patient_id: patient.id,
     patient_reference: patient.reference,
   };

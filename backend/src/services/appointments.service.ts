@@ -1,4 +1,4 @@
-import type { Appointment, AppointmentMode, AppointmentStatus, User } from "@prisma/client";
+import type { Appointment, AppointmentMode, AppointmentStatus, Prisma, User } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import { normalizePhone } from "../utils/phone.js";
@@ -21,6 +21,14 @@ import {
 } from "./notifications.service.js";
 
 const ACTIVE_BOOKING_STATUSES: AppointmentStatus[] = ["PENDING", "CONFIRMED"];
+
+/** A voice hold is not a booking until the caller submits the correct OTP. */
+export const excludeUnconfirmedVoiceHold: Prisma.AppointmentWhereInput = {
+  NOT: {
+    status: "PENDING",
+    otps: { some: { usedAt: null } },
+  },
+};
 
 export type PublicAppointmentRecordRequest = {
   status: string;
@@ -471,7 +479,7 @@ export async function getAppointmentForPatient(appointmentId: string, patientId:
 
 export async function listAppointmentsForPatient(patientId: string) {
   const rows = await prisma.appointment.findMany({
-    where: { patientId },
+    where: { AND: [{ patientId }, excludeUnconfirmedVoiceHold] },
     include: appointmentInclude,
     orderBy: { startsAt: "asc" },
   });
@@ -488,7 +496,7 @@ export async function listAppointmentsForDoctor(doctorUserId: string) {
   await syncDoctorAppointmentInvoices(doctorUserId);
 
   const rows = await prisma.appointment.findMany({
-    where: { doctorUserId },
+    where: { AND: [{ doctorUserId }, excludeUnconfirmedVoiceHold] },
     include: appointmentInclude,
     orderBy: { startsAt: "asc" },
   });

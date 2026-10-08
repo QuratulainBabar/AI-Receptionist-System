@@ -17,6 +17,8 @@ import {
 } from "recharts";
 import { AppointmentCard } from "@/components/shared/cards";
 import { AppointmentInvoiceAction } from "@/components/doctor/AppointmentInvoiceAction";
+import { Calendar as DateCalendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Button,
   EmptyNote,
@@ -131,6 +133,8 @@ function DoctorDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [scheduleDate, setScheduleDate] = useState(() => new Date(2026, 3, 28));
+  const [calendarOpen, setCalendarOpen] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -167,11 +171,25 @@ function DoctorDashboard() {
     );
   }, [dashboard?.clinic, dashboard?.speciality]);
 
+  const scheduleDateLabel = scheduleDate.toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  function shiftScheduleDate(days: number) {
+    setScheduleDate((current) => {
+      const next = new Date(current);
+      next.setDate(next.getDate() + days);
+      return next;
+    });
+  }
+
   const todayAppointmentsCount = dashboard?.todayVisitsCount ?? 0;
   const totalPatients = 1248;
   const upcomingConsultations = 18;
   const pendingFollowUps = 42;
-  const medicalReports = 312;
 
   const samplePatients = [
     {
@@ -229,7 +247,7 @@ function DoctorDashboard() {
             {greeting},
           </p>
           <h1
-            className="font-[--font-display] font-extrabold tracking-tight text-foreground text-balance flex items-center gap-3 flex-wrap"
+            className="font-jakarta font-extrabold tracking-tight text-foreground text-balance flex items-center gap-3 flex-wrap"
             style={{
               fontSize: "clamp(1.8rem, 3.2vw, 2.3rem)",
               letterSpacing: "-0.03em",
@@ -357,14 +375,11 @@ function DoctorDashboard() {
         <EmptyNote>Loading your dashboard…</EmptyNote>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <StatCard
               label="Today's Appointments"
               value={String(todayAppointmentsCount)}
               icon="appointments"
-              trend="3 more"
-              trendLabel="than yesterday"
-              trendPositive
               miniChart={[14, 18, 16, 22, 19, 21, 24]}
               miniChartColor="#2563EB"
             />
@@ -372,8 +387,6 @@ function DoctorDashboard() {
               label="Total Patients"
               value={String(totalPatients)}
               icon="patients"
-              trend="12% this month"
-              trendPositive
               miniChart={[980, 1020, 1080, 1120, 1160, 1195, 1248]}
               miniChartColor="#0D9488"
             />
@@ -381,9 +394,6 @@ function DoctorDashboard() {
               label="Upcoming Consultations"
               value={String(upcomingConsultations)}
               icon="consultations"
-              trend="5 more"
-              trendLabel="than today"
-              trendPositive
               miniChart={[8, 10, 9, 13, 11, 14, 18]}
               miniChartColor="#8B5CF6"
             />
@@ -391,19 +401,8 @@ function DoctorDashboard() {
               label="Pending Follow-ups"
               value={String(pendingFollowUps)}
               icon="followups"
-              trend="8% this week"
-              trendPositive
               miniChart={[20, 25, 28, 32, 36, 40, 42]}
               miniChartColor="#F59E0B"
-            />
-            <StatCard
-              label="Medical Reports"
-              value={String(medicalReports)}
-              icon="reports"
-              trend="15% this month"
-              trendPositive
-              miniChart={[220, 245, 260, 275, 288, 300, 312]}
-              miniChartColor="#3B82F6"
             />
           </div>
 
@@ -768,7 +767,7 @@ function DoctorDashboard() {
                     <Brain className="size-5.5 text-white" strokeWidth={2.3} />
                   </div>
                   <div>
-                    <h3 className="font-[--font-display] text-[17px] font-extrabold tracking-tight text-white">
+                    <h3 className="font-jakarta text-[17px] font-extrabold tracking-tight text-white">
                       AI Receptionist Insights
                     </h3>
                     <p className="mt-1 text-[12.5px] text-blue-100/80">
@@ -854,19 +853,44 @@ function DoctorDashboard() {
                   icon={<Calendar className="size-5" strokeWidth={2.2} />}
                 />
                 <div className="flex items-center gap-2 shrink-0">
-                  <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2">
-                    <Calendar className="size-4 text-muted-foreground" strokeWidth={2} />
-                    <span className="text-[13px] font-bold text-foreground">Mon, Apr 28, 2026</span>
-                  </div>
+                  <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
+                    <PopoverTrigger asChild>
+                      <button
+                        type="button"
+                        className="flex items-center gap-2 rounded-xl border border-border bg-card px-3.5 py-2 transition-colors hover:bg-secondary"
+                        aria-label="Choose schedule date"
+                      >
+                        <Calendar className="size-4 text-muted-foreground" strokeWidth={2} />
+                        <span className="text-[13px] font-bold text-foreground">
+                          {scheduleDateLabel}
+                        </span>
+                      </button>
+                    </PopoverTrigger>
+                    <PopoverContent align="end" className="w-auto p-0">
+                      <DateCalendar
+                        mode="single"
+                        selected={scheduleDate}
+                        onSelect={(date) => {
+                          if (!date) return;
+                          setScheduleDate(date);
+                          setCalendarOpen(false);
+                        }}
+                      />
+                    </PopoverContent>
+                  </Popover>
                   <button
                     type="button"
                     className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                    aria-label="Previous day"
+                    onClick={() => shiftScheduleDate(-1)}
                   >
                     <ChevronLeft className="size-4.5" strokeWidth={2.3} />
                   </button>
                   <button
                     type="button"
                     className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:text-foreground hover:bg-secondary transition-colors"
+                    aria-label="Next day"
+                    onClick={() => shiftScheduleDate(1)}
                   >
                     <ChevronRight className="size-4.5" strokeWidth={2.3} />
                   </button>

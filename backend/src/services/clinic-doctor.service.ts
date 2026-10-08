@@ -65,6 +65,39 @@ export function formatOpenSlotLabels(
   });
 }
 
+/** Fee text the agent may speak. Empty when this doctor has no consultation fee. */
+export function consultationFeeToSpeak(fee: string | null | undefined) {
+  const value = (fee ?? "").trim();
+  if (!value || value.toLowerCase() === "none") return "";
+  return value;
+}
+
+/** One opening sentence: doctor name, plus fee only when the profile has one. */
+export function openingDoctorLine(doctorName: string, fee: string | null | undefined) {
+  const name = doctorName.trim();
+  if (!name) return "";
+  const amount = consultationFeeToSpeak(fee);
+  if (amount) return `Appointments are with ${name}. The consultation fee is ${amount}. `;
+  return `Appointments are with ${name}. `;
+}
+
+/**
+ * Keep the saved greeting, and insert the live doctor sentence.
+ * `{opening_doctor_line}` is filled on each call from the inbound webhook.
+ */
+export function greetingWithOpeningLine(greeting: string) {
+  const without = greeting
+    .replace(/\{opening_doctor_line\}/g, " ")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\s+\n/g, "\n")
+    .replace(/\n\s+/g, "\n")
+    .trim();
+  const base = without || "Hi, you've reached Qubetech AI Receptionist. How may I help you today?";
+  const match = base.match(/^([\s\S]+?[.!?])\s+([\s\S]+)$/);
+  if (match) return `${match[1]} {opening_doctor_line}${match[2]}`;
+  return `${base} {opening_doctor_line}`.trim();
+}
+
 export function clinicDoctorProfileBlock(doctor: NonNullable<ClinicDoctorRow>) {
   const weeklyHoursSummary = formatWeeklyHoursSummary(parseWeeklyHours(doctor.weeklyHours));
   const slotLabels = formatOpenSlotLabels(doctor.availability, { withIds: true });

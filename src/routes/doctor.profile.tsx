@@ -129,7 +129,6 @@ function DoctorProfilePage() {
   return (
     <>
       <PageHeader
-        eyebrow="Doctor"
         title="My professional profile"
         description="This is the clinic’s doctor profile for the phone AI. After you save and Super Admin runs Sync, the receptionist uses only your latest details."
         actions={

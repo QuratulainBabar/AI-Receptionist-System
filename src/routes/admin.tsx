@@ -17,7 +17,6 @@ export const Route = createFileRoute("/admin")({
 
 const nav: NavItem[] = [
   { to: "/admin", label: "Dashboard", group: "Overview" },
-  { to: "/admin/synthflow", label: "Synthflow", group: "Phone AI" },
   { to: "/admin/voice-calls", label: "Voice calls", group: "Phone AI" },
   { to: "/admin/appointments", label: "Appointments", group: "Clinic" },
   { to: "/admin/doctors", label: "Doctors", group: "Users" },
@@ -45,7 +44,7 @@ function AdminLayout() {
   if (!session) return null;
 
   return (
-    <AppShell brandSuffix="Super Admin" nav={nav} session={session}>
+    <AppShell brandSuffix="" nav={nav} session={session}>
       <Outlet />
     </AppShell>
   );

@@ -140,6 +140,7 @@ export async function ensureMessagesForPatient(patientId: string) {
   });
 
   for (const appointment of appointments) {
+    if (appointment.status === "PENDING") continue;
     await createMessagesForAppointment(appointment);
   }
 }

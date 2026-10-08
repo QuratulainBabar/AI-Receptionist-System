@@ -191,7 +191,6 @@ function AdminVoiceCallsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Phone AI"
         title="Voice calls"
         description="Every Synthflow AI receptionist call — caller, status, booking, recording, and conversation details."
       />

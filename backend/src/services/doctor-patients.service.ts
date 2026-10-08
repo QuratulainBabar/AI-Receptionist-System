@@ -13,6 +13,7 @@ import {
   toPublicAppointmentInvoice,
   type PublicAppointmentInvoice,
 } from "./appointment-invoices.service.js";
+import { excludeUnconfirmedVoiceHold } from "./appointments.service.js";
 import { buildPatientTimeline, type PatientTimelineEvent } from "./patient-chart.service.js";
 
 export type PublicDoctorPatient = {
@@ -320,7 +321,7 @@ export async function listPatientsForDoctor(doctorUserId: string, q?: string) {
   await assertDoctor(doctorUserId);
 
   const appointments = await prisma.appointment.findMany({
-    where: { doctorUserId },
+    where: { AND: [{ doctorUserId }, excludeUnconfirmedVoiceHold] },
     select: { patientId: true },
     distinct: ["patientId"],
   });
@@ -336,7 +337,7 @@ export async function listPatientsForDoctor(doctorUserId: string, q?: string) {
     include: {
       medicalHistory: true,
       patientAppointments: {
-        where: { doctorUserId },
+        where: { AND: [{ doctorUserId }, excludeUnconfirmedVoiceHold] },
         orderBy: { startsAt: "desc" },
       },
     },
@@ -353,7 +354,7 @@ export async function getPatientFileForDoctor(doctorUserId: string, patientId: s
   await assertDoctor(doctorUserId);
 
   const linked = await prisma.appointment.findFirst({
-    where: { doctorUserId, patientId },
+    where: { AND: [{ doctorUserId, patientId }, excludeUnconfirmedVoiceHold] },
   });
   if (!linked) {
     throw new AppError(404, "Patient not found in your list");
@@ -364,7 +365,7 @@ export async function getPatientFileForDoctor(doctorUserId: string, patientId: s
     include: {
       medicalHistory: true,
       patientAppointments: {
-        where: { doctorUserId },
+        where: { AND: [{ doctorUserId }, excludeUnconfirmedVoiceHold] },
         orderBy: { startsAt: "desc" },
       },
       medicalRecords: {
@@ -381,7 +382,7 @@ export async function getPatientFileForDoctor(doctorUserId: string, patientId: s
   await syncDoctorAppointmentInvoices(doctorUserId);
 
   const appointments = await prisma.appointment.findMany({
-    where: { doctorUserId, patientId },
+    where: { AND: [{ doctorUserId, patientId }, excludeUnconfirmedVoiceHold] },
     include: {
       patient: true,
       doctorUser: true,

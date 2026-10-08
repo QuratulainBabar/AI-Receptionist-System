@@ -22,7 +22,6 @@ import { Route as AdminDoctorsRouteImport } from './routes/admin.doctors'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminPatientsRouteImport } from './routes/admin.patients'
 import { Route as AdminSubscriptionsRouteImport } from './routes/admin.subscriptions'
-import { Route as AdminSynthflowRouteImport } from './routes/admin.synthflow'
 import { Route as AdminVoiceCallsRouteImport } from './routes/admin.voice-calls'
 import { Route as DoctorIndexRouteImport } from './routes/doctor.index'
 import { Route as DoctorActivityRouteImport } from './routes/doctor.activity'
@@ -34,6 +33,7 @@ import { Route as DoctorProfileRouteImport } from './routes/doctor.profile'
 import { Route as DoctorRecordsRouteImport } from './routes/doctor.records'
 import { Route as DoctorScheduleRouteImport } from './routes/doctor.schedule'
 import { Route as DoctorSubscriptionRouteImport } from './routes/doctor.subscription'
+import { Route as DoctorSynthflowRouteImport } from './routes/doctor.synthflow'
 import { Route as PatientIndexRouteImport } from './routes/patient.index'
 import { Route as PatientActivityRouteImport } from './routes/patient.activity'
 import { Route as PatientAppointmentsRouteImport } from './routes/patient.appointments'
@@ -116,11 +116,6 @@ const AdminSubscriptionsRoute = AdminSubscriptionsRouteImport.update({
   path: '/subscriptions',
   getParentRoute: () => AdminRoute,
 } as any)
-const AdminSynthflowRoute = AdminSynthflowRouteImport.update({
-  id: '/synthflow',
-  path: '/synthflow',
-  getParentRoute: () => AdminRoute,
-} as any)
 const AdminVoiceCallsRoute = AdminVoiceCallsRouteImport.update({
   id: '/voice-calls',
   path: '/voice-calls',
@@ -174,6 +169,11 @@ const DoctorScheduleRoute = DoctorScheduleRouteImport.update({
 const DoctorSubscriptionRoute = DoctorSubscriptionRouteImport.update({
   id: '/subscription',
   path: '/subscription',
+  getParentRoute: () => DoctorRoute,
+} as any)
+const DoctorSynthflowRoute = DoctorSynthflowRouteImport.update({
+  id: '/synthflow',
+  path: '/synthflow',
   getParentRoute: () => DoctorRoute,
 } as any)
 const PatientIndexRoute = PatientIndexRouteImport.update({
@@ -272,7 +272,6 @@ export interface FileRoutesByFullPath {
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
-  '/admin/synthflow': typeof AdminSynthflowRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
   '/doctor/activity': typeof DoctorActivityRoute
   '/doctor/availability': typeof DoctorAvailabilityRoute
@@ -283,6 +282,7 @@ export interface FileRoutesByFullPath {
   '/doctor/records': typeof DoctorRecordsRoute
   '/doctor/schedule': typeof DoctorScheduleRoute
   '/doctor/subscription': typeof DoctorSubscriptionRoute
+  '/doctor/synthflow': typeof DoctorSynthflowRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -312,7 +312,6 @@ export interface FileRoutesByTo {
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
-  '/admin/synthflow': typeof AdminSynthflowRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
   '/doctor/activity': typeof DoctorActivityRoute
   '/doctor/availability': typeof DoctorAvailabilityRoute
@@ -323,6 +322,7 @@ export interface FileRoutesByTo {
   '/doctor/records': typeof DoctorRecordsRoute
   '/doctor/schedule': typeof DoctorScheduleRoute
   '/doctor/subscription': typeof DoctorSubscriptionRoute
+  '/doctor/synthflow': typeof DoctorSynthflowRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -356,7 +356,6 @@ export interface FileRoutesById {
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
-  '/admin/synthflow': typeof AdminSynthflowRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
   '/doctor/activity': typeof DoctorActivityRoute
   '/doctor/availability': typeof DoctorAvailabilityRoute
@@ -367,6 +366,7 @@ export interface FileRoutesById {
   '/doctor/records': typeof DoctorRecordsRoute
   '/doctor/schedule': typeof DoctorScheduleRoute
   '/doctor/subscription': typeof DoctorSubscriptionRoute
+  '/doctor/synthflow': typeof DoctorSynthflowRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -401,7 +401,6 @@ export interface FileRouteTypes {
     | '/admin/login'
     | '/admin/patients'
     | '/admin/subscriptions'
-    | '/admin/synthflow'
     | '/admin/voice-calls'
     | '/doctor/activity'
     | '/doctor/availability'
@@ -412,6 +411,7 @@ export interface FileRouteTypes {
     | '/doctor/records'
     | '/doctor/schedule'
     | '/doctor/subscription'
+    | '/doctor/synthflow'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -441,7 +441,6 @@ export interface FileRouteTypes {
     | '/admin/login'
     | '/admin/patients'
     | '/admin/subscriptions'
-    | '/admin/synthflow'
     | '/admin/voice-calls'
     | '/doctor/activity'
     | '/doctor/availability'
@@ -452,6 +451,7 @@ export interface FileRouteTypes {
     | '/doctor/records'
     | '/doctor/schedule'
     | '/doctor/subscription'
+    | '/doctor/synthflow'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -484,7 +484,6 @@ export interface FileRouteTypes {
     | '/admin/login'
     | '/admin/patients'
     | '/admin/subscriptions'
-    | '/admin/synthflow'
     | '/admin/voice-calls'
     | '/doctor/activity'
     | '/doctor/availability'
@@ -495,6 +494,7 @@ export interface FileRouteTypes {
     | '/doctor/records'
     | '/doctor/schedule'
     | '/doctor/subscription'
+    | '/doctor/synthflow'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -618,13 +618,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminSubscriptionsRouteImport
       parentRoute: typeof AdminRoute
     }
-    '/admin/synthflow': {
-      id: '/admin/synthflow'
-      path: '/synthflow'
-      fullPath: '/admin/synthflow'
-      preLoaderRoute: typeof AdminSynthflowRouteImport
-      parentRoute: typeof AdminRoute
-    }
     '/admin/voice-calls': {
       id: '/admin/voice-calls'
       path: '/voice-calls'
@@ -700,6 +693,13 @@ declare module '@tanstack/react-router' {
       path: '/subscription'
       fullPath: '/doctor/subscription'
       preLoaderRoute: typeof DoctorSubscriptionRouteImport
+      parentRoute: typeof DoctorRoute
+    }
+    '/doctor/synthflow': {
+      id: '/doctor/synthflow'
+      path: '/synthflow'
+      fullPath: '/doctor/synthflow'
+      preLoaderRoute: typeof DoctorSynthflowRouteImport
       parentRoute: typeof DoctorRoute
     }
     '/patient/': {
@@ -858,7 +858,6 @@ interface AdminRouteChildren {
   AdminLoginRoute: typeof AdminLoginRoute
   AdminPatientsRoute: typeof AdminPatientsRouteWithChildren
   AdminSubscriptionsRoute: typeof AdminSubscriptionsRoute
-  AdminSynthflowRoute: typeof AdminSynthflowRoute
   AdminVoiceCallsRoute: typeof AdminVoiceCallsRoute
   AdminIndexRoute: typeof AdminIndexRoute
 }
@@ -869,7 +868,6 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminLoginRoute: AdminLoginRoute,
   AdminPatientsRoute: AdminPatientsRouteWithChildren,
   AdminSubscriptionsRoute: AdminSubscriptionsRoute,
-  AdminSynthflowRoute: AdminSynthflowRoute,
   AdminVoiceCallsRoute: AdminVoiceCallsRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
@@ -898,6 +896,7 @@ interface DoctorRouteChildren {
   DoctorRecordsRoute: typeof DoctorRecordsRoute
   DoctorScheduleRoute: typeof DoctorScheduleRoute
   DoctorSubscriptionRoute: typeof DoctorSubscriptionRoute
+  DoctorSynthflowRoute: typeof DoctorSynthflowRoute
   DoctorIndexRoute: typeof DoctorIndexRoute
 }
 
@@ -911,6 +910,7 @@ const DoctorRouteChildren: DoctorRouteChildren = {
   DoctorRecordsRoute: DoctorRecordsRoute,
   DoctorScheduleRoute: DoctorScheduleRoute,
   DoctorSubscriptionRoute: DoctorSubscriptionRoute,
+  DoctorSynthflowRoute: DoctorSynthflowRoute,
   DoctorIndexRoute: DoctorIndexRoute,
 }
 

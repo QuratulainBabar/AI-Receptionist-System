@@ -129,13 +129,13 @@ function DoctorLayout() {
     ? access.modules.map((item) => ({ to: item.to, label: item.label, group: item.group }))
     : [];
   const accountMenu = access.modules
-    .filter((item) => ["patients", "records", "activity", "profile", "availability"].includes(item.id))
+    .filter((item) => ["profile"].includes(item.id))
     .map((item) => ({ to: item.to, label: item.label }));
 
   return (
     <DoctorAccessContext.Provider value={access}>
       <AppShell
-        brandSuffix={access.enrolled ? "Doctor portal" : "Doctor onboarding"}
+        brandSuffix=""
         nav={nav}
         session={session}
         accountMenu={accountMenu}

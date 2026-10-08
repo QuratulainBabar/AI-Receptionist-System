@@ -138,7 +138,12 @@ function isPrescriptionFile(category: string) {
 export async function buildPatientTimeline(doctorUserId: string, patientId: string): Promise<PatientTimelineEvent[]> {
   const [appointments, records, notes, prescriptions, calls] = await Promise.all([
     prisma.appointment.findMany({
-      where: { doctorUserId, patientId },
+      where: {
+        AND: [
+          { doctorUserId, patientId },
+          { NOT: { status: "PENDING", otps: { some: { usedAt: null } } } },
+        ],
+      },
       include: {
         followUpOf: { select: { reference: true } },
         statusEvents: { orderBy: { occurredAt: "desc" } },

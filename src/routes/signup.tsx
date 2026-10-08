@@ -1,10 +1,10 @@
 import { createFileRoute, Link, redirect, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
-import { Button, Field, Input, Badge } from "@/components/ui/primitives";
+import { Button, Field, Input } from "@/components/ui/primitives";
 import { authApi, formatApiError } from "@/lib/api";
 import { getSession, homeForRole, saveAuth } from "@/lib/session";
-import { Mail, Lock, UserCircle2, ArrowRight, Sparkles, CheckCircle2, Shield } from "lucide-react";
+import { Mail, Lock, UserCircle2, ArrowRight, CheckCircle2 } from "lucide-react";
 
 export const Route = createFileRoute("/signup")({
   beforeLoad: () => {
@@ -40,9 +40,6 @@ function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-
-  const passwordStrength = [password.length >= 8, /[A-Z]/.test(password), /[0-9]/.test(password)];
-  const strengthScore = passwordStrength.filter(Boolean).length;
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -88,7 +85,6 @@ function SignupPage() {
   return (
     <AuthLayout
       variant="signup"
-      eyebrow="Doctor onboarding · Step 1"
       title="Create your clinic account"
       description="Set up your practice on AI Receptionist and start receiving AI-managed appointments today."
       footer={
@@ -103,7 +99,7 @@ function SignupPage() {
         </p>
       }
     >
-      <form className="space-y-4.5" onSubmit={submit}>
+      <form className="space-y-2.5" onSubmit={submit}>
         <Field label="Full name" required>
           <div className="relative">
             <UserCircle2
@@ -111,8 +107,8 @@ function SignupPage() {
               strokeWidth={2}
             />
             <Input
-              className="!pl-11"
-              placeholder="Dr. Sarah Johnson"
+              className="!h-10 !rounded-lg !pl-10 !text-[12px]"
+              placeholder="Enter your full name"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               required
@@ -120,11 +116,7 @@ function SignupPage() {
           </div>
         </Field>
 
-        <Field
-          label="Work email"
-          required
-          hint="We'll send setup instructions and appointment alerts here."
-        >
+        <Field label="Work email" required>
           <div className="relative">
             <Mail
               className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 size-4.5 text-muted-foreground/60"
@@ -136,7 +128,7 @@ function SignupPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              className="!pl-11"
+              className="!h-10 !rounded-lg !pl-10 !text-[12px]"
             />
           </div>
         </Field>
@@ -154,54 +146,9 @@ function SignupPage() {
               onChange={(e) => setPassword(e.target.value)}
               minLength={8}
               required
-              className="!pl-11"
+              className="!h-10 !rounded-lg !pl-10 !text-[12px]"
             />
           </div>
-          {password ? (
-            <div className="mt-2.5 space-y-2">
-              <div className="flex gap-1.5">
-                {[0, 1, 2].map((i) => (
-                  <div
-                    key={i}
-                    className="flex-1 h-1.5 rounded-full transition-all duration-300"
-                    style={{
-                      background:
-                        i < strengthScore
-                          ? strengthScore === 3
-                            ? "linear-gradient(90deg, #10B981, #059669)"
-                            : strengthScore === 2
-                              ? "linear-gradient(90deg, #F59E0B, #D97706)"
-                              : "linear-gradient(90deg, #EF4444, #DC2626)"
-                          : "#E2E8F0",
-                    }}
-                  />
-                ))}
-              </div>
-              <div className="grid grid-cols-2 gap-y-1.5 gap-x-3">
-                {[
-                  { t: "8+ characters", ok: password.length >= 8 },
-                  { t: "Uppercase letter", ok: /[A-Z]/.test(password) },
-                  { t: "Number included", ok: /[0-9]/.test(password) },
-                  { t: "No spaces", ok: !/\s/.test(password) },
-                ].map((c) => (
-                  <div
-                    key={c.t}
-                    className="flex items-center gap-1.5 text-[11.5px] font-medium"
-                    style={{
-                      color: c.ok ? "#047857" : "#94A3B8",
-                    }}
-                  >
-                    {c.ok ? (
-                      <CheckCircle2 className="size-3.5" strokeWidth={3} />
-                    ) : (
-                      <span className="size-3.5 rounded-full border-2 border-current opacity-40" />
-                    )}
-                    {c.t}
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
         </Field>
 
         <Field label="Confirm password" required>
@@ -217,7 +164,7 @@ function SignupPage() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               minLength={8}
               required
-              className="!pl-11"
+              className="!h-10 !rounded-lg !pl-10 !text-[12px]"
             />
           </div>
           {confirmPassword && password !== confirmPassword ? (
@@ -278,7 +225,7 @@ function SignupPage() {
         <Button
           type="submit"
           size="lg"
-          className="w-full rounded-xl text-[14px]"
+          className="!h-10 w-full rounded-lg text-[13px]"
           disabled={loading}
         >
           {loading ? (
@@ -308,44 +255,6 @@ function SignupPage() {
           )}
         </Button>
       </form>
-
-      <div
-        className="mt-6 flex items-start gap-3 rounded-2xl p-4.5"
-        style={{
-          background:
-            "linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(16, 185, 129, 0.02) 100%)",
-          border: "1px solid rgba(16, 185, 129, 0.18)",
-        }}
-      >
-        <Shield className="size-5 shrink-0 mt-0.5" strokeWidth={2.3} style={{ color: "#047857" }} />
-        <div>
-          <p className="text-[13px] font-bold" style={{ color: "#047857" }}>
-            Your data is secure
-          </p>
-          <p className="mt-1 text-[12px] leading-relaxed" style={{ color: "#065F46" }}>
-            End-to-end encryption, HIPAA-compliant storage, and role-based access. We never sell
-            patient data.
-          </p>
-        </div>
-      </div>
-
-      <div className="mt-4 grid grid-cols-3 gap-2.5">
-        {[
-          { icon: <Sparkles className="size-3.5" />, label: "AI reception in minutes" },
-          { icon: <CheckCircle2 className="size-3.5" />, label: "Setup in under 5 min" },
-          { icon: <Shield className="size-3.5" />, label: "Cancel anytime" },
-        ].map((b) => (
-          <div
-            key={b.label}
-            className="rounded-xl p-3 text-center flex flex-col items-center gap-1.5 bg-muted/50"
-          >
-            <span style={{ color: "#1D4ED8" }}>{b.icon}</span>
-            <span className="text-[10.5px] font-bold text-muted-foreground leading-tight">
-              {b.label}
-            </span>
-          </div>
-        ))}
-      </div>
     </AuthLayout>
   );
 }

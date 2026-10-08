@@ -53,7 +53,7 @@ function AdminPatientsPage() {
 
   return (
     <>
-      <PageHeader eyebrow="Users" title="Patients" description="Search and manage patient accounts." />
+      <PageHeader title="Patients" description="Search and manage patient accounts." />
 
       <Panel className="mb-6 p-4">
         <div className="flex flex-col gap-3 sm:flex-row">
