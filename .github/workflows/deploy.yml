@@ -1,0 +1,108 @@
+name: Deploy to aidoctor.toolkitpro.cloud
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-aidoctor
+  cancel-in-progress: true
+
+env:
+  VITE_API_URL: https://aidoctor.toolkitpro.cloud/backend
+  DEPLOY_ROOT: /home/limiria/aidoctor.toolkitpro.cloud
+  NODE_VERSION: "20"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            backend/package-lock.json
+
+      - name: Install and build frontend
+        run: |
+          npm ci
+          npm run build
+        env:
+          VITE_API_URL: ${{ env.VITE_API_URL }}
+
+      - name: Install and build backend
+        working-directory: backend
+        run: |
+          npm ci
+          npx prisma generate
+          npm run build
+
+      - name: Prepare backend deploy bundle
+        run: |
+          mkdir -p deploy-backend
+          cp -r backend/dist deploy-backend/dist
+          cp -r backend/prisma deploy-backend/prisma
+          cp backend/package.json deploy-backend/package.json
+          cp backend/package-lock.json deploy-backend/package-lock.json
+          cp backend/ecosystem.config.cjs deploy-backend/ecosystem.config.cjs
+
+      - name: Deploy frontend to public_html
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          # Use directory source so hidden files (e.g. .htaccess) are included
+          source: dist/
+          target: ${{ env.DEPLOY_ROOT }}/public_html
+          strip_components: 1
+          overwrite: true
+
+      - name: Deploy backend app files
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          source: deploy-backend/
+          target: ${{ env.DEPLOY_ROOT }}/app
+          strip_components: 1
+          overwrite: true
+
+      - name: Install deps, migrate, restart PM2
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            APP_DIR="${{ env.DEPLOY_ROOT }}/app"
+            cd "$APP_DIR"
+
+            if [ ! -f .env ]; then
+              echo "Missing $APP_DIR/.env — create it on the server before deploy (see .github/DEPLOY.md)."
+              exit 1
+            fi
+
+            mkdir -p uploads
+            npm ci
+            npx prisma generate
+            npx prisma migrate deploy
+
+            if pm2 describe aidoctor-api >/dev/null 2>&1; then
+              pm2 restart aidoctor-api --update-env
+            else
+              pm2 start ecosystem.config.cjs
+            fi
+            pm2 save
