@@ -16,7 +16,7 @@ import { generateUniqueReference, hashPassword } from "./auth.helpers.js";
 
 import { getCurrentSubscriptionForUser, latestSubscriptionByUserIds } from "./subscription.service.js";
 
-export type AdminDoctorListItem = ReturnType<typeof toPublicUser> & {
+export type AdminDoctorListItem = Omit<ReturnType<typeof toPublicUser>, "phone"> & {
   specialty: string | null;
   clinic: string | null;
   fee: string | null;
@@ -274,7 +274,7 @@ export async function uploadDoctorPhotoForAdmin(
   if (!user || user.role !== Role.DOCTOR) throw new AppError(404, "Doctor not found");
   await ensureDoctorProfileForUser(userId);
   const profile = await updateDoctorPhotoForDoctor(userId, file);
-  voidDirectorySync("admin-doctor-photo");
+  queueDirectorySync("admin-doctor-photo");
   return profile;
 }
 
