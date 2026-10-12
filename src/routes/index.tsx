@@ -6,7 +6,8 @@ export const Route = createFileRoute("/")({
   beforeLoad: () => {
     if (typeof window === "undefined") return;
     const session = getSession();
-    if (session?.token) {
+    // Allow /#pricing (and other hashes) so unpaid doctors are not bounced in a loop.
+    if (session?.token && !window.location.hash) {
       throw redirect({ to: homeForRole(session.role) });
     }
   },

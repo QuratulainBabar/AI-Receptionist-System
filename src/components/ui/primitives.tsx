@@ -79,7 +79,7 @@ export function Button({
 export function Panel({ className, children }: { className?: string; children: ReactNode }) {
   return (
     <div
-      className={cn("panel p-6", className)}
+      className={cn("panel p-4 sm:p-6 min-w-0 max-w-full", className)}
       style={{
         background: "linear-gradient(180deg, #FFFFFF 0%, #FEFEFF 100%)",
         border: "1px solid #EEF2F7",
@@ -183,8 +183,8 @@ export function Field({
   required?: boolean;
 }) {
   return (
-    <label className="block space-y-2">
-      <span className="text-[13px] font-semibold text-foreground flex items-center gap-1.5">
+    <label className="block min-w-0 space-y-2">
+      <span className="flex items-center gap-1.5 text-[13px] font-semibold text-foreground">
         {label}
         {required ? <span className="text-destructive">*</span> : null}
       </span>
@@ -267,20 +267,20 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <header className="mb-7 flex flex-wrap items-end justify-between gap-5">
+    <header className="mb-5 sm:mb-7 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-5">
       <div className="min-w-0 max-w-3xl">
         {eyebrow ? (
           <SectionLabel className="text-[11px] text-blue-600/80">{eyebrow}</SectionLabel>
         ) : null}
         <h1
           className="mt-1.5 font-sans font-bold tracking-tight text-foreground text-balance"
-          style={{ fontSize: "clamp(1.5rem, 2.5vw, 2rem)" }}
+          style={{ fontSize: "clamp(1.35rem, 2.5vw, 2rem)" }}
         >
           {title}
         </h1>
         {description ? (
           <p
-            className="mt-2.5 text-[14px] leading-relaxed text-muted-foreground max-w-2xl"
+            className="mt-2.5 text-[13px] sm:text-[14px] leading-relaxed text-muted-foreground max-w-2xl"
             style={{ color: "#5A6A85" }}
           >
             {description}
@@ -288,7 +288,9 @@ export function PageHeader({
         ) : null}
       </div>
       {actions ? (
-        <div className="ml-auto flex flex-wrap items-center justify-end gap-2.5">{actions}</div>
+        <div className="flex w-full flex-wrap items-center gap-2.5 sm:ml-auto sm:w-auto sm:justify-end">
+          {actions}
+        </div>
       ) : null}
     </header>
   );
@@ -532,11 +534,11 @@ export function CardHeader({
   icon?: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-start justify-between gap-4 pb-5 mb-5 border-b border-[#F1F5F9]">
-      <div className="flex items-start gap-3.5 min-w-0">
+    <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b border-[#F1F5F9] pb-4 sm:mb-5 sm:gap-4 sm:pb-5">
+      <div className="flex min-w-0 items-start gap-3 sm:gap-3.5">
         {icon ? (
           <div
-            className="grid size-10 shrink-0 place-items-center rounded-xl"
+            className="grid size-9 shrink-0 place-items-center rounded-xl sm:size-10"
             style={{
               background:
                 "linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.05))",
@@ -547,11 +549,11 @@ export function CardHeader({
           </div>
         ) : null}
         <div className="min-w-0">
-          <h3 className="section-title text-[16px]">{title}</h3>
-          {subtitle ? <p className="mt-1 text-[13px] text-muted-foreground">{subtitle}</p> : null}
+          <h3 className="section-title text-[15px] sm:text-[16px]">{title}</h3>
+          {subtitle ? <p className="mt-1 text-[12.5px] sm:text-[13px] text-muted-foreground">{subtitle}</p> : null}
         </div>
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="w-full min-w-0 sm:w-auto sm:shrink-0">{action}</div> : null}
     </div>
   );
 }

@@ -3,34 +3,16 @@ import { useState } from "react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { Button, Field, Input } from "@/components/ui/primitives";
 import { authApi, formatApiError } from "@/lib/api";
-import {
-  parseBillingCycleSlug,
-  parsePlanSlug,
-} from "@/lib/plan-selection";
 import { getSession, homeForRole, saveAuth } from "@/lib/session";
 import { Mail, Lock, UserCircle2, ArrowRight, CheckCircle2 } from "lucide-react";
 
-const LANDING_PRICING_URL = "/#pricing";
-
 export const Route = createFileRoute("/signup")({
-  validateSearch: (search: Record<string, unknown>) => ({
-    plan: parsePlanSlug(search.plan),
-    cycle: parseBillingCycleSlug(search.cycle),
-  }),
-  beforeLoad: ({ search }) => {
+  beforeLoad: () => {
     if (typeof window === "undefined") return;
     const session = getSession();
     if (!session?.token) return;
-    if (session.role === "doctor" && search.plan) {
-      throw redirect({
-        to: "/doctor/onboarding",
-        search: {
-          checkout: undefined,
-          payment: undefined,
-          plan: search.plan,
-          cycle: search.cycle ?? "monthly",
-        },
-      });
+    if (session.role === "doctor") {
+      throw redirect({ to: "/doctor/profile", search: { setup: "1" } });
     }
     throw redirect({ to: homeForRole(session.role) });
   },
@@ -53,7 +35,6 @@ export const Route = createFileRoute("/signup")({
 
 function SignupPage() {
   const navigate = useNavigate();
-  const search = Route.useSearch();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -88,19 +69,16 @@ function SignupPage() {
         role: "doctor",
       });
       saveAuth(result.user, result.token);
-      if (result.user.role === "doctor") {
-        await navigate({
-          to: "/doctor/onboarding",
-          search: {
-            checkout: undefined,
-            payment: undefined,
-            plan: search.plan,
-            cycle: search.cycle ?? (search.plan ? "monthly" : undefined),
-          },
-        });
-      } else {
+      if (result.user.role !== "doctor") {
         await navigate({ to: homeForRole(result.user.role) });
+        return;
       }
+      // New doctors go straight to profile setup (no doctor ↔ pricing redirect loop).
+      await navigate({
+        to: "/doctor/profile",
+        search: { setup: "1" },
+        replace: true,
+      });
     } catch (err) {
       setError(formatApiError(err, "Unable to create account."));
     } finally {
@@ -113,29 +91,18 @@ function SignupPage() {
       variant="signup"
       title="Create your clinic account"
       footer={
-        <div className="space-y-2.5">
-          <p>
-            New clinic?{" "}
-            <a
-              href={LANDING_PRICING_URL}
-              className="font-bold text-blue-600 no-underline transition-colors hover:text-blue-700 hover:no-underline focus:no-underline active:no-underline"
-            >
-              Choose a plan & sign up
-            </a>
-          </p>
-          <p>
-            Already have an account?{" "}
-            <Link
-              to="/login"
-              className="font-bold text-blue-600 no-underline transition-colors hover:text-blue-700 hover:no-underline focus:no-underline active:no-underline"
-            >
-              Sign in
-            </Link>
-          </p>
-        </div>
+        <p>
+          Already have an account?{" "}
+          <Link
+            to="/login"
+            className="font-bold text-blue-600 no-underline transition-colors hover:text-blue-700 hover:no-underline focus:no-underline active:no-underline"
+          >
+            Sign in
+          </Link>
+        </p>
       }
     >
-      <form className="space-y-2.5" onSubmit={submit}>
+      <form className="space-y-2.5" onSubmit={submit} autoComplete="off">
         <Field label="Full name" required>
           <div className="relative">
             <UserCircle2
@@ -145,6 +112,8 @@ function SignupPage() {
             <Input
               className="!h-10 !rounded-lg !pl-10 !text-[12px]"
               placeholder="Enter your full name"
+              name="signup-full-name"
+              autoComplete="off"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
               required
@@ -161,6 +130,10 @@ function SignupPage() {
             <Input
               type="email"
               placeholder="you@clinicpractice.com"
+              name="signup-email"
+              autoComplete="off"
+              readOnly
+              onFocus={(e) => e.currentTarget.removeAttribute("readonly")}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -178,6 +151,10 @@ function SignupPage() {
             <Input
               type={showPassword ? "text" : "password"}
               placeholder="Minimum 8 characters"
+              name="signup-password"
+              autoComplete="new-password"
+              readOnly
+              onFocus={(e) => e.currentTarget.removeAttribute("readonly")}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               minLength={8}
@@ -196,6 +173,10 @@ function SignupPage() {
             <Input
               type={showPassword ? "text" : "password"}
               placeholder="Re-enter your password"
+              name="signup-confirm-password"
+              autoComplete="new-password"
+              readOnly
+              onFocus={(e) => e.currentTarget.removeAttribute("readonly")}
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
               minLength={8}

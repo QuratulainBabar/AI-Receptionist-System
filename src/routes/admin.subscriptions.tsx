@@ -194,7 +194,7 @@ function AdminSubscriptionsPage() {
   return (
     <>
       <div
-        className="relative mb-8 overflow-hidden rounded-3xl px-6 pb-6 pt-5 md:px-8 md:pb-7 md:pt-5 lg:px-10 lg:pb-8 lg:pt-5"
+        className="relative mb-6 overflow-hidden rounded-2xl px-4 pb-5 pt-4 sm:mb-8 sm:rounded-3xl sm:px-6 sm:pb-6 sm:pt-5 md:px-8 md:pb-7 lg:px-10 lg:pb-8"
         style={{
           backgroundColor: "#F4F7FF",
           backgroundImage: `
@@ -207,28 +207,25 @@ function AdminSubscriptionsPage() {
           border: "1px solid rgba(59,130,246,0.15)",
         }}
       >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute right-4 top-4 z-10 flex flex-col items-end gap-3"
-        >
-          <div className="inline-flex items-center gap-3 rounded-2xl border border-white/70 bg-white/85 px-5 py-3 text-[13px] shadow-[0_10px_30px_-14px_rgba(30,64,175,0.25)] backdrop-blur">
-            <Calendar className="size-4.5 text-blue-600" strokeWidth={2.1} />
+        <div className="relative z-10 mb-4 flex flex-col gap-3 sm:absolute sm:right-4 sm:top-4 sm:mb-0 sm:items-end">
+          <div className="inline-flex max-w-full flex-wrap items-center gap-2 rounded-2xl border border-white/70 bg-white/85 px-3 py-2.5 text-[12px] shadow-[0_10px_30px_-14px_rgba(30,64,175,0.25)] backdrop-blur sm:gap-3 sm:px-5 sm:py-3 sm:text-[13px]">
+            <Calendar className="size-4 shrink-0 text-blue-600 sm:size-4.5" strokeWidth={2.1} />
             <span className="font-bold text-slate-700">{todayLabel}</span>
-            <span className="text-slate-300">·</span>
+            <span className="hidden text-slate-300 sm:inline">·</span>
             <span className="font-semibold text-slate-500">{timeLabel}</span>
           </div>
           <Button
             type="button"
             variant="outline"
             onClick={() => void load()}
-            className="gap-2.5 rounded-2xl border border-white/70 bg-white/85 px-5 py-3 text-[13px] font-bold shadow-[0_8px_26px_-14px_rgba(30,64,175,0.22)] backdrop-blur hover:bg-white"
+            className="w-full gap-2.5 rounded-2xl border border-white/70 bg-white/85 px-5 py-3 text-[13px] font-bold shadow-[0_8px_26px_-14px_rgba(30,64,175,0.22)] backdrop-blur hover:bg-white sm:w-auto"
           >
             <RefreshCw className="size-4.5" strokeWidth={2.2} />
             Refresh
           </Button>
         </div>
-        <div className="relative z-10 max-w-[19rem] pt-24 sm:max-w-[26rem] sm:pt-0 lg:max-w-[24rem] xl:max-w-[28rem]">
-            <h1 className="font-sans text-[clamp(2.1rem,3.6vw,3.15rem)] font-black leading-[1.02] tracking-tight">
+        <div className="relative z-10 max-w-full pt-2 sm:max-w-[26rem] sm:pt-0 lg:max-w-[24rem] xl:max-w-[28rem]">
+            <h1 className="font-sans text-[clamp(1.75rem,3.6vw,3.15rem)] font-black leading-[1.02] tracking-tight">
               Manage Your
               <br />
               <span
@@ -266,9 +263,9 @@ function AdminSubscriptionsPage() {
       {loading && !overview ? (
         <EmptyNote>Loading subscriptions…</EmptyNote>
       ) : (
-        <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mb-6 grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
           <div
-            className="relative overflow-hidden rounded-3xl p-5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)]"
+            className="relative min-w-0 overflow-hidden rounded-2xl p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)] sm:rounded-3xl sm:p-5"
             style={{
               background: "linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%)",
               border: "1px solid #E2E8F0",
@@ -317,7 +314,7 @@ function AdminSubscriptionsPage() {
           </div>
 
           <div
-            className="relative overflow-hidden rounded-3xl p-5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)]"
+            className="relative min-w-0 overflow-hidden rounded-2xl p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)] sm:rounded-3xl sm:p-5"
             style={{
               background: "linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%)",
               border: "1px solid #E2E8F0",
@@ -366,7 +363,7 @@ function AdminSubscriptionsPage() {
           </div>
 
           <div
-            className="relative overflow-hidden rounded-3xl p-5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)]"
+            className="relative min-w-0 overflow-hidden rounded-2xl p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)] sm:rounded-3xl sm:p-5"
             style={{
               background: "linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%)",
               border: "1px solid #E2E8F0",
@@ -415,7 +412,7 @@ function AdminSubscriptionsPage() {
           </div>
 
           <div
-            className="relative overflow-hidden rounded-3xl p-5 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)]"
+            className="relative min-w-0 overflow-hidden rounded-2xl p-4 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.35)] sm:rounded-3xl sm:p-5"
             style={{
               background: "linear-gradient(180deg, #FFFFFF 0%, #F8FBFF 100%)",
               border: "1px solid #E2E8F0",
@@ -466,7 +463,7 @@ function AdminSubscriptionsPage() {
       )}
 
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_420px]">
+        <div className="grid min-w-0 gap-4 sm:gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,380px)] xl:grid-cols-[minmax(0,1fr)_420px]">
           <div className="space-y-4">
             {!plans.length ? (
               <EmptyNote>

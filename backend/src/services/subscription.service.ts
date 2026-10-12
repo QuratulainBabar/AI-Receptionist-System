@@ -273,32 +273,37 @@ export async function getCurrentSubscriptionForUser(userId: string) {
 
 type DoctorModule = { id: string; label: string; to: string; group: string };
 
-const CLINICAL_MODULES: DoctorModule[] = [
-  { id: "schedule", label: "Appointments", to: "/doctor/appointments", group: "Today" },
-  { id: "notifications", label: "Notifications", to: "/doctor/notifications", group: "Today" },
-  { id: "patients", label: "Patient List", to: "/doctor/patients", group: "Clinical" },
-  { id: "records", label: "Reports", to: "/doctor/records", group: "Clinical" },
-  { id: "activity", label: "Activity History", to: "/doctor/activity", group: "Clinical" },
+/** Sidebar order for the doctor portal (flat list, no section headers). */
+const DOCTOR_NAV_MODULES: DoctorModule[] = [
+  { id: "dashboard", label: "Dashboard", to: "/doctor", group: "" },
+  { id: "schedule", label: "Appointments", to: "/doctor/appointments", group: "" },
+  { id: "team", label: "Users", to: "/doctor/team", group: "" },
+  { id: "availability", label: "Availability", to: "/doctor/availability", group: "" },
+  { id: "patients", label: "Patient List", to: "/doctor/patients", group: "" },
+  { id: "records", label: "Reports", to: "/doctor/records", group: "" },
+  { id: "activity", label: "Activity History", to: "/doctor/activity", group: "" },
+  { id: "subscription", label: "Plans", to: "/doctor/subscription", group: "" },
+  { id: "notifications", label: "Notifications", to: "/doctor/notifications", group: "" },
+  { id: "synthflow", label: "My Clinic", to: "/doctor/clinic", group: "" },
+  { id: "profile", label: "My profile", to: "/doctor/profile", group: "" },
+  { id: "settings", label: "Settings", to: "/doctor/settings", group: "" },
 ];
 
+const CLINICAL_MODULE_IDS = new Set([
+  "schedule",
+  "notifications",
+  "patients",
+  "records",
+  "activity",
+]);
+
 function modulesForPlan(ready: boolean): DoctorModule[] {
-  const practice: DoctorModule[] = [
-    { id: "dashboard", label: "Dashboard", to: "/doctor", group: "Today" },
-    { id: "synthflow", label: "My Clinic", to: "/doctor/clinic", group: "Phone AI" },
-    { id: "profile", label: "My profile", to: "/doctor/profile", group: "Practice" },
-    { id: "availability", label: "Availability", to: "/doctor/availability", group: "Practice" },
-    { id: "team", label: "Users", to: "/doctor/team", group: "Practice" },
-    { id: "subscription", label: "Plans", to: "/doctor/subscription", group: "Practice" },
-    { id: "settings", label: "Settings", to: "/doctor/settings", group: "Practice" },
-  ];
-  if (!ready) return practice.filter((mod) => mod.id !== "team");
-  return [
-    practice[0]!,
-    ...CLINICAL_MODULES.filter((mod) => mod.group === "Today"),
-    ...CLINICAL_MODULES.filter((mod) => mod.group === "Clinical"),
-    practice[1]!,
-    ...practice.slice(2),
-  ];
+  if (!ready) {
+    return DOCTOR_NAV_MODULES.filter(
+      (mod) => !CLINICAL_MODULE_IDS.has(mod.id) && mod.id !== "team",
+    );
+  }
+  return DOCTOR_NAV_MODULES;
 }
 
 export async function getDoctorAccess(userId: string) {
@@ -318,7 +323,10 @@ export async function getDoctorAccess(userId: string) {
       profile.clinic.trim(),
   );
   const availabilityComplete = (profile?._count.availability ?? 0) > 0;
-  const ready = enrolled && profileComplete && availabilityComplete;
+  // Full doctor dashboard unlocks once required My Profile fields are saved.
+  // Availability remains tracked but no longer blocks portal access.
+  const portalOpen = enrolled || profileComplete;
+  const ready = profileComplete;
 
   let planFeatures: string[] = [];
   if (subscription) {
@@ -329,9 +337,9 @@ export async function getDoctorAccess(userId: string) {
     planFeatures = plan?.features ?? [];
   }
 
-  const modules = enrolled ? modulesForPlan(ready) : [];
+  const modules = portalOpen ? modulesForPlan(ready) : [];
   const upcomingModules =
-    enrolled && !ready
+    portalOpen && !ready
       ? modulesForPlan(true).filter(
           (mod) => !["dashboard", "profile", "availability", "subscription"].includes(mod.id),
         )
@@ -343,7 +351,7 @@ export async function getDoctorAccess(userId: string) {
     availabilityComplete,
     ready,
     planName: enrolled ? (subscription?.planName ?? null) : null,
-    planFeatures: enrolled ? planFeatures : [],
+    planFeatures: enrolled || profileComplete ? planFeatures : [],
     modules,
     upcomingModules,
     subscription: enrolled ? subscription : subscription,
@@ -453,6 +461,180 @@ function checkoutReturnOrigin(requested?: string) {
   return fallback;
 }
 
+const LANDING_PLAN_NAMES: Record<string, string> = {
+  starter: "Starter",
+  growth: "Growth",
+  professional: "Growth",
+  pilot: "Pilot",
+};
+
+export async function findLandingPlan(planSlug: string, cycleSlug: string) {
+  const name = LANDING_PLAN_NAMES[planSlug.trim().toLowerCase()];
+  if (!name) throw new AppError(400, "Unknown plan");
+  const cycle: BillingCycle =
+    planSlug.trim().toLowerCase() === "pilot"
+      ? "YEARLY"
+      : cycleSlug.trim().toLowerCase() === "yearly" ||
+          cycleSlug.trim().toLowerCase() === "year" ||
+          cycleSlug.trim().toLowerCase() === "annual"
+        ? "YEARLY"
+        : "MONTHLY";
+
+  const plan = await prisma.subscriptionPlan.findFirst({
+    where: {
+      isActive: true,
+      billingCycle: cycle,
+      name: { equals: name, mode: "insensitive" },
+    },
+    orderBy: { sortOrder: "asc" },
+  });
+  if (!plan) {
+    throw new AppError(404, `No active ${name} (${cycle.toLowerCase()}) plan is available`);
+  }
+  return plan;
+}
+
+/** Public landing checkout — Stripe collects email; no account required yet. */
+export async function createGuestCheckoutSession(
+  planSlug: string,
+  cycleSlug: string,
+  returnOrigin?: string,
+) {
+  const plan = await findLandingPlan(planSlug, cycleSlug);
+  const stripe = getStripe();
+  const origin = checkoutReturnOrigin(returnOrigin);
+
+  const session = await stripe.checkout.sessions.create({
+    mode: "subscription",
+    line_items: [{ price: plan.stripePriceId, quantity: 1 }],
+    success_url: `${origin}/checkout/complete?session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${origin}/#pricing`,
+    billing_address_collection: "auto",
+    metadata: {
+      planId: plan.id,
+      planSlug: planSlug.trim().toLowerCase(),
+      guest: "1",
+    },
+    subscription_data: {
+      metadata: {
+        planId: plan.id,
+        planSlug: planSlug.trim().toLowerCase(),
+        guest: "1",
+      },
+      trial_period_days: plan.trialDays > 0 ? plan.trialDays : undefined,
+    },
+  });
+
+  if (!session.url) {
+    throw new AppError(502, "Stripe did not return a checkout URL");
+  }
+  return { url: session.url, sessionId: session.id };
+}
+
+/** After guest Stripe payment: create/login doctor, attach subscription, return JWT. */
+export async function completeGuestCheckoutSession(sessionId: string) {
+  if (!sessionId.startsWith("cs_")) {
+    throw new AppError(400, "Invalid checkout session");
+  }
+  const stripe = getStripe();
+  const session = await stripe.checkout.sessions.retrieve(sessionId, {
+    expand: ["subscription", "customer"],
+  });
+
+  const paid =
+    session.payment_status === "paid" || session.payment_status === "no_payment_required";
+  if (session.status !== "complete" || !paid) {
+    throw new AppError(400, "Payment is not complete yet");
+  }
+
+  const email = (
+    session.customer_details?.email ||
+    session.customer_email ||
+    ""
+  )
+    .trim()
+    .toLowerCase();
+  if (!email) {
+    throw new AppError(400, "Stripe checkout did not return an email");
+  }
+
+  const fullName =
+    session.customer_details?.name?.trim() ||
+    email.split("@")[0]?.replace(/[._-]+/g, " ") ||
+    "Clinic Doctor";
+
+  const stripeCustomerId =
+    typeof session.customer === "string" ? session.customer : session.customer?.id || "";
+
+  const {
+    ensureDoctorProfileForUser,
+  } = await import("./doctor-profile.service.js");
+  const {
+    generateUniqueReference,
+    hashPassword,
+    signAccessToken,
+    toPublicUser,
+  } = await import("./auth.helpers.js");
+
+  let user = await prisma.user.findUnique({ where: { email } });
+  let created = false;
+
+  if (!user) {
+    const reference = await generateUniqueReference(Role.DOCTOR);
+    const passwordHash = await hashPassword(cryptoRandomPassword());
+    user = await prisma.user.create({
+      data: {
+        email,
+        fullName,
+        passwordHash,
+        role: Role.DOCTOR,
+        reference,
+        isActive: true,
+        stripeCustomerId: stripeCustomerId || null,
+      },
+    });
+    await ensureDoctorProfileForUser(user.id);
+    created = true;
+  } else if (user.role !== Role.DOCTOR) {
+    throw new AppError(409, "This email belongs to a non-doctor account");
+  } else if (!user.isActive) {
+    throw new AppError(403, "This account has been deactivated. Contact support.");
+  } else if (stripeCustomerId && user.stripeCustomerId !== stripeCustomerId) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { stripeCustomerId },
+    });
+    user = { ...user, stripeCustomerId };
+  }
+
+  const stripeSub = session.subscription;
+  if (stripeSub) {
+    const sub =
+      typeof stripeSub === "string" ? await stripe.subscriptions.retrieve(stripeSub) : stripeSub;
+    // Ensure subscription metadata has userId for future webhooks.
+    if (sub.metadata?.userId !== user.id) {
+      await stripe.subscriptions.update(sub.id, {
+        metadata: { ...sub.metadata, userId: user.id, planId: session.metadata?.planId || "" },
+      });
+    }
+    await upsertFromStripeSubscription(sub, user.id);
+  }
+
+  const token = signAccessToken(user);
+  const access = await getDoctorAccess(user.id);
+  return {
+    created,
+    enrolled: access.enrolled,
+    access,
+    user: toPublicUser(user),
+    token,
+  };
+}
+
+function cryptoRandomPassword() {
+  return `Tmp-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}!A1`;
+}
+
 export async function createCheckoutSession(userId: string, planId: string, returnOrigin?: string) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user || user.role !== Role.DOCTOR) {
@@ -479,7 +661,7 @@ export async function createCheckoutSession(userId: string, planId: string, retu
       : `${origin}/doctor/profile?setup=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: alreadyEnrolled
       ? `${origin}/doctor/subscription?checkout=cancelled`
-      : `${origin}/doctor/onboarding?checkout=cancelled`,
+      : `${origin}/#pricing`,
     metadata: { userId: user.id, planId: plan.id },
     subscription_data: {
       metadata: { userId: user.id, planId: plan.id },

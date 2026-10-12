@@ -36,6 +36,7 @@ import { resolveBootAgentId, syncClinicDirectoryToSynthflow } from "./services/c
 import {
   adminSubscriptionsRouter,
   doctorSubscriptionsRouter,
+  publicBillingRouter,
 } from "./routes/subscriptions.js";
 import * as subscriptionsController from "./controllers/subscriptions.controller.js";
 import { alignDoctorTimeZones } from "./services/doctor-profile.service.js";
@@ -105,6 +106,7 @@ app.use("/api/doctor/synthflow", doctorSynthflowRouter);
 app.use("/api/doctor/team", clinicTeamRouter);
 app.use("/api/admin/subscriptions", adminSubscriptionsRouter);
 app.use("/api/doctor/subscription", doctorSubscriptionsRouter);
+app.use("/api/billing", publicBillingRouter);
 app.use("/api/webhooks/synthflow", synthflowRouter);
 
 app.use(errorHandler);

@@ -230,6 +230,8 @@ function DoctorProfilePage() {
             : "Saved locally. Create or sync the AI agent from My Clinic to push this profile to callers.",
         );
       }
+      // Required profile fields saved → refresh access so full dashboard modules unlock.
+      window.dispatchEvent(new Event("doctor-access-refresh"));
       if (setupMode) {
         await navigate({ to: "/doctor", search: { checkout: "success" }, replace: true });
         return;
@@ -300,7 +302,7 @@ function DoctorProfilePage() {
         title={setupMode ? "Set up your profile" : "My Profile"}
         description={
           setupMode
-            ? "Payment received. Complete your clinic profile to open the doctor dashboard."
+            ? "Complete your clinic profile to open the doctor dashboard."
             : "Manage your personal, professional, and clinic details. Saved changes sync to the AI phone receptionist."
         }
         actions={
@@ -503,7 +505,7 @@ function DoctorProfilePage() {
             </Field>
             <Field label="Consultation type">
               {editing ? (
-                <div className="grid grid-cols-3 gap-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   {CONSULTATION_OPTIONS.map((option) => (
                     <button
                       key={option.value}

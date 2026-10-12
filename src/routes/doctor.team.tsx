@@ -356,8 +356,8 @@ function DoctorTeamPage() {
             </EmptyNote>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[960px]">
+          <div className="table-scroll">
+            <table className="w-full min-w-[800px] md:min-w-[960px]">
               <thead>
                 <tr className="border-b border-sky-100">
                   <th className="px-5 py-3.5 text-left">
@@ -471,7 +471,7 @@ function DoctorTeamPage() {
             aria-label="Close"
             onClick={() => !saving && setModalOpen(false)}
           />
-          <div className="relative z-10 max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-sky-100 bg-white shadow-2xl">
+          <div className="relative z-10 max-h-[92vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-sky-100 bg-white shadow-2xl scrollbar-thin">
             <div className="sticky top-0 flex items-start justify-between gap-3 border-b border-sky-100 bg-white px-5 py-4">
               <div>
                 <div className="flex items-center gap-2">

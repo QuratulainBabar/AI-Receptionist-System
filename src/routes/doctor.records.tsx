@@ -167,8 +167,8 @@ function DoctorRecords() {
           .
         </EmptyNote>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-3">
-          <div className="space-y-4 lg:col-span-2">
+        <div className="grid min-w-0 gap-4 sm:gap-6 lg:grid-cols-3">
+          <div className="min-w-0 space-y-4 lg:col-span-2">
             <Panel className="p-4">
               <SectionLabel>Patient overview</SectionLabel>
               <div className="mt-3 grid gap-3 text-[13px] sm:grid-cols-2">

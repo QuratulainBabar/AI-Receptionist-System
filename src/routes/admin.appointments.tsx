@@ -230,12 +230,12 @@ function AdminAppointmentsPage() {
       )}
 
       {rescheduleFor ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/35 p-4">
-          <Panel className="w-full max-w-lg space-y-4 p-5">
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-foreground/35 p-3 sm:p-4">
+          <Panel className="my-4 w-full max-w-lg space-y-4 p-4 sm:my-0 sm:p-5">
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <SectionLabel>Reschedule</SectionLabel>
-                <p className="mt-1 text-sm font-semibold">
+                <p className="mt-1 text-sm font-semibold break-words">
                   {rescheduleFor.reference} · {rescheduleFor.patientName}
                 </p>
                 <p className="text-xs text-muted-foreground">

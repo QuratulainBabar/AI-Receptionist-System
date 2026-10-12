@@ -324,8 +324,8 @@ export function DoctorAppointmentsView({ view }: { view: AppointmentView }) {
         <EmptyNote>{meta.empty}</EmptyNote>
       ) : (
         <Panel className="overflow-hidden border border-sky-100 p-0">
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[1080px]">
+          <div className="table-scroll">
+            <table className="w-full min-w-[960px] md:min-w-[1080px]">
               <thead>
                 <tr className="border-b border-sky-100 bg-gradient-to-r from-sky-50 to-blue-50/40">
                   <th className="px-5 py-3.5 text-left">

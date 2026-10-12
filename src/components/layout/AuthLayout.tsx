@@ -44,7 +44,7 @@ export function AuthLayout({
           </h2>
           <div className="relative mt-3 flex w-full flex-1 items-center justify-center">
             <img
-              src="/images/auth%206.png"
+              src="/images/Doctor%20(1).png"
               alt="Doctor with AI receptionist"
               className="h-full w-auto max-h-full max-w-full select-none object-contain"
               loading="eager"

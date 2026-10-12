@@ -28,6 +28,7 @@ import {
   CircleCheck,
   Ban,
   RefreshCw,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -136,6 +137,21 @@ export function AppShell({
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
   }, [collapsed]);
+
+  useEffect(() => {
+    setOpen(false);
+    setAccountOpen(false);
+    setNotificationOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
 
   const autoExpanded = useMemo(() => {
     const next: Record<string, boolean> = {};
@@ -336,6 +352,14 @@ export function AppShell({
                 <ChevronLeft className="size-4" strokeWidth={2.2} aria-hidden />
               )}
             </button>
+            <button
+              type="button"
+              aria-label="Close menu"
+              onClick={() => setOpen(false)}
+              className="grid size-8 shrink-0 place-items-center rounded-lg text-white/70 transition-colors hover:bg-white/10 hover:text-white lg:hidden"
+            >
+              <X className="size-4.5" strokeWidth={2.2} aria-hidden />
+            </button>
           </div>
         </div>
 
@@ -346,15 +370,17 @@ export function AppShell({
           )}
         >
           {groups.map((group) => (
-            <div key={group} className="mb-2 first:mt-1.5">
-              <p
-                className={cn(
-                  "mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35",
-                  collapsed && "lg:hidden",
-                )}
-              >
-                {group}
-              </p>
+            <div key={group || "nav"} className="mb-2 first:mt-1.5">
+              {group ? (
+                <p
+                  className={cn(
+                    "mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35",
+                    collapsed && "lg:hidden",
+                  )}
+                >
+                  {group}
+                </p>
+              ) : null}
               <div className="space-y-1">
                 {nav
                   .filter((item) => item.group === group)
@@ -506,11 +532,11 @@ export function AppShell({
       ) : null}
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        <header className="glass-header z-20 flex min-h-[72px] shrink-0 items-center justify-between gap-3 px-4 py-3 md:px-8">
-          <div className="flex items-center gap-3 min-w-0">
+        <header className="glass-header z-20 flex min-h-[60px] shrink-0 items-center justify-between gap-2 px-3 py-2.5 sm:min-h-[72px] sm:gap-3 sm:px-4 sm:py-3 md:px-6 lg:px-8">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <button
               type="button"
-              className="grid size-10 place-items-center rounded-xl border border-border bg-card text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors lg:hidden"
+              className="grid size-10 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground lg:hidden"
               onClick={() => setOpen(true)}
               aria-label="Open menu"
             >
@@ -518,7 +544,7 @@ export function AppShell({
             </button>
           </div>
 
-          <div className="flex items-center gap-2 md:gap-3">
+          <div className="flex min-w-0 items-center gap-1.5 sm:gap-2 md:gap-3">
             {session.role === "patient" ? (
               <div className="relative hidden md:block w-[420px] max-w-[45vw]">
                 <Search
@@ -561,7 +587,7 @@ export function AppShell({
               {notificationOpen ? (
                 <div
                   role="menu"
-                  className="absolute right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+                  className="absolute right-0 z-50 mt-2 w-[min(20rem,calc(100vw-1.25rem))] overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
                 >
                   <div className="border-b border-border px-5 py-4">
                     <h4 className="section-title text-[15px]">Notifications</h4>
@@ -638,7 +664,7 @@ export function AppShell({
                 aria-haspopup="menu"
                 aria-expanded={accountOpen}
                 onClick={() => setAccountOpen((value) => !value)}
-                className="flex items-center gap-2.5 rounded-2xl border border-border/70 bg-card/60 pl-1.5 pr-3 py-1.5 text-left transition-all hover:bg-secondary hover:shadow-sm"
+                className="flex max-w-full items-center gap-2 rounded-2xl border border-border/70 bg-card/60 py-1.5 pl-1.5 pr-2 text-left transition-all hover:bg-secondary hover:shadow-sm sm:gap-2.5 sm:pr-3"
               >
                 <span
                   className="grid size-8 shrink-0 place-items-center rounded-xl font-semibold text-white text-[12px]"
@@ -677,7 +703,7 @@ export function AppShell({
               {accountOpen ? (
                 <div
                   role="menu"
-                  className="absolute right-0 z-50 mt-1.5 w-56 overflow-hidden rounded-xl border border-border bg-card shadow-lg"
+                  className="absolute right-0 z-50 mt-1.5 w-[min(14rem,calc(100vw-1.25rem))] overflow-hidden rounded-xl border border-border bg-card shadow-lg sm:w-56"
                 >
                   <div className="border-b border-border bg-muted/20 px-3 py-2.5">
                     <div className="flex items-center gap-2.5">
@@ -739,8 +765,8 @@ export function AppShell({
             </div>
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-8 scrollbar-thin">
-          <div className="mx-auto w-full max-w-[1480px]">{children}</div>
+        <main className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden p-3 scrollbar-thin sm:p-4 md:p-6 lg:p-8">
+          <div className="mx-auto w-full min-w-0 max-w-[1480px]">{children}</div>
         </main>
       </div>
     </div>

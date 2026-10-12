@@ -85,16 +85,16 @@ function AdminSettingsPage() {
       <header className="mb-6">
         <h1
           className="font-jakarta font-extrabold tracking-tight text-foreground"
-          style={{ fontSize: "clamp(1.75rem, 3vw, 2.25rem)", letterSpacing: "-0.03em" }}
+          style={{ fontSize: "clamp(1.45rem, 3vw, 2.25rem)", letterSpacing: "-0.03em" }}
         >
           Settings
         </h1>
-        <p className="mt-2.5 max-w-2xl text-[14.5px] leading-relaxed" style={{ color: "#64748B" }}>
+        <p className="mt-2.5 max-w-2xl text-[13px] leading-relaxed sm:text-[14.5px]" style={{ color: "#64748B" }}>
           Manage your Super Admin profile, review SMS capabilities, system users, and password security.
         </p>
       </header>
 
-      <div className="mb-6 inline-flex max-w-full flex-wrap gap-1 rounded-2xl border border-border/80 bg-card p-1.5 shadow-sm">
+      <div className="mb-6 inline-flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-border/80 bg-card p-1.5 shadow-sm scrollbar-thin">
         {(
           [
             ["general", "General"],
@@ -111,7 +111,7 @@ function AdminSettingsPage() {
               setNotice("");
               setError("");
             }}
-            className={`rounded-xl px-4 py-2 text-[13.5px] font-bold transition-colors ${
+            className={`shrink-0 rounded-xl px-3 py-2 text-[12.5px] font-bold transition-colors sm:px-4 sm:text-[13.5px] ${
               tab === id
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -544,8 +544,8 @@ function UsersTab({
           </Button>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 px-5 py-3">
-          <div className="relative min-w-[220px] flex-1">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:px-5">
+          <div className="relative min-w-0 w-full flex-1 sm:min-w-[220px]">
             <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
             <Input
               value={q}
@@ -560,7 +560,7 @@ function UsersTab({
             />
           </div>
           <select
-            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:w-auto"
             value={role}
             onChange={(e) => setRole(e.target.value as typeof role)}
           >
@@ -570,7 +570,7 @@ function UsersTab({
             <option value="admin">Super Admin</option>
           </select>
           <select
-            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+            className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:w-auto"
             value={status}
             onChange={(e) => setStatus(e.target.value as typeof status)}
           >

@@ -194,11 +194,11 @@ function AdminDoctorsPage() {
         }}
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid min-w-0 gap-3 sm:grid-cols-3 sm:gap-4">
         {cards.map((card) => (
           <div
             key={card.label}
-            className="rounded-2xl border border-border/80 bg-card p-4 shadow-sm"
+            className="min-w-0 rounded-2xl border border-border/80 bg-card p-4 shadow-sm"
           >
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -297,11 +297,11 @@ function AdminDoctorsPage() {
             <EmptyNote>No doctors match this search.</EmptyNote>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="table-scroll">
+            <table className="min-w-[880px] w-full text-sm">
               <thead className="bg-muted/40 text-left text-[11.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
                 <tr>
-                  <th className="px-5 py-3.5 font-medium">Doctor</th>
+                  <th className="px-4 py-3.5 font-medium sm:px-5">Doctor</th>
                   <th className="px-5 py-3.5 font-medium">Specialty</th>
                   <th className="px-5 py-3.5 font-medium">Email</th>
                   <th className="px-5 py-3.5 font-medium">Phone</th>

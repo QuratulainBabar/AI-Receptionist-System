@@ -26,6 +26,7 @@ import { Route as AdminPatientsRouteImport } from './routes/admin.patients'
 import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminSubscriptionsRouteImport } from './routes/admin.subscriptions'
 import { Route as AdminVoiceCallsRouteImport } from './routes/admin.voice-calls'
+import { Route as CheckoutCompleteRouteImport } from './routes/checkout.complete'
 import { Route as DoctorIndexRouteImport } from './routes/doctor.index'
 import { Route as DoctorActivityRouteImport } from './routes/doctor.activity'
 import { Route as DoctorAppointmentsRouteImport } from './routes/doctor.appointments'
@@ -149,6 +150,11 @@ const AdminVoiceCallsRoute = AdminVoiceCallsRouteImport.update({
   id: '/voice-calls',
   path: '/voice-calls',
   getParentRoute: () => AdminRoute,
+} as any)
+const CheckoutCompleteRoute = CheckoutCompleteRouteImport.update({
+  id: '/checkout/complete',
+  path: '/checkout/complete',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const DoctorIndexRoute = DoctorIndexRouteImport.update({
   id: '/',
@@ -365,6 +371,7 @@ export interface FileRoutesByFullPath {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
+  '/checkout/complete': typeof CheckoutCompleteRoute
   '/doctor/activity': typeof DoctorActivityRoute
   '/doctor/appointments': typeof DoctorAppointmentsRouteWithChildren
   '/doctor/availability': typeof DoctorAvailabilityRoute
@@ -419,6 +426,7 @@ export interface FileRoutesByTo {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
+  '/checkout/complete': typeof CheckoutCompleteRoute
   '/doctor/activity': typeof DoctorActivityRoute
   '/doctor/availability': typeof DoctorAvailabilityRoute
   '/doctor/clinic': typeof DoctorClinicRoute
@@ -476,6 +484,7 @@ export interface FileRoutesById {
   '/admin/settings': typeof AdminSettingsRoute
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
+  '/checkout/complete': typeof CheckoutCompleteRoute
   '/doctor/activity': typeof DoctorActivityRoute
   '/doctor/appointments': typeof DoctorAppointmentsRouteWithChildren
   '/doctor/availability': typeof DoctorAvailabilityRoute
@@ -535,6 +544,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/subscriptions'
     | '/admin/voice-calls'
+    | '/checkout/complete'
     | '/doctor/activity'
     | '/doctor/appointments'
     | '/doctor/availability'
@@ -589,6 +599,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/subscriptions'
     | '/admin/voice-calls'
+    | '/checkout/complete'
     | '/doctor/activity'
     | '/doctor/availability'
     | '/doctor/clinic'
@@ -645,6 +656,7 @@ export interface FileRouteTypes {
     | '/admin/settings'
     | '/admin/subscriptions'
     | '/admin/voice-calls'
+    | '/checkout/complete'
     | '/doctor/activity'
     | '/doctor/appointments'
     | '/doctor/availability'
@@ -695,6 +707,7 @@ export interface RootRouteChildren {
   PatientRoute: typeof PatientRouteWithChildren
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
+  CheckoutCompleteRoute: typeof CheckoutCompleteRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -817,6 +830,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/admin/voice-calls'
       preLoaderRoute: typeof AdminVoiceCallsRouteImport
       parentRoute: typeof AdminRoute
+    }
+    '/checkout/complete': {
+      id: '/checkout/complete'
+      path: '/checkout/complete'
+      fullPath: '/checkout/complete'
+      preLoaderRoute: typeof CheckoutCompleteRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/doctor/': {
       id: '/doctor/'
@@ -1283,6 +1303,7 @@ const rootRouteChildren: RootRouteChildren = {
   PatientRoute: PatientRouteWithChildren,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
+  CheckoutCompleteRoute: CheckoutCompleteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

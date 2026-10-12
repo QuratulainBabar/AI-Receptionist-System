@@ -240,7 +240,7 @@ function PatientDetails() {
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
       {message ? <p className="mb-4 text-sm text-primary">{message}</p> : null}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid min-w-0 gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Panel className="p-4">
             <div className="flex items-start gap-4">

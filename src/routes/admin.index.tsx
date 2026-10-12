@@ -178,7 +178,7 @@ function AdminDashboard() {
   return (
     <>
       <section
-        className="relative mb-6 overflow-hidden rounded-[22px] px-5 py-6 sm:px-7 sm:py-7"
+        className="relative mb-6 overflow-hidden rounded-[18px] px-4 py-5 sm:rounded-[22px] sm:px-7 sm:py-7"
         style={{
           background: "linear-gradient(115deg, #0B1E4B 0%, #123A8A 48%, #1D4ED8 100%)",
           boxShadow: "0 18px 40px -24px rgba(29, 78, 216, 0.55)",
@@ -192,12 +192,12 @@ function AdminDashboard() {
               "radial-gradient(circle at 88% 18%, rgba(147,197,253,0.35) 0%, transparent 42%), radial-gradient(circle at 8% 90%, rgba(99,102,241,0.28) 0%, transparent 45%)",
           }}
         />
-        <div className="relative flex flex-wrap items-start justify-between gap-5">
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-5">
           <div className="min-w-0 max-w-2xl">
             <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-200/90">
               Platform overview
             </p>
-            <h1 className="mt-2 font-jakarta text-[clamp(1.7rem,3vw,2.35rem)] font-extrabold tracking-tight text-white">
+            <h1 className="mt-2 font-jakarta text-[clamp(1.4rem,3vw,2.35rem)] font-extrabold tracking-tight text-white">
               Welcome back, {welcomeName} 👋
             </h1>
             <p className="mt-2 max-w-md text-[12.5px] leading-snug text-blue-100/80">
@@ -205,20 +205,20 @@ function AdminDashboard() {
             </p>
             <p className="mt-3 text-[12.5px] font-semibold text-blue-200/75">{todayLabel}</p>
           </div>
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Link to="/admin/doctors">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-2.5">
+            <Link to="/admin/doctors" className="min-w-0 flex-1 sm:flex-none">
               <Button
                 size="md"
-                className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+                className="w-full rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white sm:w-auto [&_svg]:text-white"
               >
                 <Stethoscope className="size-4.5 text-white" strokeWidth={2} />
                 Doctors
               </Button>
             </Link>
-            <Link to="/admin/earnings">
+            <Link to="/admin/earnings" className="min-w-0 flex-1 sm:flex-none">
               <Button
                 size="md"
-                className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+                className="w-full rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white sm:w-auto [&_svg]:text-white"
               >
                 <Wallet className="size-4.5 text-white" strokeWidth={2} />
                 Earnings
@@ -234,11 +234,11 @@ function AdminDashboard() {
         <EmptyNote>Loading dashboard…</EmptyNote>
       ) : (
         <>
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-4 xl:grid-cols-4">
             {kpiCards.map((card) => (
               <div
                 key={card.label}
-                className="rounded-[18px] p-5 transition-all duration-300 hover:-translate-y-0.5"
+                className="min-w-0 rounded-[18px] p-4 transition-all duration-300 hover:-translate-y-0.5 sm:p-5"
                 style={CARD_STYLE}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -262,10 +262,10 @@ function AdminDashboard() {
             ))}
           </div>
 
-          <div className="mt-6 grid gap-4 xl:grid-cols-[1.35fr_1fr]">
-            <div className="rounded-[18px] p-5" style={CARD_STYLE}>
+          <div className="mt-6 grid min-w-0 gap-4 xl:grid-cols-[1.35fr_1fr]">
+            <div className="min-w-0 rounded-[18px] p-4 sm:p-5" style={CARD_STYLE}>
               <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-                <div>
+                <div className="min-w-0">
                   <h2 className="font-jakarta text-[16px] font-bold text-slate-900">
                     Platform metrics
                   </h2>
@@ -281,7 +281,7 @@ function AdminDashboard() {
                 </Link>
               </div>
               {platformBars.some((row) => row.value > 0) ? (
-                <div className="h-[260px] w-full">
+                <div className="chart-box h-[200px] sm:h-[260px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={platformBars} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
                       <defs>
@@ -327,7 +327,7 @@ function AdminDashboard() {
               )}
             </div>
 
-            <div className="rounded-[18px] p-5" style={CARD_STYLE}>
+            <div className="min-w-0 rounded-[18px] p-4 sm:p-5" style={CARD_STYLE}>
               <div className="mb-4">
                 <h2 className="font-jakarta text-[16px] font-bold text-slate-900">Platform status</h2>
                 <p className="mt-0.5 text-[13px] text-slate-500">
@@ -336,7 +336,7 @@ function AdminDashboard() {
               </div>
               {statusDonut.length ? (
                 <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                  <div className="relative mx-auto h-[180px] w-[180px] shrink-0">
+                  <div className="relative mx-auto h-[160px] w-[160px] shrink-0 sm:h-[180px] sm:w-[180px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -408,9 +408,9 @@ function AdminDashboard() {
             </div>
           </div>
 
-          <div className="mt-6 rounded-[18px] p-5" style={CARD_STYLE}>
+          <div className="mt-6 min-w-0 rounded-[18px] p-4 sm:p-5" style={CARD_STYLE}>
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <h2 className="font-jakarta text-[16px] font-bold text-slate-900">
                   Top doctors by appointments
                 </h2>
@@ -489,9 +489,9 @@ function AdminDashboard() {
             )}
           </div>
 
-          <div className="mt-6 rounded-[18px] p-5" style={CARD_STYLE}>
+          <div className="mt-6 min-w-0 rounded-[18px] p-4 sm:p-5" style={CARD_STYLE}>
             <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-              <div className="flex items-start gap-3">
+              <div className="flex min-w-0 items-start gap-3">
                 <span
                   className="grid size-10 shrink-0 place-items-center rounded-2xl"
                   style={{ background: "rgba(37,99,235,0.1)", color: "#2563EB" }}
@@ -513,8 +513,8 @@ function AdminDashboard() {
               <p className="py-10 text-center text-sm text-slate-500">No voice calls recorded yet.</p>
             ) : (
               <div className="overflow-hidden rounded-2xl border border-slate-100">
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[640px] text-sm">
+                <div className="table-scroll">
+                  <table className="w-full min-w-[560px] text-sm sm:min-w-[640px]">
                     <thead
                       style={{
                         background: "linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%)",

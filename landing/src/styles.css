@@ -64,7 +64,7 @@
 .landing-root .links a:hover,.landing-root .links a.active{opacity:1;background:rgba(255,255,255,.12)}
 .landing-root .nav-cta{display:flex;align-items:center;gap:14px}
 .landing-root .signin{font-weight:600;font-size:15px;padding:8px 6px;opacity:.9}
-.landing-root .signin:hover{opacity:1;text-decoration:underline}
+.landing-root .signin:hover,.landing-root .signin:focus,.landing-root .signin:active{opacity:1;text-decoration:none}
 .landing-root .nav .btn{min-height:44px;padding:0 20px;font-size:15px;background:#fff;color:var(--primary);box-shadow:none}
 .landing-root .burger{display:none;width:46px;height:46px;border-radius:12px;border:1px solid rgba(255,255,255,.3);background:transparent;color:inherit;place-items:center}
 .landing-root .nav.scrolled{background:color-mix(in srgb,var(--bg) 92%,transparent);backdrop-filter:saturate(1.4) blur(14px);-webkit-backdrop-filter:saturate(1.4) blur(14px);color:var(--text);box-shadow:0 1px 0 var(--line)}
@@ -336,7 +336,7 @@
 .landing-root .foot p{margin-top:18px;font-size:15px;max-width:34ch;color:#9FB0D6}
 .landing-root .foot h4{color:#fff;font-size:15px;margin-bottom:18px;letter-spacing:0}
 .landing-root .foot ul{list-style:none;margin:0;padding:0;display:grid;gap:11px;font-size:15px}
-.landing-root .foot a:hover{color:#fff;text-decoration:underline}
+.landing-root .foot a:hover,.landing-root .foot a:focus,.landing-root .foot a:active{color:#fff;text-decoration:none}
 .landing-root .bottom{border-top:1px solid rgba(255,255,255,.12);padding:24px 0 28px;display:flex;justify-content:space-between;flex-wrap:wrap;gap:12px;font-size:14px;color:#9FB0D6}
 
 /* reveal */

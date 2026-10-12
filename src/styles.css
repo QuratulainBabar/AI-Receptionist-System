@@ -339,6 +339,10 @@
     linear-gradient(135deg, #0B1E4B 0%, #1E3A8A 50%, #172554 100%);
 }
 
+.scrollbar-thin {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
 .scrollbar-thin::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -390,4 +394,37 @@
 }
 .sidebar-scroll::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* Portal layout: contain overflow on small screens */
+#root {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.45) transparent;
+}
+.table-scroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.table-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.table-scroll::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.35);
+  border-radius: 3px;
+}
+.table-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(148, 163, 184, 0.55);
+}
+
+.chart-box {
+  width: 100%;
+  min-width: 0;
 }

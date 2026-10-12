@@ -131,7 +131,7 @@ function DoctorSubscriptionPage() {
           {!plans.length ? (
             <EmptyNote>No plans are available yet. Super Admin can publish them from Billing.</EmptyNote>
           ) : (
-            <div className="grid gap-4 md:grid-cols-3">
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {plans.map((plan) => {
                 const current = subscription?.planId === plan.id && ["ACTIVE", "TRIALING", "PAST_DUE"].includes(subscription.status);
                 return (

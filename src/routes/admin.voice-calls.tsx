@@ -228,8 +228,8 @@ function AdminVoiceCallsPage() {
       ) : !calls.length ? (
         <EmptyNote>No voice calls yet. Calls appear here automatically after Synthflow handles them.</EmptyNote>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <table className="min-w-full text-sm">
+        <div className="table-scroll rounded-lg border border-border">
+          <table className="min-w-[720px] w-full text-sm">
             <thead className="bg-muted/50 text-left text-xs uppercase tracking-wide text-muted-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">When</th>

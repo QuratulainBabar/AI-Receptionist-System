@@ -12,7 +12,8 @@
     "prisma:push": "prisma db push",
     "prisma:studio": "prisma studio",
     "seed": "tsx prisma/seed.ts",
-    "ensure:demo": "tsx scripts/ensure-demo-accounts.ts"
+    "ensure:demo": "tsx scripts/ensure-demo-accounts.ts",
+    "ensure:landing-plans": "tsx scripts/ensure-landing-plans.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"

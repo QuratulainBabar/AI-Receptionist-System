@@ -170,7 +170,7 @@ function PatientListPage() {
         title="Patient list"
         description="Open a file to review history, reports and visits."
         actions={
-          <div className="flex items-center gap-2.5">
+          <div className="flex w-full flex-wrap items-center gap-2.5 sm:w-auto">
             <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
               <PopoverTrigger asChild>
                 <button
@@ -283,9 +283,9 @@ function PatientListPage() {
             : "No patients yet. Use New Patient to add someone, or wait for a booking."}
         </EmptyNote>
       ) : (
-        <Panel className="p-5 w-full max-w-full overflow-hidden">
-          <div className="overflow-x-auto w-full max-w-full -mx-1">
-            <table className="w-full min-w-[900px] table-fixed">
+        <Panel className="w-full max-w-full overflow-hidden p-3 sm:p-5">
+          <div className="table-scroll -mx-1 w-full max-w-full">
+            <table className="w-full min-w-[760px] table-fixed md:min-w-[900px]">
               <thead>
                 <tr className="border-b" style={{ borderColor: "#EEF2F7" }}>
                   <th className="px-5 py-3.5 text-left min-w-[200px]">
@@ -652,9 +652,9 @@ function PatientFormModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/45 p-4 sm:p-6">
-      <div className="my-8 w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/45 p-3 sm:p-6">
+      <div className="my-4 w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl sm:my-8">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-4 py-4 sm:px-5">
           <div>
             <h2 className="font-jakarta text-lg font-bold text-slate-900">
               {isEdit ? "Edit patient" : "New patient"}
@@ -675,7 +675,7 @@ function PatientFormModal({
           </button>
         </div>
 
-        <form onSubmit={submit} className="space-y-4 px-5 py-5">
+        <form onSubmit={submit} className="space-y-4 px-4 py-5 sm:px-5">
           {error ? <p className="text-sm text-destructive">{error}</p> : null}
 
           <Field label="Full name">

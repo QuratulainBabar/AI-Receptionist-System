@@ -16,11 +16,11 @@ export const Route = createFileRoute("/admin")({
 });
 
 const nav: NavItem[] = [
-  { to: "/admin", label: "Dashboard", group: "Overview" },
-  { to: "/admin/doctors", label: "Doctors", group: "Users" },
-  { to: "/admin/subscriptions", label: "Subscriptions", group: "Billing" },
-  { to: "/admin/earnings", label: "Earnings", group: "Billing" },
-  { to: "/admin/settings", label: "Settings", group: "Management" },
+  { to: "/admin", label: "Dashboard", group: "" },
+  { to: "/admin/doctors", label: "Doctors", group: "" },
+  { to: "/admin/subscriptions", label: "Subscriptions", group: "" },
+  { to: "/admin/earnings", label: "Earnings", group: "" },
+  { to: "/admin/settings", label: "Settings", group: "" },
 ];
 
 function AdminLayout() {

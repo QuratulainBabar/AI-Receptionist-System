@@ -516,7 +516,7 @@ function AdminDoctorDetails() {
               {form.weeklyHours.map((slot) => (
                 <div
                   key={slot.day}
-                  className="grid grid-cols-[1fr_auto_auto] items-center gap-2 rounded-xl border border-border/70 px-3 py-2"
+                  className="grid grid-cols-1 items-center gap-2 rounded-xl border border-border/70 px-3 py-2 sm:grid-cols-[1fr_auto_auto]"
                 >
                   <label className="flex items-center gap-2 text-sm">
                     <input
@@ -535,7 +535,7 @@ function AdminDoctorDetails() {
                   </label>
                   <Input
                     type="time"
-                    className="h-9 w-[7.5rem]"
+                    className="h-9 w-full sm:w-[7.5rem]"
                     disabled={!slot.enabled}
                     value={slot.startTime}
                     onChange={(e) =>
@@ -549,7 +549,7 @@ function AdminDoctorDetails() {
                   />
                   <Input
                     type="time"
-                    className="h-9 w-[7.5rem]"
+                    className="h-9 w-full sm:w-[7.5rem]"
                     disabled={!slot.enabled}
                     value={slot.endTime}
                     onChange={(e) =>

@@ -238,7 +238,7 @@ function DoctorDashboard() {
   return (
     <>
       <section
-        className="relative mb-4 overflow-hidden rounded-[22px] px-5 py-6 sm:px-7 sm:py-7"
+        className="relative mb-4 overflow-hidden rounded-[18px] px-4 py-5 sm:rounded-[22px] sm:px-7 sm:py-7"
         style={{
           background: "linear-gradient(115deg, #0B1E4B 0%, #123A8A 48%, #1D4ED8 100%)",
           boxShadow: "0 18px 40px -24px rgba(29, 78, 216, 0.5)",
@@ -252,9 +252,9 @@ function DoctorDashboard() {
               "radial-gradient(circle at 88% 18%, rgba(147,197,253,0.35) 0%, transparent 42%), radial-gradient(circle at 8% 90%, rgba(99,102,241,0.25) 0%, transparent 45%)",
           }}
         />
-        <div className="relative flex flex-wrap items-start justify-between gap-5">
+        <div className="relative flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-5">
           <div className="min-w-0 max-w-2xl">
-            <h1 className="font-jakarta text-[clamp(1.55rem,2.8vw,2.1rem)] font-extrabold tracking-tight text-white">
+            <h1 className="font-jakarta text-[clamp(1.35rem,2.8vw,2.1rem)] font-extrabold tracking-tight text-white">
               {greeting}, Dr. {firstName} 👋
             </h1>
             <p className="mt-2 text-[13px] leading-snug text-blue-100/85">
@@ -268,20 +268,20 @@ function DoctorDashboard() {
             </p>
           </div>
           {access.ready ? (
-            <div className="flex flex-wrap items-center gap-2.5">
-              <Link to="/doctor/appointments">
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:gap-2.5">
+              <Link to="/doctor/appointments" className="min-w-0 flex-1 sm:flex-none">
                 <Button
                   size="md"
-                  className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+                  className="w-full rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white sm:w-auto [&_svg]:text-white"
                 >
                   <Calendar className="size-4.5 text-white" strokeWidth={2} />
                   Appointments
                 </Button>
               </Link>
-              <Link to="/doctor/patients">
+              <Link to="/doctor/patients" className="min-w-0 flex-1 sm:flex-none">
                 <Button
                   size="md"
-                  className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+                  className="w-full rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white sm:w-auto [&_svg]:text-white"
                 >
                   <Stethoscope className="size-4.5 text-white" strokeWidth={2} />
                   Patients
@@ -325,13 +325,12 @@ function DoctorDashboard() {
         </p>
       ) : null}
 
-      {!access.ready ? (
+      {!access.profileComplete ? (
         <Panel className="mb-6 space-y-4 p-6">
           <div>
             <p className="text-sm font-bold">Finish setup to use the clinic</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {access.planName ? `${access.planName} is active.` : "Your plan is active."} Complete
-              your profile and availability, then the rest of the portal opens.
+              Complete your profile to open the full doctor dashboard.
             </p>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -413,7 +412,7 @@ function DoctorDashboard() {
             <h2 className="font-jakarta text-[15px] font-bold text-slate-900">Practice overview</h2>
             <p className="text-[12.5px] text-slate-500">Key clinic metrics for today</p>
           </div>
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid min-w-0 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
             {[
               {
                 label: "Today's appointments",
@@ -454,7 +453,7 @@ function DoctorDashboard() {
             ].map((card) => (
               <div
                 key={card.label}
-                className="rounded-[18px] border border-slate-200/90 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5"
+                className="min-w-0 rounded-[18px] border border-slate-200/90 bg-white p-4 transition-all duration-300 hover:-translate-y-0.5 sm:p-5"
                 style={{
                   boxShadow:
                     "0 1px 2px 0 rgba(15,23,42,0.03), 0 10px 28px -16px rgba(15,23,42,0.12)",
@@ -484,10 +483,10 @@ function DoctorDashboard() {
             ))}
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-3 xl:grid-cols-4">
-            <div className="lg:col-span-2 xl:col-span-2 space-y-4">
+          <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="min-w-0 space-y-4 lg:col-span-2 xl:col-span-2">
               <div
-                className="rounded-2xl p-5"
+                className="min-w-0 rounded-2xl p-4 sm:p-5"
                 style={{
                   background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
                   border: "1px solid #EEF2F7",
@@ -500,14 +499,14 @@ function DoctorDashboard() {
                   subtitle="Weekly appointments"
                   icon={<Calendar className="size-5" strokeWidth={2.2} />}
                   action={
-                    <select className="h-9 rounded-xl border border-border bg-card px-3 text-[12.5px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                    <select className="h-9 w-full rounded-xl border border-border bg-card px-3 text-[12.5px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20 sm:w-auto">
                       <option>This Week</option>
                       <option>This Month</option>
                       <option>This Quarter</option>
                     </select>
                   }
                 />
-                <div className="h-[220px] w-full">
+                <div className="chart-box h-[180px] sm:h-[220px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
                       data={appointmentTrendsData}
@@ -574,7 +573,7 @@ function DoctorDashboard() {
               </div>
 
               <div
-                className="rounded-2xl p-5"
+                className="min-w-0 rounded-2xl p-4 sm:p-5"
                 style={{
                   background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
                   border: "1px solid #EEF2F7",
@@ -587,14 +586,14 @@ function DoctorDashboard() {
                   subtitle="Total patients by category"
                   icon={<Users className="size-5" strokeWidth={2.2} />}
                   action={
-                    <select className="h-9 rounded-xl border border-border bg-card px-3 text-[12.5px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                    <select className="h-9 w-full rounded-xl border border-border bg-card px-3 text-[12.5px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20 sm:w-auto">
                       <option>This Month</option>
                       <option>Last Month</option>
                       <option>This Year</option>
                     </select>
                   }
                 />
-                <div className="h-[220px] w-full">
+                <div className="chart-box h-[180px] sm:h-[220px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart
                       data={patientGrowthData}
@@ -642,9 +641,9 @@ function DoctorDashboard() {
               </div>
             </div>
 
-            <div className="lg:col-span-2 xl:col-span-2 space-y-4">
+            <div className="min-w-0 space-y-4 lg:col-span-2 xl:col-span-2">
               <div
-                className="rounded-2xl p-5"
+                className="min-w-0 rounded-2xl p-4 sm:p-5"
                 style={{
                   background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
                   border: "1px solid #EEF2F7",
@@ -657,13 +656,13 @@ function DoctorDashboard() {
                   subtitle="Consultation types"
                   icon={<Stethoscope className="size-5" strokeWidth={2.2} />}
                   action={
-                    <select className="h-9 rounded-xl border border-border bg-card px-3 text-[12.5px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20">
+                    <select className="h-9 w-full rounded-xl border border-border bg-card px-3 text-[12.5px] font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-blue-500/20 sm:w-auto">
                       <option>This Week</option>
                       <option>This Month</option>
                     </select>
                   }
                 />
-                <div className="h-[220px] w-full">
+                <div className="chart-box h-[180px] sm:h-[220px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart
                       data={consultationData}
@@ -732,7 +731,7 @@ function DoctorDashboard() {
               </div>
 
               <div
-                className="rounded-2xl p-5"
+                className="min-w-0 rounded-2xl p-4 sm:p-5"
                 style={{
                   background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
                   border: "1px solid #EEF2F7",
@@ -744,16 +743,16 @@ function DoctorDashboard() {
                   title="Appointment Status"
                   icon={<Activity className="size-5" strokeWidth={2.2} />}
                 />
-                <div className="flex items-center justify-between gap-6 h-[220px]">
-                  <div className="flex-1 h-full">
+                <div className="flex h-auto min-h-[180px] flex-col items-stretch justify-between gap-4 sm:h-[220px] sm:flex-row sm:items-center sm:gap-6">
+                  <div className="chart-box h-[160px] flex-1 sm:h-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={appointmentStatusData}
                           cx="50%"
                           cy="50%"
-                          innerRadius={62}
-                          outerRadius={85}
+                          innerRadius={48}
+                          outerRadius={68}
                           dataKey="value"
                           strokeWidth={4}
                           stroke="#FFFFFF"
@@ -774,27 +773,27 @@ function DoctorDashboard() {
                       </PieChart>
                     </ResponsiveContainer>
                   </div>
-                  <div className="space-y-4 flex-1">
+                  <div className="min-w-0 flex-1 space-y-3 sm:space-y-4">
                     {appointmentStatusData.map((s) => {
                       const total = appointmentStatusData.reduce((a, b) => a + b.value, 0);
                       const pct = Math.round((s.value / total) * 100);
                       return (
                         <div key={s.name} className="space-y-1.5">
                           <div className="flex items-center justify-between gap-3">
-                            <div className="flex items-center gap-2.5">
+                            <div className="flex min-w-0 items-center gap-2.5">
                               <span
-                                className="size-2.5 rounded-full"
+                                className="size-2.5 shrink-0 rounded-full"
                                 style={{ backgroundColor: s.color }}
                               />
-                              <span className="text-[13px] font-bold text-foreground">
+                              <span className="truncate text-[13px] font-bold text-foreground">
                                 {s.name}
                               </span>
                             </div>
-                            <span className="text-[13px] font-bold text-muted-foreground">
+                            <span className="shrink-0 text-[13px] font-bold text-muted-foreground">
                               {pct}% ({s.value})
                             </span>
                           </div>
-                          <div className="h-2 rounded-full bg-muted overflow-hidden">
+                          <div className="h-2 overflow-hidden rounded-full bg-muted">
                             <div
                               className="h-full rounded-full transition-all"
                               style={{
@@ -812,9 +811,9 @@ function DoctorDashboard() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-3">
+          <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-3">
             <div
-              className="lg:col-span-1 rounded-2xl p-5 overflow-hidden relative"
+              className="relative min-w-0 overflow-hidden rounded-2xl p-4 sm:p-5 lg:col-span-1"
               style={{
                 background: "linear-gradient(135deg, #0B1E4B 0%, #1D4ED8 45%, #1E40AF 100%)",
                 boxShadow: "0 16px 40px -16px rgba(29, 78, 216, 0.55)",
@@ -916,7 +915,7 @@ function DoctorDashboard() {
             </div>
 
             <div
-              className="lg:col-span-2 xl:col-span-2 rounded-2xl p-5"
+              className="min-w-0 rounded-2xl p-4 sm:p-5 lg:col-span-2 xl:col-span-2"
               style={{
                 background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
                 border: "1px solid #EEF2F7",
@@ -924,13 +923,13 @@ function DoctorDashboard() {
                   "0 1px 2px 0 rgba(15, 23, 42, 0.03), 0 8px 24px -14px rgba(15, 23, 42, 0.1)",
               }}
             >
-              <div className="flex flex-wrap items-start justify-between gap-4 mb-5">
+              <div className="mb-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between sm:gap-4">
                 <CardHeader
                   title="Upcoming Appointments"
                   subtitle="Today's schedule · 5 appointments"
                   icon={<Calendar className="size-5" strokeWidth={2.2} />}
                 />
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
                   <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
                     <PopoverTrigger asChild>
                       <button
@@ -976,8 +975,8 @@ function DoctorDashboard() {
               </div>
 
               <div className="overflow-hidden rounded-xl border border-[#F1F5F9]">
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-full text-sm">
+                <div className="table-scroll">
+                  <table className="w-full min-w-[640px] text-sm">
                     <thead>
                       <tr
                         style={{
@@ -1133,9 +1132,9 @@ function DoctorDashboard() {
             </div>
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-3">
+          <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-3">
             <div
-              className="lg:col-span-2 rounded-2xl p-5"
+              className="min-w-0 rounded-2xl p-4 sm:p-5 lg:col-span-2"
               style={{
                 background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
                 border: "1px solid #EEF2F7",
@@ -1214,7 +1213,7 @@ function DoctorDashboard() {
             </div>
 
             <div
-              className="lg:col-span-1 rounded-2xl p-5 flex flex-col"
+              className="flex min-w-0 flex-col rounded-2xl p-4 sm:p-5 lg:col-span-1"
               style={{
                 background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
                 border: "1px solid #EEF2F7",
@@ -1307,8 +1306,8 @@ function DoctorDashboard() {
           </div>
 
           {access.ready ? (
-            <div className="mt-6 grid gap-4 lg:grid-cols-3">
-              <section className="space-y-3 lg:col-span-2">
+            <div className="mt-6 grid min-w-0 gap-4 lg:grid-cols-3">
+              <section className="min-w-0 space-y-3 lg:col-span-2">
                 <SectionLabel>Today's appointments</SectionLabel>
                 {dashboard?.todayAppointments.length ? (
                   dashboard.todayAppointments.map((appointment) => (

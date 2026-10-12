@@ -69,19 +69,6 @@ function DoctorLayout() {
           const confirmed = await doctorSubscriptionApi.confirm(sessionId);
           if (cancelled) return;
           setAccess(confirmed.access);
-          if (!confirmed.enrolled) {
-            await router.navigate({
-              to: "/doctor/onboarding",
-              search: {
-                checkout: undefined,
-                payment: "failed",
-                plan: undefined,
-                cycle: undefined,
-              },
-              replace: true,
-            });
-            return;
-          }
           if (!confirmed.access.profileComplete) {
             await router.navigate({
               to: "/doctor/profile",
@@ -103,46 +90,26 @@ function DoctorLayout() {
         const next = result.access;
         setAccess(next);
         const path = window.location.pathname;
-        if (!next.enrolled && path !== "/doctor/onboarding") {
-          await router.navigate({
-            to: "/doctor/onboarding",
-            search: {
-              checkout: undefined,
-              payment: undefined,
-              plan: undefined,
-              cycle: undefined,
-            },
-            replace: true,
-          });
-          return;
-        }
-        if (next.enrolled && path === "/doctor/onboarding") {
-          if (!next.profileComplete) {
+        const onProfile = path === "/doctor/profile" || path.startsWith("/doctor/profile/");
+        const onOnboarding = path === "/doctor/onboarding";
+
+        // Incomplete profile → force setup. Once profile is complete, full dashboard is allowed
+        // (subscription enrollment is optional for portal access after profile save).
+        if (!next.profileComplete) {
+          if (onOnboarding) return;
+          if (!onProfile) {
             await router.navigate({
               to: "/doctor/profile",
               search: { setup: "1" },
               replace: true,
             });
-            return;
           }
-          await router.navigate({ to: "/doctor", search: { checkout: undefined }, replace: true });
           return;
         }
-        if (
-          next.enrolled &&
-          !next.profileComplete &&
-          path !== "/doctor/profile" &&
-          path !== "/doctor/onboarding"
-        ) {
-          await router.navigate({
-            to: "/doctor/profile",
-            search: { setup: "1" },
-            replace: true,
-          });
-          return;
-        }
-        if (next.enrolled && !next.ready && isClinicalPath(path)) {
+
+        if (path === "/doctor/onboarding") {
           await router.navigate({ to: "/doctor", search: { checkout: undefined }, replace: true });
+          return;
         }
       } catch (err) {
         if (!cancelled) {
@@ -156,10 +123,15 @@ function DoctorLayout() {
       const current = getSession();
       if (current) setSession(current);
     }
+    function refreshAccess() {
+      void resolveAccess();
+    }
     window.addEventListener("session-updated", refreshSession);
+    window.addEventListener("doctor-access-refresh", refreshAccess);
     return () => {
       cancelled = true;
       window.removeEventListener("session-updated", refreshSession);
+      window.removeEventListener("doctor-access-refresh", refreshAccess);
     };
   }, [router, session, pathname]);
 
@@ -174,37 +146,45 @@ function DoctorLayout() {
   }
 
   const onboarding = pathname === "/doctor/onboarding";
-  if (!access.enrolled && !onboarding) {
+  const onProfile = pathname === "/doctor/profile" || pathname.startsWith("/doctor/profile/");
+  if (!access.profileComplete && !onboarding && !onProfile) {
     return (
       <div className="flex min-h-screen items-center justify-center p-8 text-sm text-muted-foreground">
-        Continue to plan selection…
+        Opening profile setup…
       </div>
     );
   }
 
-  const nav: NavItem[] = access.enrolled
-    ? access.modules.map((item) => {
-        if (item.id === "schedule" || item.label === "Appointments") {
-          return {
-            to: "/doctor/appointments",
-            label: "Appointments",
-            group: item.group,
-            children: [...APPOINTMENT_NAV_CHILDREN],
-          };
-        }
-        if (item.id === "team" || item.label === "Users") {
-          return {
-            to: "/doctor/team",
-            label: "Users",
-            group: item.group,
-            children: [{ to: "/doctor/team", label: "Team members" }],
-          };
-        }
-        return { to: item.to, label: item.label, group: item.group };
-      })
-    : [];
-  const accountMenu = access.modules
-    .filter((item) => ["profile"].includes(item.id))
+  const setupNav: NavItem[] = [
+    { to: "/doctor/profile", label: "My profile", group: "" },
+  ];
+  const navSource = access.modules.length ? access.modules : setupNav.map((item) => ({
+    id: "profile",
+    label: item.label,
+    to: item.to,
+    group: item.group,
+  }));
+  const nav: NavItem[] = navSource.map((item) => {
+    if (item.id === "schedule" || item.label === "Appointments") {
+      return {
+        to: "/doctor/appointments",
+        label: "Appointments",
+        group: item.group,
+        children: [...APPOINTMENT_NAV_CHILDREN],
+      };
+    }
+    if (item.id === "team" || item.label === "Users") {
+      return {
+        to: "/doctor/team",
+        label: "Users",
+        group: item.group,
+        children: [{ to: "/doctor/team", label: "Team members" }],
+      };
+    }
+    return { to: item.to, label: item.label, group: item.group };
+  });
+  const accountMenu = navSource
+    .filter((item) => item.id === "profile" || item.label === "My profile")
     .map((item) => ({ to: item.to, label: item.label }));
 
   return (

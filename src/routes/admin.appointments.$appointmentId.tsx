@@ -147,7 +147,7 @@ function AdminAppointmentDetails() {
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
       {success ? <p className="mb-4 text-sm text-primary">{success}</p> : null}
 
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid min-w-0 gap-4 sm:gap-6 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Panel className="p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -291,10 +291,10 @@ function AdminAppointmentDetails() {
       </div>
 
       {rescheduleOpen ? (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/35 p-4">
-          <Panel className="w-full max-w-lg space-y-4 p-5">
+        <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-foreground/35 p-3 sm:p-4">
+          <Panel className="my-4 w-full max-w-lg space-y-4 p-4 sm:my-0 sm:p-5">
             <div className="flex items-start justify-between gap-3">
-              <div>
+              <div className="min-w-0">
                 <SectionLabel>Reschedule</SectionLabel>
                 <p className="mt-1 text-sm font-semibold">
                   {appointment.reference} · {appointment.patientName}

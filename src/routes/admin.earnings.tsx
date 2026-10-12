@@ -189,7 +189,7 @@ function AdminEarningsPage() {
 
   return (
     <>
-      <div className="mb-7 flex flex-wrap items-end justify-between gap-5">
+      <div className="mb-5 flex flex-col gap-4 sm:mb-7 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-5">
         <div className="min-w-0 max-w-3xl">
           <div className="mb-2 inline-flex items-center gap-2 text-blue-600">
             <Wallet className="size-5" strokeWidth={2.2} />
@@ -198,20 +198,20 @@ function AdminEarningsPage() {
           <h1
             className="font-jakarta font-extrabold tracking-tight text-foreground text-balance"
             style={{
-              fontSize: "clamp(1.75rem, 3vw, 2.25rem)",
+              fontSize: "clamp(1.45rem, 3vw, 2.25rem)",
               letterSpacing: "-0.03em",
             }}
           >
             Platform Earnings
           </h1>
-          <p className="mt-2.5 max-w-2xl text-[14.5px] leading-relaxed" style={{ color: "#64748B" }}>
+          <p className="mt-2.5 max-w-2xl text-[13px] leading-relaxed sm:text-[14.5px]" style={{ color: "#64748B" }}>
             Subscription revenue and payment analytics across clinics and doctors.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:ml-auto sm:w-auto sm:gap-2.5">
           <select
-            className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm outline-none focus:border-blue-400"
+            className="h-10 min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 shadow-sm outline-none focus:border-blue-400 sm:flex-none"
             value={range}
             onChange={(e) => {
               setPage(1);
@@ -233,7 +233,7 @@ function AdminEarningsPage() {
                   setPage(1);
                   setFrom(e.target.value);
                 }}
-                className="h-10 w-[150px] rounded-xl"
+                className="h-10 w-full min-w-0 rounded-xl sm:w-[150px]"
               />
               <Input
                 type="date"
@@ -242,7 +242,7 @@ function AdminEarningsPage() {
                   setPage(1);
                   setTo(e.target.value);
                 }}
-                className="h-10 w-[150px] rounded-xl"
+                className="h-10 w-full min-w-0 rounded-xl sm:w-[150px]"
               />
             </>
           ) : null}
@@ -341,16 +341,16 @@ function AdminEarningsPage() {
             </Panel>
           ) : null}
 
-          <div className="mb-6 grid gap-4 xl:grid-cols-[1.4fr_0.9fr]">
-            <Panel className="p-5">
+          <div className="mb-6 grid min-w-0 gap-4 xl:grid-cols-[1.4fr_0.9fr]">
+            <Panel className="min-w-0 p-4 sm:p-5">
               <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <h2 className="font-jakarta text-[17px] font-bold text-slate-900">Revenue over time</h2>
+                <div className="min-w-0">
+                  <h2 className="font-jakarta text-[16px] font-bold text-slate-900 sm:text-[17px]">Revenue over time</h2>
                   <p className="text-[13px] text-slate-500">{data.range.label} · paid invoices only</p>
                 </div>
               </div>
               {chartData.length ? (
-                <div className="h-[280px] w-full">
+                <div className="chart-box h-[220px] sm:h-[280px]">
                   <ResponsiveContainer width="100%" height="100%">
                     <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
                       <defs>
@@ -403,14 +403,14 @@ function AdminEarningsPage() {
               )}
             </Panel>
 
-            <Panel className="p-5">
+            <Panel className="min-w-0 p-4 sm:p-5">
               <div className="mb-4">
-                <h2 className="font-jakarta text-[17px] font-bold text-slate-900">Billing interval split</h2>
+                <h2 className="font-jakarta text-[16px] font-bold text-slate-900 sm:text-[17px]">Billing interval split</h2>
                 <p className="text-[13px] text-slate-500">Collected revenue by monthly vs yearly plans</p>
               </div>
               {splitData.length ? (
                 <>
-                  <div className="mx-auto h-[200px] w-full max-w-[240px]">
+                  <div className="chart-box mx-auto h-[180px] w-full max-w-[240px] sm:h-[200px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -474,8 +474,8 @@ function AdminEarningsPage() {
               </p>
             </div>
             {data.planBreakdown.length ? (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-left text-sm">
+              <div className="table-scroll">
+                <table className="min-w-[640px] w-full text-left text-sm">
                   <thead className="bg-slate-50/80 text-[12px] uppercase tracking-wide text-slate-500">
                     <tr>
                       <th className="px-5 py-3 font-bold">Plan</th>
@@ -520,8 +520,8 @@ function AdminEarningsPage() {
                   Individual subscription payments and invoice references
                 </p>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="relative">
+              <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center">
+                <div className="relative w-full sm:w-auto">
                   <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
                   <Input
                     value={q}
@@ -530,11 +530,11 @@ function AdminEarningsPage() {
                       if (e.key === "Enter") applySearch();
                     }}
                     placeholder="Search doctor, clinic, invoice…"
-                    className="h-10 w-[240px] rounded-xl pl-9"
+                    className="h-10 w-full rounded-xl pl-9 sm:w-[240px]"
                   />
                 </div>
                 <select
-                  className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700"
+                  className="h-10 w-full rounded-xl border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 sm:w-auto"
                   value={planId}
                   onChange={(e) => {
                     setPage(1);
@@ -568,8 +568,8 @@ function AdminEarningsPage() {
 
             {data.payments.rows.length ? (
               <>
-                <div className="overflow-x-auto">
-                  <table className="min-w-full text-left text-sm">
+                <div className="table-scroll">
+                  <table className="min-w-[720px] w-full text-left text-sm">
                     <thead className="bg-slate-50/80 text-[12px] uppercase tracking-wide text-slate-500">
                       <tr>
                         <th className="px-5 py-3 font-bold">Doctor / Clinic</th>
@@ -688,7 +688,7 @@ function SummaryCard({
 }) {
   return (
     <div
-      className={`relative overflow-hidden rounded-3xl p-5 transition-all duration-300 hover:-translate-y-0.5 ${
+      className={`relative min-w-0 overflow-hidden rounded-2xl p-4 transition-all duration-300 hover:-translate-y-0.5 sm:rounded-3xl sm:p-5 ${
         highlighted
           ? "text-white shadow-[0_18px_44px_-18px_rgba(37,99,235,0.55)]"
           : "hover:shadow-[0_18px_44px_-18px_rgba(37,99,235,0.28)]"
@@ -711,7 +711,7 @@ function SummaryCard({
             {label}
           </p>
           <p
-            className={`mt-2 font-sans text-[30px] font-black leading-none tracking-tight ${
+            className={`mt-2 font-sans text-[clamp(1.5rem,4vw,1.875rem)] font-black leading-none tracking-tight ${
               highlighted ? "text-white" : "text-slate-900"
             }`}
           >

@@ -183,7 +183,7 @@ function DoctorSettingsPage() {
         </p>
       </header>
 
-      <div className="mb-6 inline-flex max-w-full flex-wrap gap-1 rounded-2xl border border-border/80 bg-card p-1.5 shadow-sm">
+      <div className="mb-6 inline-flex max-w-full gap-1 overflow-x-auto rounded-2xl border border-border/80 bg-card p-1.5 shadow-sm scrollbar-thin">
         {(
           [
             ["general", "General"],
@@ -199,7 +199,7 @@ function DoctorSettingsPage() {
               setNotice("");
               setError("");
             }}
-            className={`rounded-xl px-4 py-2 text-[13.5px] font-bold transition-colors ${
+            className={`shrink-0 rounded-xl px-3 py-2 text-[12.5px] font-bold transition-colors sm:px-4 sm:text-[13.5px] ${
               tab === id
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "text-muted-foreground hover:bg-secondary hover:text-foreground"

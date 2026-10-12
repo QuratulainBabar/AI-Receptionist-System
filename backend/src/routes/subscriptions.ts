@@ -4,6 +4,11 @@ import { authenticate, requireRole } from "../middleware/auth.js";
 import { attachClinicContext, requireClinicOwner } from "../middleware/clinic-context.js";
 import * as subscriptionsController from "../controllers/subscriptions.controller.js";
 
+/** Public billing routes used by the landing pricing CTAs (no auth). */
+export const publicBillingRouter = Router();
+publicBillingRouter.post("/checkout", subscriptionsController.startGuestCheckout);
+publicBillingRouter.post("/checkout/complete", subscriptionsController.completeGuestCheckout);
+
 export const adminSubscriptionsRouter = Router();
 adminSubscriptionsRouter.use(authenticate, requireRole(Role.SUPER_ADMIN));
 adminSubscriptionsRouter.get("/overview", subscriptionsController.overview);

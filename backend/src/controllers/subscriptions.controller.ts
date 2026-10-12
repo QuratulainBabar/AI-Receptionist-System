@@ -41,6 +41,12 @@ const checkoutBodySchema = z.object({
   returnOrigin: z.string().trim().max(200).optional(),
 });
 
+const guestCheckoutBodySchema = z.object({
+  plan: z.enum(["starter", "growth", "pilot", "professional"]),
+  cycle: z.enum(["monthly", "yearly"]).optional().default("monthly"),
+  returnOrigin: z.string().trim().max(200).optional(),
+});
+
 const confirmCheckoutSchema = z.object({
   sessionId: z.string().trim().min(8).max(255),
 });
@@ -209,6 +215,33 @@ export async function startCheckout(req: Request, res: Response, next: NextFunct
       body.returnOrigin,
     );
     res.json({ success: true, checkout });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** Landing page: open Stripe Checkout without signup first. */
+export async function startGuestCheckout(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = guestCheckoutBodySchema.parse(req.body);
+    const plan = body.plan === "professional" ? "growth" : body.plan;
+    const checkout = await subscriptionService.createGuestCheckoutSession(
+      plan,
+      body.cycle,
+      body.returnOrigin,
+    );
+    res.json({ success: true, checkout });
+  } catch (error) {
+    next(error);
+  }
+}
+
+/** After guest Stripe payment: create/login doctor and return JWT. */
+export async function completeGuestCheckout(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = confirmCheckoutSchema.parse(req.body);
+    const result = await subscriptionService.completeGuestCheckoutSession(body.sessionId);
+    res.json({ success: true, ...result });
   } catch (error) {
     next(error);
   }

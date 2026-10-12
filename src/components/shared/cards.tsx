@@ -14,24 +14,24 @@ export function AppointmentCard({
   const who = perspective === "patient" ? appointment.doctorName : appointment.patientName;
   return (
     <div
-      className="rounded-2xl p-5 transition-all duration-300 hover:-translate-y-0.5 group"
+      className="group rounded-2xl p-4 transition-all duration-300 hover:-translate-y-0.5 sm:p-5"
       style={{
         background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
         border: "1px solid #EEF2F7",
         boxShadow: "0 1px 2px 0 rgba(15,23,42,0.03), 0 8px 20px -16px rgba(15,23,42,0.1)",
       }}
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="flex min-w-0 items-start gap-3.5 flex-1">
-          <Avatar label={initials(who)} size="md" className="size-11" />
+      <div className="flex items-start justify-between gap-3 sm:gap-4">
+        <div className="flex min-w-0 flex-1 items-start gap-3 sm:gap-3.5">
+          <Avatar label={initials(who)} size="md" className="size-10 shrink-0 sm:size-11" />
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-start gap-2 justify-between">
+            <div className="flex flex-wrap items-start justify-between gap-2">
               <div className="min-w-0">
-                <p className="truncate text-[14.5px] font-extrabold tracking-tight text-foreground">
+                <p className="truncate text-[14px] font-extrabold tracking-tight text-foreground sm:text-[14.5px]">
                   {who}
                 </p>
                 <p
-                  className="mt-0.5 text-[12.5px] font-semibold text-muted-foreground"
+                  className="mt-0.5 line-clamp-2 text-[12.5px] font-semibold text-muted-foreground"
                   style={{ color: "#64748B" }}
                 >
                   {perspective === "patient" ? appointment.speciality : appointment.reason}
@@ -40,7 +40,7 @@ export function AppointmentCard({
               <Badge
                 tone={statusTone[appointment.status]}
                 dot
-                className="px-3 py-1 rounded-full text-[10.5px] shrink-0"
+                className="shrink-0 rounded-full px-3 py-1 text-[10.5px]"
               >
                 {appointment.status}
               </Badge>

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Check } from 'lucide-react'
-import { planSignupUrl, type LandingPlanSlug } from '../lib/app'
+import { openStripeCheckoutForPlan, type LandingPlanSlug } from '../lib/app'
 
 type Period = 'monthly' | 'yearly'
 
@@ -97,7 +97,20 @@ const plans: Plan[] = [
 
 export default function Pricing() {
   const [period, setPeriod] = useState<Period>('monthly')
+  const [busySlug, setBusySlug] = useState<string>('')
+  const [error, setError] = useState('')
   const yearly = period === 'yearly'
+
+  async function choosePlan(slug: LandingPlanSlug) {
+    setError('')
+    setBusySlug(slug)
+    try {
+      await openStripeCheckoutForPlan(slug, period)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to open Stripe checkout.')
+      setBusySlug('')
+    }
+  }
 
   return (
     <section className="sec pricing" id="pricing">
@@ -123,6 +136,12 @@ export default function Pricing() {
           </div>
         </div>
 
+        {error ? (
+          <p className="foot-note" style={{ color: '#DC2626', marginBottom: 24 }}>
+            {error}
+          </p>
+        ) : null}
+
         <div className="price-grid">
           {plans.map((plan) => {
             const price = yearly ? plan.yearly : plan.monthly
@@ -135,6 +154,7 @@ export default function Pricing() {
             ]
               .filter(Boolean)
               .join(' ')
+            const busy = busySlug === plan.slug
 
             return (
               <article className={className} key={plan.name}>
@@ -157,9 +177,14 @@ export default function Pricing() {
                     </li>
                   ))}
                 </ul>
-                <a href={planSignupUrl(plan.slug, period)} className={plan.ctaClass}>
-                  {plan.cta}
-                </a>
+                <button
+                  type="button"
+                  className={plan.ctaClass}
+                  disabled={Boolean(busySlug)}
+                  onClick={() => void choosePlan(plan.slug)}
+                >
+                  {busy ? 'Opening Stripe…' : plan.cta}
+                </button>
               </article>
             )
           })}

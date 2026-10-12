@@ -1,11 +1,38 @@
 export type PlanSlug = "starter" | "growth" | "pilot";
 export type BillingCycleSlug = "monthly" | "yearly";
 
+export const PENDING_PLAN_KEY = "ai-receptionist-pending-plan";
+
 const PLAN_ALIASES: Record<PlanSlug, string[]> = {
   starter: ["starter"],
   growth: ["growth", "professional"],
   pilot: ["pilot"],
 };
+
+/** Landing stores the chosen plan so Stripe checkout can open after signup. */
+export function readPendingPlan(): { plan: PlanSlug; cycle: BillingCycleSlug } | undefined {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = sessionStorage.getItem(PENDING_PLAN_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw) as { plan?: unknown; cycle?: unknown };
+    const plan = parsePlanSlug(parsed.plan);
+    const cycle = parseBillingCycleSlug(parsed.cycle) ?? "monthly";
+    if (!plan) return undefined;
+    return { plan, cycle: plan === "pilot" ? "yearly" : cycle };
+  } catch {
+    return undefined;
+  }
+}
+
+export function clearPendingPlan() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(PENDING_PLAN_KEY);
+  } catch {
+    /* ignore */
+  }
+}
 
 export function parsePlanSlug(value: unknown): PlanSlug | undefined {
   if (typeof value !== "string") return undefined;
