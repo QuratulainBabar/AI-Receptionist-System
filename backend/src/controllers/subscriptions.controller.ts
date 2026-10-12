@@ -4,6 +4,7 @@ import { getStripe, isStripeConfigured } from "../lib/stripe.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 import * as subscriptionService from "../services/subscription.service.js";
+import * as adminEarningsService from "../services/admin-earnings.service.js";
 import { handleStripeInvoiceEvent } from "../services/appointment-invoices.service.js";
 
 const billingCycleSchema = z.enum(["MONTHLY", "YEARLY"]);
@@ -48,6 +49,31 @@ export async function overview(_req: Request, res: Response, next: NextFunction)
   try {
     const data = await subscriptionService.getSubscriptionOverview();
     res.json({ success: true, overview: data });
+  } catch (error) {
+    next(error);
+  }
+}
+
+const earningsQuerySchema = z.object({
+  range: z.enum(["this_month", "last_month", "last_3_months", "custom"]).optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  q: z.string().optional(),
+  planId: z.string().optional(),
+  status: z.string().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(5).max(50).optional(),
+  sync: z
+    .union([z.literal("true"), z.literal("false"), z.boolean()])
+    .optional()
+    .transform((v) => v === true || v === "true"),
+});
+
+export async function earnings(req: Request, res: Response, next: NextFunction) {
+  try {
+    const query = earningsQuerySchema.parse(req.query);
+    const data = await adminEarningsService.getAdminEarnings(query);
+    res.json({ success: true, earnings: data });
   } catch (error) {
     next(error);
   }
@@ -152,6 +178,12 @@ export async function getMine(req: Request, res: Response, next: NextFunction) {
 export async function getAccess(req: Request, res: Response, next: NextFunction) {
   try {
     const access = await subscriptionService.getDoctorAccess(req.user!.sub);
+    if (req.clinicContext && !req.clinicContext.isOwner) {
+      const { modulesAllowedByPermissions } = await import("../services/clinic-team.permissions.js");
+      const allowed = modulesAllowedByPermissions(req.clinicContext.permissions);
+      access.modules = access.modules.filter((mod) => allowed.has(mod.id));
+      access.upcomingModules = [];
+    }
     res.json({ success: true, access });
   } catch (error) {
     next(error);

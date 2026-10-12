@@ -9,6 +9,7 @@ import {
   listRecordsForPatient,
 } from "./records.service.js";
 import { sendClinicSms } from "./synthflow.client.js";
+import { isDoctorSmsEnabled } from "./doctor-sms-preferences.service.js";
 
 export const RECORD_UPLOAD_CATEGORIES = [
   "Medical history",
@@ -161,17 +162,22 @@ export async function requestRecordsForAppointment(input: {
 
   let smsSent = false;
   let smsError = "";
-  try {
-    await sendClinicSms({
-      toPhone: phone,
-      patientName: appointment.patient.fullName,
-      doctorName: doctor.fullName,
-      appointmentReference: appointment.reference,
-      uploadUrl: link,
-    });
-    smsSent = true;
-  } catch (error) {
-    smsError = error instanceof Error ? error.message : "SMS could not be sent";
+  const recordSmsOn = await isDoctorSmsEnabled(input.doctorUserId, "recordUploads");
+  if (!recordSmsOn) {
+    smsError = "Medical record upload texts are turned off in Settings.";
+  } else {
+    try {
+      await sendClinicSms({
+        toPhone: phone,
+        patientName: appointment.patient.fullName,
+        doctorName: doctor.fullName,
+        appointmentReference: appointment.reference,
+        uploadUrl: link,
+      });
+      smsSent = true;
+    } catch (error) {
+      smsError = error instanceof Error ? error.message : "SMS could not be sent";
+    }
   }
 
   const updated = await prisma.recordRequest.update({
@@ -186,7 +192,9 @@ export async function requestRecordsForAppointment(input: {
     ...publicRequest,
     message: smsSent
       ? `Upload link SMS sent to ${phone} from ${env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053"}.`
-      : `Upload link created, but SMS failed: ${smsError}. Link: ${link}`,
+      : smsError.includes("turned off in Settings")
+        ? `Upload link created. Record-upload texts are turned off in Settings. Link: ${link}`
+        : `Upload link created, but SMS failed: ${smsError}. Link: ${link}`,
   };
 }
 
@@ -371,10 +379,13 @@ export function renderUploadPageHtml(input: {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Upload medical records — Qubetech</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
     :root { color-scheme: light; --brand: #3047A0; --bg: #F3F5FB; --card: #fff; --line: #D5DCF0; --muted: #4E5E8C; }
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: linear-gradient(180deg, #F7F8FC, var(--bg)); color: #1a2448; }
+    body { margin: 0; font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif; background: linear-gradient(180deg, #F7F8FC, var(--bg)); color: #1a2448; }
     main { max-width: 480px; margin: 0 auto; padding: 28px 18px 48px; }
     .brand { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; color: var(--brand); text-transform: uppercase; }
     h1 { margin: 10px 0 6px; font-size: 1.55rem; line-height: 1.2; }
@@ -461,8 +472,11 @@ export function renderUploadErrorPage(message: string) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Upload link unavailable</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #F3F5FB; color: #1a2448; }
+    body { margin: 0; font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif; background: #F3F5FB; color: #1a2448; }
     main { max-width: 420px; margin: 48px auto; padding: 0 18px; }
     h1 { font-size: 1.4rem; }
     p { color: #4E5E8C; line-height: 1.45; }

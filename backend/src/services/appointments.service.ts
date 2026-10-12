@@ -7,6 +7,7 @@ import { createMessagesForAppointment } from "./messages.service.js";
 import { cancelPendingReminders, scheduleAppointmentReminders } from "./appointment-reminders.service.js";
 import { clinicTimeZoneLabel, formatClinicDate, formatClinicDateTime, formatClinicInput, formatClinicTime } from "../utils/clinic-time.js";
 import { sendPatientReminderSms } from "./synthflow.client.js";
+import { isDoctorSmsEnabled } from "./doctor-sms-preferences.service.js";
 import { recordAppointmentStatus } from "./patient-chart.service.js";
 import { logAppointmentBooked } from "./activity.service.js";
 import {
@@ -56,6 +57,7 @@ export type PublicAppointment = {
   clinic: string;
   fee: string;
   startsAt: string;
+  createdAt: string;
   followUpOfId: string | null;
   followUpOfReference: string | null;
   isFollowUp: boolean;
@@ -254,6 +256,7 @@ function toPublicAppointment(row: AppointmentWithPeople): PublicAppointment {
     clinic: row.clinic,
     fee: row.fee,
     startsAt: row.startsAt.toISOString(),
+    createdAt: row.createdAt.toISOString(),
     followUpOfId: row.followUpOfId ?? null,
     followUpOfReference: row.followUpOf?.reference ?? null,
     isFollowUp: Boolean(row.followUpOfId),
@@ -713,6 +716,13 @@ async function sendNextVisitConfirmation(appointment: AppointmentWithPeople) {
   const when = `${formatClinicDateTime(appointment.startsAt)} ${clinicTimeZoneLabel(appointment.startsAt)}`;
   const visitType = appointment.mode === "VIDEO_CALL" ? "Video call" : "In clinic";
   const reason = appointment.reason.trim();
+  const confirmationsOn = await isDoctorSmsEnabled(
+    appointment.doctorUserId,
+    "appointmentConfirmations",
+  );
+  if (!confirmationsOn) {
+    return `Next visit ${appointment.reference} is confirmed. Confirmation texts are turned off in Settings, so no SMS was sent.`;
+  }
   const body = `Qubetech: your next visit is confirmed. ${appointment.reference} with ${appointment.doctorUser.fullName} at ${appointment.clinic || "the clinic"} on ${when}. Type: ${visitType}.${reason ? ` Details: ${reason.slice(0, 180)}` : ""}`;
   try {
     await sendPatientReminderSms({ toPhone: phone, body, purpose: "confirmation" });

@@ -1,5 +1,6 @@
 import type { NextFunction, Request, Response } from "express";
 import {
+  changePasswordSchema,
   forgotPasswordSchema,
   loginSchema,
   resetPasswordSchema,
@@ -41,6 +42,16 @@ export async function resetPassword(req: Request, res: Response, next: NextFunct
   try {
     const body = resetPasswordSchema.parse(req.body);
     const result = await authService.resetPassword(body);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function changePassword(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = changePasswordSchema.parse(req.body);
+    const result = await authService.changePassword(req.user!.sub, body);
     res.json({ success: true, ...result });
   } catch (error) {
     next(error);

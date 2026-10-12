@@ -10,19 +10,31 @@ export const Route = createFileRoute("/doctor")({
     if (typeof window === "undefined") return;
     const session = getSession();
     if (!session?.token || session.role !== "doctor") {
-      throw redirect({ to: "/" });
+      throw redirect({ to: "/login" });
     }
   },
   component: DoctorLayout,
 });
 
 const CLINICAL_PREFIXES = [
+  "/doctor/appointments",
   "/doctor/schedule",
   "/doctor/notifications",
   "/doctor/patients",
   "/doctor/records",
   "/doctor/activity",
+  "/doctor/team",
 ];
+
+const APPOINTMENT_NAV_CHILDREN = [
+  { to: "/doctor/appointments/", label: "All Appointments" },
+  { to: "/doctor/appointments/new", label: "New" },
+  { to: "/doctor/appointments/pending", label: "Pending" },
+  { to: "/doctor/appointments/confirmed", label: "Confirmed" },
+  { to: "/doctor/appointments/completed", label: "Completed" },
+  { to: "/doctor/appointments/cancelled", label: "Cancelled" },
+  { to: "/doctor/appointments/follow-ups", label: "Follow-Up Appointments" },
+] as const;
 
 function isClinicalPath(pathname: string) {
   return CLINICAL_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
@@ -38,7 +50,7 @@ function DoctorLayout() {
   useEffect(() => {
     const current = getSession();
     if (!current?.token || current.role !== "doctor") {
-      void router.navigate({ to: "/" });
+      void router.navigate({ to: "/login" });
       return;
     }
     setSession(current);
@@ -60,7 +72,20 @@ function DoctorLayout() {
           if (!confirmed.enrolled) {
             await router.navigate({
               to: "/doctor/onboarding",
-              search: { checkout: undefined, payment: "failed" },
+              search: {
+                checkout: undefined,
+                payment: "failed",
+                plan: undefined,
+                cycle: undefined,
+              },
+              replace: true,
+            });
+            return;
+          }
+          if (!confirmed.access.profileComplete) {
+            await router.navigate({
+              to: "/doctor/profile",
+              search: { setup: "1" },
               replace: true,
             });
             return;
@@ -81,13 +106,39 @@ function DoctorLayout() {
         if (!next.enrolled && path !== "/doctor/onboarding") {
           await router.navigate({
             to: "/doctor/onboarding",
-            search: { checkout: undefined, payment: undefined },
+            search: {
+              checkout: undefined,
+              payment: undefined,
+              plan: undefined,
+              cycle: undefined,
+            },
             replace: true,
           });
           return;
         }
         if (next.enrolled && path === "/doctor/onboarding") {
+          if (!next.profileComplete) {
+            await router.navigate({
+              to: "/doctor/profile",
+              search: { setup: "1" },
+              replace: true,
+            });
+            return;
+          }
           await router.navigate({ to: "/doctor", search: { checkout: undefined }, replace: true });
+          return;
+        }
+        if (
+          next.enrolled &&
+          !next.profileComplete &&
+          path !== "/doctor/profile" &&
+          path !== "/doctor/onboarding"
+        ) {
+          await router.navigate({
+            to: "/doctor/profile",
+            search: { setup: "1" },
+            replace: true,
+          });
           return;
         }
         if (next.enrolled && !next.ready && isClinicalPath(path)) {
@@ -101,8 +152,14 @@ function DoctorLayout() {
     }
 
     void resolveAccess();
+    function refreshSession() {
+      const current = getSession();
+      if (current) setSession(current);
+    }
+    window.addEventListener("session-updated", refreshSession);
     return () => {
       cancelled = true;
+      window.removeEventListener("session-updated", refreshSession);
     };
   }, [router, session, pathname]);
 
@@ -126,7 +183,25 @@ function DoctorLayout() {
   }
 
   const nav: NavItem[] = access.enrolled
-    ? access.modules.map((item) => ({ to: item.to, label: item.label, group: item.group }))
+    ? access.modules.map((item) => {
+        if (item.id === "schedule" || item.label === "Appointments") {
+          return {
+            to: "/doctor/appointments",
+            label: "Appointments",
+            group: item.group,
+            children: [...APPOINTMENT_NAV_CHILDREN],
+          };
+        }
+        if (item.id === "team" || item.label === "Users") {
+          return {
+            to: "/doctor/team",
+            label: "Users",
+            group: item.group,
+            children: [{ to: "/doctor/team", label: "Team members" }],
+          };
+        }
+        return { to: item.to, label: item.label, group: item.group };
+      })
     : [];
   const accountMenu = access.modules
     .filter((item) => ["profile"].includes(item.id))

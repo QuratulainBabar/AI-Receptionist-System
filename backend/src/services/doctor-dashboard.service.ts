@@ -89,7 +89,7 @@ export async function getDoctorDashboard(doctorUserId: string): Promise<DoctorDa
     unreadAlerts: notifications.length,
     patientsCount: patients.length,
     todayAppointments,
-    latestNotifications: notifications.slice(0, 3),
+    latestNotifications: notifications.slice(0, 2),
     subscription,
   };
 }

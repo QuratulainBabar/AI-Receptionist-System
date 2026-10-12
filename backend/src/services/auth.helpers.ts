@@ -11,20 +11,48 @@ const SALT_ROUNDS = 12;
 
 export type PublicRole = "patient" | "doctor" | "admin";
 
+export type SystemRoleLabel = "Patient" | "Doctor" | "Super Admin" | "Clinic Staff";
+
 export type PublicUser = {
   id: string;
   email: string;
   fullName: string;
+  phone: string;
+  photoUrl: string;
   role: PublicRole;
+  systemRole: Role;
+  systemRoleLabel: SystemRoleLabel;
   reference: string;
   isActive: boolean;
   createdAt: string;
 };
 
+function publicUserPhotoUrl(stored: string) {
+  const value = (stored || "").trim();
+  if (!value) return "";
+  if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/")) {
+    return value;
+  }
+  return `/uploads/user-photos/${value.replace(/^\/+/, "")}`;
+}
+
 export function toPublicRole(role: Role): PublicRole {
-  if (role === "DOCTOR") return "doctor";
+  if (role === "DOCTOR" || role === "CLINIC_STAFF") return "doctor";
   if (role === "SUPER_ADMIN") return "admin";
   return "patient";
+}
+
+export function toSystemRoleLabel(role: Role): SystemRoleLabel {
+  switch (role) {
+    case "DOCTOR":
+      return "Doctor";
+    case "SUPER_ADMIN":
+      return "Super Admin";
+    case "CLINIC_STAFF":
+      return "Clinic Staff";
+    default:
+      return "Patient";
+  }
 }
 
 export function toPublicUser(user: User): PublicUser {
@@ -32,7 +60,11 @@ export function toPublicUser(user: User): PublicUser {
     id: user.id,
     email: user.email,
     fullName: user.fullName,
+    phone: user.phone || "",
+    photoUrl: publicUserPhotoUrl(user.photoUrl || ""),
     role: toPublicRole(user.role),
+    systemRole: user.role,
+    systemRoleLabel: toSystemRoleLabel(user.role),
     reference: user.reference,
     isActive: user.isActive,
     createdAt: user.createdAt.toISOString(),
@@ -71,7 +103,8 @@ export function createRawToken() {
 }
 
 export async function generateUniqueReference(role: Role) {
-  const prefix = role === "DOCTOR" ? "DR" : role === "SUPER_ADMIN" ? "SA" : "PT";
+  const prefix =
+    role === "DOCTOR" ? "DR" : role === "SUPER_ADMIN" ? "SA" : role === "CLINIC_STAFF" ? "ST" : "PT";
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const reference = `${prefix}-${Math.floor(1000 + Math.random() * 9000)}`;
     const existing = await prisma.user.findUnique({ where: { reference } });

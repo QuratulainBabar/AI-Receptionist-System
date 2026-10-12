@@ -10,6 +10,7 @@ authRouter.post("/login", authController.login);
 authRouter.post("/admin/login", authController.adminLogin);
 authRouter.post("/forgot-password", authController.forgotPassword);
 authRouter.post("/reset-password", authController.resetPassword);
+authRouter.post("/change-password", authenticate, authController.changePassword);
 authRouter.get("/me", authenticate, authController.me);
 
 authRouter.get("/patient-only", authenticate, requireRole(Role.PATIENT), (_req, res) => {

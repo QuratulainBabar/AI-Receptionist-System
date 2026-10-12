@@ -88,12 +88,15 @@ async function buildClinicContext() {
       opening_doctor_line: "",
       availability_summary: "No open slots. Do not invent a time.",
       booking_instructions:
-        "This clinic has one doctor. Say only the doctor name and the consultation fee when a fee is set. When the caller wants to book, call check_doctor_availability and say only those open times. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment for a real slot_id. Do not read the otp aloud. Ask for the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
+        "This clinic has one doctor. Use the latest Clinic doctor profile for specialty, experience, qualifications, clinic, fee, languages, and other listed details when the caller asks. When the caller wants to book, call check_doctor_availability and say only those open times. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment for a real slot_id. Do not read the otp aloud. Ask for the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
     };
   }
 
   const profile = clinicDoctorProfileBlock(doctor);
   const fee = consultationFeeToSpeak(profile.fee);
+  const feeSpoken = fee
+    ? `${fee}${profile.feeCurrency ? ` ${profile.feeCurrency}` : ""}`.trim()
+    : "";
   const openLabels = formatOpenSlotLabels(doctor.availability, {
     withIds: false,
     limit: 8,
@@ -103,13 +106,13 @@ async function buildClinicContext() {
     clinic_name: "Qubetech AI Receptionist Clinic",
     doctors_available: "1",
     clinic_doctor_name: profile.doctorName,
-    clinic_doctor_fee: fee,
-    opening_doctor_line: openingDoctorLine(profile.doctorName, fee),
+    clinic_doctor_fee: feeSpoken,
+    opening_doctor_line: openingDoctorLine(profile.doctorName, feeSpoken || fee),
     availability_summary: openLabels.length
       ? "When the caller wants to book, call check_doctor_availability and say only those open times. Do not read this variable aloud."
       : `${profile.doctorName} has no open slots right now.`,
     booking_instructions:
-      "Say only the doctor name and the consultation fee when a fee is set. Do not mention specialty, experience, qualifications, bio, languages, hospital, or other profile details. When the caller wants to book, call check_doctor_availability and say only spoken_summary. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment with that doctor and a real slot_id. Do not read the otp aloud. Ask the caller to say the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
+      "On opening, say the doctor name and consultation fee when set. If asked about the doctor, answer from the Clinic doctor profile (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services). Never invent missing details. When the caller wants to book, call check_doctor_availability and say only spoken_summary. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment with that doctor and a real slot_id. Do not read the otp aloud. Ask the caller to say the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
   };
 }
 

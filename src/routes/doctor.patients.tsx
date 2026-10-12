@@ -1,10 +1,10 @@
 import { createFileRoute, Link, Outlet, useMatches } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
-  Avatar,
   Badge,
   Button,
   EmptyNote,
+  Field,
   Input,
   PageHeader,
   Panel,
@@ -18,10 +18,12 @@ import {
   Search,
   ChevronDown,
   UserRoundPlus,
-  MoreHorizontal,
   FileText,
   ChevronLeft,
   ChevronRight,
+  Pencil,
+  Trash2,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -73,6 +75,9 @@ function PatientListPage() {
   const [patients, setPatients] = useState<ApiDoctorPatient[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const [editingPatient, setEditingPatient] = useState<ApiDoctorPatient | null>(null);
 
   const [statusFilter, setStatusFilter] = useState<string>("All Status");
   const [genderFilter, setGenderFilter] = useState<string>("All Genders");
@@ -81,6 +86,31 @@ function PatientListPage() {
   const [selectedDate, setSelectedDate] = useState(() => new Date());
   const [calendarOpen, setCalendarOpen] = useState(false);
   const PAGE_SIZE = 10;
+
+  function reloadPatients() {
+    setLoading(true);
+    return doctorPatientsApi
+      .list({ q: appliedQuery || undefined })
+      .then((result) => setPatients(result.patients))
+      .catch((err) => setError(formatApiError(err, "Unable to load patients.")))
+      .finally(() => setLoading(false));
+  }
+
+  async function deletePatient(patient: ApiDoctorPatient) {
+    const ok = window.confirm(
+      `Delete ${patient.name}?\n\nThis permanently removes their patient file and appointments. This cannot be undone.`,
+    );
+    if (!ok) return;
+    setMessage("");
+    setError("");
+    try {
+      const result = await doctorPatientsApi.delete(patient.id);
+      setPatients((current) => current.filter((row) => row.id !== patient.id));
+      setMessage(result.message || `${patient.name} has been deleted.`);
+    } catch (err) {
+      setError(formatApiError(err, "Unable to delete patient."));
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -170,12 +200,29 @@ function PatientListPage() {
                 />
               </PopoverContent>
             </Popover>
-            <Button>
+            <Button type="button" onClick={() => setAddOpen(true)}>
               <UserRoundPlus className="size-4" strokeWidth={2} />
               New Patient
             </Button>
           </div>
         }
+      />
+
+      {message ? <p className="mb-4 text-sm text-primary">{message}</p> : null}
+
+      <PatientFormModal
+        open={addOpen || Boolean(editingPatient)}
+        patient={editingPatient}
+        onClose={() => {
+          setAddOpen(false);
+          setEditingPatient(null);
+        }}
+        onSaved={(msg) => {
+          setMessage(msg);
+          setError("");
+          setPage(1);
+          void reloadPatients();
+        }}
       />
 
       <Panel className="mb-5 p-4">
@@ -233,7 +280,7 @@ function PatientListPage() {
         <EmptyNote>
           {appliedQuery || statusFilter !== "All Status" || genderFilter !== "All Genders"
             ? "No patients match that search."
-            : "No patients assigned yet. Patients appear here after they book with you."}
+            : "No patients yet. Use New Patient to add someone, or wait for a booking."}
         </EmptyNote>
       ) : (
         <Panel className="p-5 w-full max-w-full overflow-hidden">
@@ -358,7 +405,7 @@ function PatientListPage() {
                         </Badge>
                       </td>
                       <td className="px-5 py-4 align-middle">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1.5">
                           <Link
                             to="/doctor/patients/$patientId"
                             params={{ patientId: patient.id }}
@@ -371,9 +418,21 @@ function PatientListPage() {
                           </Link>
                           <button
                             type="button"
+                            aria-label={`Edit ${patient.name}`}
+                            title="Edit patient"
+                            onClick={() => setEditingPatient(patient)}
                             className="grid size-9 shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground transition-all hover:bg-secondary hover:text-foreground"
                           >
-                            <MoreHorizontal className="size-4" strokeWidth={2} />
+                            <Pencil className="size-4" strokeWidth={2.1} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label={`Delete ${patient.name}`}
+                            title="Delete patient"
+                            onClick={() => void deletePatient(patient)}
+                            className="grid size-9 shrink-0 place-items-center rounded-lg border border-rose-200 text-rose-600 transition-colors hover:bg-rose-50"
+                          >
+                            <Trash2 className="size-4" strokeWidth={2.1} />
                           </button>
                         </div>
                       </td>
@@ -484,6 +543,214 @@ function FilterSelect({
         className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
         strokeWidth={2.5}
       />
+    </div>
+  );
+}
+
+type AddPatientForm = {
+  fullName: string;
+  phone: string;
+  email: string;
+  age: string;
+  gender: string;
+  condition: string;
+};
+
+const emptyAddPatientForm = (): AddPatientForm => ({
+  fullName: "",
+  phone: "",
+  email: "",
+  age: "",
+  gender: "",
+  condition: "",
+});
+
+function PatientFormModal({
+  open,
+  patient,
+  onClose,
+  onSaved,
+}: {
+  open: boolean;
+  patient: ApiDoctorPatient | null;
+  onClose: () => void;
+  onSaved: (message: string) => void;
+}) {
+  const isEdit = Boolean(patient);
+  const [form, setForm] = useState<AddPatientForm>(emptyAddPatientForm);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) return;
+    if (patient) {
+      const gender =
+        patient.gender && patient.gender !== "—" ? patient.gender : "";
+      setForm({
+        fullName: patient.name || "",
+        phone: patient.phone || "",
+        email: patient.email || "",
+        age: patient.age != null ? String(patient.age) : "",
+        gender,
+        condition: patient.condition || "",
+      });
+    } else {
+      setForm(emptyAddPatientForm());
+    }
+    setError("");
+  }, [open, patient]);
+
+  if (!open) return null;
+
+  function setField<K extends keyof AddPatientForm>(key: K, value: AddPatientForm[K]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submit(event: FormEvent) {
+    event.preventDefault();
+    setError("");
+    const fullName = form.fullName.trim().replace(/\s+/g, " ");
+    if (fullName.length < 2) {
+      setError("Full name is required.");
+      return;
+    }
+    if (form.phone.replace(/\D/g, "").length < 10) {
+      setError("Phone number must include at least 10 digits.");
+      return;
+    }
+
+    const ageValue = form.age.trim() ? Number(form.age) : null;
+    if (form.age.trim() && (!Number.isFinite(ageValue) || (ageValue ?? 0) < 1)) {
+      setError("Enter a valid age, or leave it blank.");
+      return;
+    }
+
+    const payload = {
+      fullName,
+      phone: form.phone.trim(),
+      email: form.email.trim() || undefined,
+      age: ageValue,
+      gender: form.gender.trim() || undefined,
+      condition: form.condition.trim() || undefined,
+    };
+
+    setSaving(true);
+    try {
+      if (patient) {
+        const result = await doctorPatientsApi.update(patient.id, payload);
+        onSaved(result.message || `${fullName} was updated.`);
+      } else {
+        const result = await doctorPatientsApi.create(payload);
+        onSaved(result.message || `${fullName} was added to your patient list.`);
+      }
+      onClose();
+    } catch (err) {
+      setError(formatApiError(err, isEdit ? "Unable to update patient." : "Unable to add patient."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/45 p-4 sm:p-6">
+      <div className="my-8 w-full max-w-lg rounded-2xl border border-slate-200 bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
+          <div>
+            <h2 className="font-jakarta text-lg font-bold text-slate-900">
+              {isEdit ? "Edit patient" : "New patient"}
+            </h2>
+            <p className="mt-1 text-[13px] text-slate-500">
+              {isEdit
+                ? "Update this patient file for your clinic list."
+                : "Add a patient to your clinic list. They can book later with the same phone number."}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="grid size-9 place-items-center rounded-xl text-slate-500 transition hover:bg-slate-100 hover:text-slate-800"
+            aria-label="Close"
+          >
+            <X className="size-4" strokeWidth={2.2} />
+          </button>
+        </div>
+
+        <form onSubmit={submit} className="space-y-4 px-5 py-5">
+          {error ? <p className="text-sm text-destructive">{error}</p> : null}
+
+          <Field label="Full name">
+            <Input
+              value={form.fullName}
+              onChange={(e) => setField("fullName", e.target.value)}
+              placeholder="e.g. Sarah Ahmed"
+              autoFocus
+            />
+          </Field>
+
+          <Field label="Phone">
+            <Input
+              value={form.phone}
+              onChange={(e) => setField("phone", e.target.value)}
+              placeholder="e.g. 03001234567"
+              inputMode="tel"
+            />
+          </Field>
+
+          <Field label="Email (optional)">
+            <Input
+              type="email"
+              value={form.email}
+              onChange={(e) => setField("email", e.target.value)}
+              placeholder="patient@email.com"
+            />
+          </Field>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Age (optional)">
+              <Input
+                value={form.age}
+                onChange={(e) => setField("age", e.target.value)}
+                placeholder="32"
+                inputMode="numeric"
+              />
+            </Field>
+            <Field label="Gender (optional)">
+              <select
+                value={form.gender}
+                onChange={(e) => setField("gender", e.target.value)}
+                className="h-11 w-full rounded-xl border border-border bg-card px-3.5 text-[13.5px] text-foreground"
+              >
+                <option value="">Select</option>
+                <option value="Female">Female</option>
+                <option value="Male">Male</option>
+                <option value="Other">Other</option>
+              </select>
+            </Field>
+          </div>
+
+          <Field label="Condition / reason (optional)">
+            <Input
+              value={form.condition}
+              onChange={(e) => setField("condition", e.target.value)}
+              placeholder="e.g. Hypertension follow-up"
+            />
+          </Field>
+
+          <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2">
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {isEdit ? (
+                <Pencil className="size-4" strokeWidth={2} />
+              ) : (
+                <UserRoundPlus className="size-4" strokeWidth={2} />
+              )}
+              {saving ? "Saving…" : isEdit ? "Save changes" : "Add patient"}
+            </Button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

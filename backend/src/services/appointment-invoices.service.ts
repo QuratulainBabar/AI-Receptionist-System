@@ -5,6 +5,7 @@ import { getStripe, isStripeConfigured } from "../lib/stripe.js";
 import { AppError } from "../utils/AppError.js";
 import { normalizePhone } from "../utils/phone.js";
 import { sendPatientReminderSms } from "./synthflow.client.js";
+import { isDoctorSmsEnabled } from "./doctor-sms-preferences.service.js";
 import { formatClinicDateTime } from "../utils/clinic-time.js";
 
 const OPEN_STATUSES: AppointmentInvoiceStatus[] = ["PENDING", "SENT", "FAILED"];
@@ -323,6 +324,18 @@ export async function sendInvoiceForDoctor(doctorUserId: string, appointmentId: 
       phone,
     },
   });
+
+  const invoiceSmsOn = await isDoctorSmsEnabled(doctorUserId, "invoiceLinks");
+  if (!invoiceSmsOn) {
+    await prisma.appointmentInvoice.update({
+      where: { appointmentId: appointment.id },
+      data: { status: "PENDING", smsError: "Invoice SMS is turned off in Settings." },
+    });
+    return {
+      message: `Invoice created. Invoice texts are turned off in Settings, so the payment link was not sent. ${hostedInvoiceUrl}`,
+      paymentUrl: hostedInvoiceUrl,
+    };
+  }
 
   const delivery = await deliverInvoiceLink(
     phone,

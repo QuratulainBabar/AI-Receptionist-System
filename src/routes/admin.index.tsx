@@ -1,41 +1,37 @@
 import { createFileRoute, Link, useRouterState } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  LineChart,
-  Line,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
   XAxis,
   YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  AreaChart,
-  Area,
-  Legend,
 } from "recharts";
+import { Badge, Button, EmptyNote, Avatar } from "@/components/ui/primitives";
 import {
-  Badge,
-  Button,
-  EmptyNote,
-  PageHeader,
-  Panel,
-  SectionLabel,
-  StatCard,
-  CardHeader,
-  Avatar,
-} from "@/components/ui/primitives";
-import { adminApi, formatApiError, type AdminStats, type AdminVoiceCall } from "@/lib/api";
+  adminApi,
+  formatApiError,
+  type AdminStats,
+  type AdminVoiceCall,
+  type ApiAdminDoctor,
+} from "@/lib/api";
 import { initials } from "@/lib/mock-data";
+import { getSession } from "@/lib/session";
 import {
   Stethoscope,
   Calendar,
   PhoneCall,
   CreditCard,
+  Wallet,
   ArrowRight,
-  Phone,
   AlertCircle,
-  Clock,
+  Settings,
+  Activity,
 } from "lucide-react";
 
 export const Route = createFileRoute("/admin/")({
@@ -45,43 +41,32 @@ export const Route = createFileRoute("/admin/")({
   component: AdminDashboard,
 });
 
+const CARD_STYLE = {
+  background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
+  border: "1px solid #EEF2F7",
+  boxShadow: "0 1px 2px 0 rgba(15,23,42,0.03), 0 10px 28px -16px rgba(15,23,42,0.12)",
+} as const;
+
 function formatWhen(iso: string | null) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString();
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
-const subscriptionGrowthData = [
-  { month: "Jan", doctors: 42, revenue: 8400 },
-  { month: "Feb", doctors: 58, revenue: 11600 },
-  { month: "Mar", doctors: 76, revenue: 15200 },
-  { month: "Apr", doctors: 95, revenue: 19000 },
-  { month: "May", doctors: 118, revenue: 23600 },
-  { month: "Jun", doctors: 142, revenue: 28400 },
-];
-
-const appointmentActivityData = [
-  { day: "Mon", appointments: 128, calls: 64, bookings: 42 },
-  { day: "Tue", appointments: 145, calls: 72, bookings: 55 },
-  { day: "Wed", appointments: 162, calls: 88, bookings: 64 },
-  { day: "Thu", appointments: 155, calls: 95, bookings: 58 },
-  { day: "Fri", appointments: 180, calls: 110, bookings: 78 },
-  { day: "Sat", appointments: 140, calls: 85, bookings: 52 },
-  { day: "Sun", appointments: 95, calls: 58, bookings: 32 },
-];
-
-const doctorActivityData = [
-  { name: "Dr. Johnson", appointments: 148, hours: 52, rating: 4.9 },
-  { name: "Dr. Williams", appointments: 132, hours: 48, rating: 4.8 },
-  { name: "Dr. Davis", appointments: 115, hours: 44, rating: 4.7 },
-  { name: "Dr. Brown", appointments: 108, hours: 42, rating: 4.6 },
-  { name: "Dr. Miller", appointments: 95, hours: 38, rating: 4.9 },
-  { name: "Dr. Garcia", appointments: 88, hours: 35, rating: 4.8 },
-];
+function firstName(name: string) {
+  return name.replace(/^Dr\.\s+/i, "").split(/\s+/)[0] || name;
+}
 
 function AdminDashboard() {
   const pathname = useRouterState({ select: (state) => state.location.pathname });
+  const session = getSession();
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [recentCalls, setRecentCalls] = useState<AdminVoiceCall[]>([]);
+  const [doctors, setDoctors] = useState<ApiAdminDoctor[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -89,12 +74,14 @@ function AdminDashboard() {
     setLoading(true);
     setError("");
     try {
-      const [statsResult, callsResult] = await Promise.all([
+      const [statsResult, callsResult, doctorsResult] = await Promise.all([
         adminApi.stats(),
-        adminApi.listVoiceCalls({ limit: 8 }),
+        adminApi.listVoiceCalls({ limit: 5 }),
+        adminApi.listDoctors({ status: "all" }),
       ]);
       setStats(statsResult.stats);
       setRecentCalls(callsResult.calls);
+      setDoctors(doctorsResult.users);
     } catch (err) {
       setError(formatApiError(err, "Unable to load admin stats."));
     } finally {
@@ -114,81 +101,132 @@ function AdminDashboard() {
     return () => window.removeEventListener("focus", onFocus);
   }, [loadStats]);
 
-  const kpiData = [
+  const welcomeName = firstName(session?.name || "Admin");
+  const todayLabel = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
+
+  const platformBars = useMemo(() => {
+    if (!stats) return [];
+    return [
+      { name: "Doctors", value: stats.doctors, fill: "#2563EB" },
+      { name: "Calls", value: stats.voiceCalls ?? 0, fill: "#6366F1" },
+      { name: "Appts", value: stats.appointments ?? 0, fill: "#8B5CF6" },
+      { name: "Subs", value: stats.activeSubscriptions ?? 0, fill: "#10B981" },
+    ];
+  }, [stats]);
+
+  const statusDonut = useMemo(() => {
+    if (!stats) return [];
+    const rows = [
+      { name: "Active doctors", value: stats.activeDoctors, color: "#2563EB" },
+      { name: "Inactive doctors", value: stats.inactiveDoctors, color: "#94A3B8" },
+      { name: "Active subscriptions", value: stats.activeSubscriptions ?? 0, color: "#10B981" },
+      { name: "Phone bookings", value: stats.phoneBookings ?? 0, color: "#F59E0B" },
+    ].filter((row) => row.value > 0);
+    return rows;
+  }, [stats]);
+
+  const statusTotal = statusDonut.reduce((sum, row) => sum + row.value, 0);
+
+  const topDoctors = useMemo(() => {
+    return [...doctors]
+      .sort((a, b) => (b.totalAppointments || 0) - (a.totalAppointments || 0))
+      .slice(0, 6);
+  }, [doctors]);
+
+  const maxDoctorAppts = Math.max(1, ...topDoctors.map((d) => d.totalAppointments || 0));
+
+  const kpiCards = [
     {
-      label: "Doctors",
+      label: "Total doctors",
       value: String(stats?.doctors ?? "—"),
-      icon: "doctors" as const,
-      miniChart: [32, 38, 45, 52, 60, 75, 95],
+      detail: `${stats?.activeDoctors ?? 0} active`,
+      icon: <Stethoscope className="size-5" strokeWidth={2.2} />,
+      iconBg: "rgba(37,99,235,0.12)",
+      iconColor: "#2563EB",
     },
     {
-      label: "Patients",
-      value: String(stats?.patients ?? "—"),
-      icon: "patients" as const,
-      miniChart: [420, 540, 680, 820, 980, 1120, 1248],
+      label: "Active subscriptions",
+      value: String(stats?.activeSubscriptions ?? "—"),
+      detail: `${stats?.inactiveDoctors ?? 0} inactive doctors`,
+      icon: <CreditCard className="size-5" strokeWidth={2.2} />,
+      iconBg: "rgba(16,185,129,0.12)",
+      iconColor: "#10B981",
     },
     {
-      label: "Voice Calls",
+      label: "Voice calls",
       value: String(stats?.voiceCalls ?? "—"),
-      icon: "calls" as const,
-      miniChart: [80, 110, 150, 190, 240, 310, 385],
+      detail: `${stats?.phoneBookings ?? 0} phone bookings`,
+      icon: <PhoneCall className="size-5" strokeWidth={2.2} />,
+      iconBg: "rgba(99,102,241,0.12)",
+      iconColor: "#6366F1",
     },
     {
       label: "Appointments",
       value: String(stats?.appointments ?? "—"),
-      icon: "appointments" as const,
-      miniChart: [180, 220, 280, 340, 420, 500, 580],
+      detail: "Platform booking total",
+      icon: <Calendar className="size-5" strokeWidth={2.2} />,
+      iconBg: "rgba(139,92,246,0.12)",
+      iconColor: "#8B5CF6",
     },
   ];
 
   return (
     <>
-      <div className="mb-7 flex flex-wrap items-end justify-between gap-5">
-        <div className="min-w-0 max-w-3xl">
-          <h1
-            className="font-jakarta font-extrabold tracking-tight text-foreground text-balance"
-            style={{
-              fontSize: "clamp(1.75rem, 3vw, 2.25rem)",
-              letterSpacing: "-0.03em",
-            }}
-          >
-            Platform Analytics
-          </h1>
-          <p
-            className="mt-2.5 text-[14.5px] leading-relaxed max-w-2xl"
-            style={{ color: "#64748B" }}
-          >
-            Complete overview of doctors, patients, voice calls, appointments and platform revenue —
-            all in one elegant place.
-          </p>
+      <section
+        className="relative mb-6 overflow-hidden rounded-[22px] px-5 py-6 sm:px-7 sm:py-7"
+        style={{
+          background: "linear-gradient(115deg, #0B1E4B 0%, #123A8A 48%, #1D4ED8 100%)",
+          boxShadow: "0 18px 40px -24px rgba(29, 78, 216, 0.55)",
+        }}
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-40"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 88% 18%, rgba(147,197,253,0.35) 0%, transparent 42%), radial-gradient(circle at 8% 90%, rgba(99,102,241,0.28) 0%, transparent 45%)",
+          }}
+        />
+        <div className="relative flex flex-wrap items-start justify-between gap-5">
+          <div className="min-w-0 max-w-2xl">
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-blue-200/90">
+              Platform overview
+            </p>
+            <h1 className="mt-2 font-jakarta text-[clamp(1.7rem,3vw,2.35rem)] font-extrabold tracking-tight text-white">
+              Welcome back, {welcomeName} 👋
+            </h1>
+            <p className="mt-2 max-w-md text-[12.5px] leading-snug text-blue-100/80">
+              Clinics, voice calls, appointments, and subscriptions at a glance.
+            </p>
+            <p className="mt-3 text-[12.5px] font-semibold text-blue-200/75">{todayLabel}</p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <Link to="/admin/doctors">
+              <Button
+                size="md"
+                className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+              >
+                <Stethoscope className="size-4.5 text-white" strokeWidth={2} />
+                Doctors
+              </Button>
+            </Link>
+            <Link to="/admin/earnings">
+              <Button
+                size="md"
+                className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+              >
+                <Wallet className="size-4.5 text-white" strokeWidth={2} />
+                Earnings
+              </Button>
+            </Link>
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2.5">
-          <Link to="/admin/voice-calls">
-            <Button variant="outline" size="md" className="rounded-xl">
-              <Phone className="size-4.5" strokeWidth={2} />
-              Voice calls
-            </Button>
-          </Link>
-          <Link to="/admin/appointments">
-            <Button variant="outline" size="md" className="rounded-xl">
-              <Calendar className="size-4.5" strokeWidth={2} />
-              Appointments
-            </Button>
-          </Link>
-          <Link to="/admin/subscriptions">
-            <Button variant="outline" size="md" className="rounded-xl">
-              <CreditCard className="size-4.5" strokeWidth={2} />
-              Subscriptions
-            </Button>
-          </Link>
-          <Link to="/admin/doctors">
-            <Button size="md" className="rounded-xl">
-              <Stethoscope className="size-4.5" strokeWidth={2} />
-              Manage Doctors
-            </Button>
-          </Link>
-        </div>
-      </div>
+      </section>
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
 
@@ -197,385 +235,410 @@ function AdminDashboard() {
       ) : (
         <>
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-            {kpiData.map((k) => (
-              <StatCard
-                key={k.label}
-                label={k.label}
-                value={k.value}
-                icon={k.icon}
-                miniChart={k.miniChart}
-              />
+            {kpiCards.map((card) => (
+              <div
+                key={card.label}
+                className="rounded-[18px] p-5 transition-all duration-300 hover:-translate-y-0.5"
+                style={CARD_STYLE}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-bold uppercase tracking-[0.08em] text-slate-500">
+                      {card.label}
+                    </p>
+                    <p className="mt-2.5 font-jakarta text-[clamp(1.7rem,2.6vw,2.05rem)] font-extrabold leading-none tracking-tight text-slate-900">
+                      {card.value}
+                    </p>
+                    <p className="mt-2.5 text-[12.5px] font-semibold text-slate-500">{card.detail}</p>
+                  </div>
+                  <div
+                    className="grid size-11 shrink-0 place-items-center rounded-2xl"
+                    style={{ background: card.iconBg, color: card.iconColor }}
+                  >
+                    {card.icon}
+                  </div>
+                </div>
+              </div>
             ))}
           </div>
 
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <div
-              className="rounded-2xl p-5"
-              style={{
-                background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
-                border: "1px solid #EEF2F7",
-                boxShadow: "0 1px 2px 0 rgba(15,23,42,0.03), 0 8px 24px -14px rgba(15,23,42,0.1)",
-              }}
-            >
-              <CardHeader
-                title="Subscription Growth"
-                subtitle="Doctors enrolled & monthly revenue"
-                icon={<CreditCard className="size-5" strokeWidth={2.2} />}
-                action={
-                  <Link to="/admin/subscriptions">
-                    <Button variant="soft" size="sm" className="rounded-xl">
-                      View plans
-                      <ArrowRight className="size-4" strokeWidth={2.3} />
-                    </Button>
-                  </Link>
-                }
-              />
-              <div className="h-[240px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart
-                    data={subscriptionGrowthData}
-                    margin={{ top: 10, right: 20, left: -10, bottom: 5 }}
-                  >
-                    <defs>
-                      <linearGradient id="drGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#2563EB" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#2563EB" stopOpacity={0} />
-                      </linearGradient>
-                      <linearGradient id="rvGrad" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#10B981" stopOpacity={0.3} />
-                        <stop offset="100%" stopColor="#10B981" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#EEF2F7" />
-                    <XAxis
-                      dataKey="month"
-                      tick={{ fontSize: 12, fill: "#94A3B8", fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      dy={8}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 12, fill: "#94A3B8", fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      dx={-5}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 14,
-                        border: "1px solid #E2E8F0",
-                        boxShadow: "0 12px 24px -12px rgba(15,23,42,0.18)",
-                        fontSize: 13,
-                        fontWeight: 600,
-                      }}
-                    />
-                    <Legend
-                      wrapperStyle={{ paddingTop: 10, fontSize: 12, fontWeight: 600 }}
-                      iconType="circle"
-                      iconSize={10}
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="doctors"
-                      name="Doctors"
-                      stroke="#2563EB"
-                      strokeWidth={2.8}
-                      fill="url(#drGrad)"
-                    />
-                    <Area
-                      type="monotone"
-                      dataKey="revenue"
-                      name="Revenue ($)"
-                      stroke="#10B981"
-                      strokeWidth={2.8}
-                      fill="url(#rvGrad)"
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            <div
-              className="rounded-2xl p-5"
-              style={{
-                background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
-                border: "1px solid #EEF2F7",
-                boxShadow: "0 1px 2px 0 rgba(15,23,42,0.03), 0 8px 24px -14px rgba(15,23,42,0.1)",
-              }}
-            >
-              <CardHeader
-                title="Appointment Activity"
-                subtitle="Weekly booking channel distribution"
-                icon={<Calendar className="size-5" strokeWidth={2.2} />}
-                action={
-                  <Link to="/admin/appointments">
-                    <Button variant="soft" size="sm" className="rounded-xl">
-                      All appointments
-                      <ArrowRight className="size-4" strokeWidth={2.3} />
-                    </Button>
-                  </Link>
-                }
-              />
-              <div className="h-[240px] w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart
-                    data={appointmentActivityData}
-                    margin={{ top: 10, right: 20, left: -10, bottom: 5 }}
-                  >
-                    <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#EEF2F7" />
-                    <XAxis
-                      dataKey="day"
-                      tick={{ fontSize: 12, fill: "#94A3B8", fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      dy={8}
-                    />
-                    <YAxis
-                      tick={{ fontSize: 12, fill: "#94A3B8", fontWeight: 600 }}
-                      axisLine={false}
-                      tickLine={false}
-                      dx={-5}
-                    />
-                    <Tooltip
-                      contentStyle={{
-                        borderRadius: 14,
-                        border: "1px solid #E2E8F0",
-                        boxShadow: "0 12px 24px -12px rgba(15,23,42,0.18)",
-                        fontSize: 13,
-                        fontWeight: 600,
-                      }}
-                    />
-                    <Legend
-                      wrapperStyle={{ paddingTop: 10, fontSize: 12, fontWeight: 600 }}
-                      iconType="circle"
-                      iconSize={10}
-                    />
-                    <Bar
-                      dataKey="appointments"
-                      name="Appointments"
-                      fill="#2563EB"
-                      radius={[8, 8, 0, 0]}
-                      barSize={18}
-                    />
-                    <Bar
-                      dataKey="calls"
-                      name="AI Calls"
-                      fill="#0D9488"
-                      radius={[8, 8, 0, 0]}
-                      barSize={18}
-                    />
-                    <Bar
-                      dataKey="bookings"
-                      name="Bookings"
-                      fill="#8B5CF6"
-                      radius={[8, 8, 0, 0]}
-                      barSize={18}
-                    />
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-4 lg:grid-cols-2">
-            <div
-              className="rounded-2xl p-5"
-              style={{
-                background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
-                border: "1px solid #EEF2F7",
-                boxShadow: "0 1px 2px 0 rgba(15,23,42,0.03), 0 8px 24px -14px rgba(15,23,42,0.1)",
-              }}
-            >
-              <CardHeader
-                title="Recent Synthflow Voice Calls"
-                subtitle="Automatically recorded from the AI receptionist agent"
-                icon={<PhoneCall className="size-5" strokeWidth={2.2} />}
-                action={
-                  <Link to="/admin/voice-calls">
-                    <Button variant="soft" size="sm" className="rounded-xl">
-                      View all calls
-                      <ArrowRight className="size-4" strokeWidth={2.3} />
-                    </Button>
-                  </Link>
-                }
-              />
-
-              {!recentCalls.length ? (
-                <p className="mt-4 text-sm text-muted-foreground text-center py-10">
-                  No voice calls recorded yet.
-                </p>
-              ) : (
-                <div className="overflow-hidden rounded-xl border border-[#F1F5F9]">
-                  <div className="overflow-x-auto max-h-[360px] scrollbar-thin">
-                    <table className="w-full min-w-full text-sm">
-                      <thead
-                        style={{
-                          background: "linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%)",
-                          position: "sticky",
-                          top: 0,
-                        }}
-                      >
-                        <tr>
-                          <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-                            Caller
-                          </th>
-                          <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-                            Phone
-                          </th>
-                          <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-                            Status
-                          </th>
-                          <th className="text-left px-4 py-3 text-[10.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
-                            Appointment
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {recentCalls.map((call) => (
-                          <tr
-                            key={call.id}
-                            className="border-t border-[#F1F5F9] transition-colors hover:bg-muted/30"
-                          >
-                            <td className="py-3 px-4">
-                              <div className="flex items-center gap-3 min-w-0">
-                                <Avatar
-                                  label={initials(call.callerName || call.patientName || "UC")}
-                                  size="sm"
-                                  className="size-9"
-                                />
-                                <div className="min-w-0">
-                                  <p className="text-[13px] font-bold text-foreground truncate">
-                                    {call.callerName || call.patientName || "Unknown"}
-                                  </p>
-                                  <p className="text-[11px] font-mono text-muted-foreground/80">
-                                    {formatWhen(call.endedAt || call.startedAt || call.createdAt)}
-                                  </p>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="py-3 px-4 font-mono text-[12px] font-semibold text-muted-foreground">
-                              {call.fromNumber || "—"}
-                            </td>
-                            <td className="py-3 px-4">
-                              <Badge
-                                tone={call.status === "COMPLETED" ? "success" : "muted"}
-                                dot
-                                className="px-2.5 py-0.5 rounded-full text-[10px]"
-                              >
-                                {call.status}
-                              </Badge>
-                            </td>
-                            <td className="py-3 px-4">
-                              {call.appointmentReference ? (
-                                <div className="min-w-0">
-                                  <p className="text-[12.5px] font-bold text-foreground truncate">
-                                    {call.appointmentReference}
-                                  </p>
-                                  {call.appointmentDate ? (
-                                    <p className="text-[11px] text-muted-foreground/80">
-                                      {call.appointmentDate} · {call.appointmentTime}
-                                    </p>
-                                  ) : null}
-                                </div>
-                              ) : (
-                                <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-muted-foreground">
-                                  <AlertCircle className="size-3.5" />
-                                  No booking
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+          <div className="mt-6 grid gap-4 xl:grid-cols-[1.35fr_1fr]">
+            <div className="rounded-[18px] p-5" style={CARD_STYLE}>
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h2 className="font-jakarta text-[16px] font-bold text-slate-900">
+                    Platform metrics
+                  </h2>
+                  <p className="mt-0.5 text-[13px] text-slate-500">
+                    Current totals across the live clinic system
+                  </p>
                 </div>
+                <Link to="/admin/subscriptions">
+                  <Button variant="soft" size="sm" className="rounded-xl gap-1.5">
+                    Subscriptions
+                    <ArrowRight className="size-3.5" />
+                  </Button>
+                </Link>
+              </div>
+              {platformBars.some((row) => row.value > 0) ? (
+                <div className="h-[260px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={platformBars} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                      <defs>
+                        <linearGradient id="adminBarGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stopColor="#3B82F6" stopOpacity={1} />
+                          <stop offset="100%" stopColor="#1D4ED8" stopOpacity={0.85} />
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="#EEF2F7" />
+                      <XAxis
+                        dataKey="name"
+                        tick={{ fontSize: 12, fill: "#94A3B8", fontWeight: 600 }}
+                        axisLine={false}
+                        tickLine={false}
+                        dy={8}
+                      />
+                      <YAxis
+                        allowDecimals={false}
+                        tick={{ fontSize: 12, fill: "#94A3B8", fontWeight: 600 }}
+                        axisLine={false}
+                        tickLine={false}
+                      />
+                      <Tooltip
+                        cursor={{ fill: "rgba(37,99,235,0.04)" }}
+                        contentStyle={{
+                          borderRadius: 14,
+                          border: "1px solid #E2E8F0",
+                          boxShadow: "0 12px 24px -12px rgba(15,23,42,0.18)",
+                          fontSize: 13,
+                          fontWeight: 600,
+                        }}
+                      />
+                      <Bar dataKey="value" name="Count" radius={[10, 10, 4, 4]} barSize={36}>
+                        {platformBars.map((row) => (
+                          <Cell key={row.name} fill={row.fill} />
+                        ))}
+                      </Bar>
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <EmptyNote>No platform metrics available yet.</EmptyNote>
               )}
             </div>
 
-            <div
-              className="rounded-2xl p-5"
-              style={{
-                background: "linear-gradient(180deg, #FFFFFF 0%, #FCFCFF 100%)",
-                border: "1px solid #EEF2F7",
-                boxShadow: "0 1px 2px 0 rgba(15,23,42,0.03), 0 8px 24px -14px rgba(15,23,42,0.1)",
-              }}
-            >
-              <CardHeader
-                title="Top Performing Doctors"
-                subtitle="This week's activity & ratings"
-                icon={<Stethoscope className="size-5" strokeWidth={2.2} />}
-                action={
-                  <Link to="/admin/doctors">
-                    <Button variant="soft" size="sm" className="rounded-xl">
-                      Manage doctors
-                      <ArrowRight className="size-4" strokeWidth={2.3} />
-                    </Button>
-                  </Link>
-                }
-              />
-              <div className="space-y-3 mt-2">
-                {doctorActivityData.map((d, i) => (
-                  <div
-                    key={d.name}
-                    className="flex items-center gap-4 rounded-2xl p-3.5 transition-all hover:-translate-y-0.5 hover:bg-muted/40 hover:shadow-sm"
-                    style={{ border: "1px solid #F1F5F9" }}
-                  >
-                    <div
-                      className="grid size-9 shrink-0 place-items-center rounded-xl text-[12px] font-extrabold"
-                      style={{
-                        background:
-                          i === 0
-                            ? "linear-gradient(135deg, #F59E0B, #D97706)"
-                            : i === 1
-                              ? "linear-gradient(135deg, #94A3B8, #64748B)"
-                              : i === 2
-                                ? "linear-gradient(135deg, #CD7F32, #A6662A)"
-                                : "linear-gradient(135deg, #F1F5F9, #E2E8F0)",
-                        color: i < 3 ? "#FFFFFF" : "#94A3B8",
-                        boxShadow: i < 3 ? "0 4px 12px -4px rgba(15,23,42,0.25)" : "none",
-                      }}
-                    >
-                      #{i + 1}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <p className="text-[13.5px] font-bold text-foreground truncate">{d.name}</p>
-                        <Badge tone="accent" dot className="px-2 py-0.5 rounded-full text-[10px]">
-                          ⭐ {d.rating.toFixed(1)}
-                        </Badge>
-                      </div>
-                      <div className="mt-1.5 flex items-center gap-4 flex-wrap">
-                        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-muted-foreground">
-                          <Calendar className="size-3.5" />
-                          {d.appointments} apts
-                        </span>
-                        <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-muted-foreground">
-                          <Clock className="size-3.5" />
-                          {d.hours} hrs
-                        </span>
-                      </div>
-                    </div>
-                    <div className="w-24 shrink-0">
-                      <div className="h-2 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${(d.appointments / 148) * 100}%`,
-                            background:
-                              i < 2
-                                ? "linear-gradient(90deg, #10B981, #059669)"
-                                : "linear-gradient(90deg, #3B82F6, #1D4ED8)",
+            <div className="rounded-[18px] p-5" style={CARD_STYLE}>
+              <div className="mb-4">
+                <h2 className="font-jakarta text-[16px] font-bold text-slate-900">Platform status</h2>
+                <p className="mt-0.5 text-[13px] text-slate-500">
+                  Doctors, subscriptions, and booking activity
+                </p>
+              </div>
+              {statusDonut.length ? (
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+                  <div className="relative mx-auto h-[180px] w-[180px] shrink-0">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <PieChart>
+                        <Pie
+                          data={statusDonut}
+                          dataKey="value"
+                          nameKey="name"
+                          innerRadius={58}
+                          outerRadius={82}
+                          paddingAngle={3}
+                          strokeWidth={0}
+                        >
+                          {statusDonut.map((entry) => (
+                            <Cell key={entry.name} fill={entry.color} />
+                          ))}
+                        </Pie>
+                        <Tooltip
+                          contentStyle={{
+                            borderRadius: 12,
+                            border: "1px solid #E2E8F0",
+                            fontSize: 12,
+                            fontWeight: 600,
                           }}
                         />
+                      </PieChart>
+                    </ResponsiveContainer>
+                    <div className="pointer-events-none absolute inset-0 grid place-items-center">
+                      <div className="text-center">
+                        <p className="font-jakarta text-xl font-extrabold text-slate-900">
+                          {statusTotal}
+                        </p>
+                        <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Total
+                        </p>
                       </div>
-                      <p className="mt-1 text-right text-[10.5px] font-bold text-muted-foreground/80">
-                        {Math.round((d.appointments / 148) * 100)}%
-                      </p>
                     </div>
                   </div>
-                ))}
+                  <div className="min-w-0 flex-1 space-y-3">
+                    {statusDonut.map((row) => {
+                      const pct = statusTotal ? Math.round((row.value / statusTotal) * 100) : 0;
+                      return (
+                        <div key={row.name}>
+                          <div className="mb-1 flex items-center justify-between gap-2 text-[12.5px]">
+                            <span className="inline-flex items-center gap-2 font-semibold text-slate-700">
+                              <span
+                                className="size-2.5 rounded-full"
+                                style={{ background: row.color }}
+                              />
+                              {row.name}
+                            </span>
+                            <span className="font-bold text-slate-900">
+                              {row.value}
+                              <span className="ml-1 font-semibold text-slate-400">({pct}%)</span>
+                            </span>
+                          </div>
+                          <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                            <div
+                              className="h-full rounded-full"
+                              style={{ width: `${pct}%`, background: row.color }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <EmptyNote>No account status data yet.</EmptyNote>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 rounded-[18px] p-5" style={CARD_STYLE}>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h2 className="font-jakarta text-[16px] font-bold text-slate-900">
+                  Top doctors by appointments
+                </h2>
+                <p className="mt-0.5 text-[13px] text-slate-500">
+                  Ranked from live clinic appointment totals
+                </p>
               </div>
+              <Link to="/admin/doctors">
+                <Button variant="soft" size="sm" className="rounded-xl gap-1.5">
+                  Manage doctors
+                  <ArrowRight className="size-3.5" />
+                </Button>
+              </Link>
+            </div>
+            {!topDoctors.length ? (
+              <EmptyNote>No doctors on the platform yet.</EmptyNote>
+            ) : (
+              <div className="space-y-3">
+                {topDoctors.map((doctor, index) => {
+                  const appts = doctor.totalAppointments || 0;
+                  const pct = Math.round((appts / maxDoctorAppts) * 100);
+                  return (
+                    <div
+                      key={doctor.id}
+                      className="grid items-center gap-3 rounded-2xl border border-slate-100 px-3.5 py-3 sm:grid-cols-[minmax(0,1fr)_minmax(120px,1.4fr)_auto]"
+                    >
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span
+                          className="grid size-8 shrink-0 place-items-center rounded-xl text-[11px] font-extrabold text-white"
+                          style={{
+                            background:
+                              index === 0
+                                ? "linear-gradient(135deg,#2563EB,#1D4ED8)"
+                                : index === 1
+                                  ? "linear-gradient(135deg,#0D9488,#0F766E)"
+                                  : index === 2
+                                    ? "linear-gradient(135deg,#6366F1,#4F46E5)"
+                                    : "linear-gradient(135deg,#94A3B8,#64748B)",
+                          }}
+                        >
+                          {index + 1}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate text-[13.5px] font-bold text-slate-900">
+                            {doctor.fullName}
+                          </p>
+                          <p className="truncate text-[12px] text-slate-500">
+                            {doctor.specialty || "Specialty not set"}
+                            {doctor.clinic ? ` · ${doctor.clinic}` : ""}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="h-2 overflow-hidden rounded-full bg-slate-100">
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${pct}%`,
+                              background: "linear-gradient(90deg,#3B82F6,#1D4ED8)",
+                            }}
+                          />
+                        </div>
+                      </div>
+                      <div className="text-right text-[12.5px] font-bold text-slate-700">
+                        {appts} appointments
+                        {doctor.upcomingAppointments ? (
+                          <span className="ml-1 font-semibold text-slate-400">
+                            · {doctor.upcomingAppointments} upcoming
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="mt-6 rounded-[18px] p-5" style={CARD_STYLE}>
+            <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-3">
+                <span
+                  className="grid size-10 shrink-0 place-items-center rounded-2xl"
+                  style={{ background: "rgba(37,99,235,0.1)", color: "#2563EB" }}
+                >
+                  <PhoneCall className="size-5" strokeWidth={2.2} />
+                </span>
+                <div>
+                  <h2 className="font-jakarta text-[16px] font-bold text-slate-900">
+                    Recent Synthflow voice calls
+                  </h2>
+                  <p className="mt-0.5 text-[13px] text-slate-500">
+                    Automatically recorded from the AI receptionist agent
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {!recentCalls.length ? (
+              <p className="py-10 text-center text-sm text-slate-500">No voice calls recorded yet.</p>
+            ) : (
+              <div className="overflow-hidden rounded-2xl border border-slate-100">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead
+                      style={{
+                        background: "linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%)",
+                        position: "sticky",
+                        top: 0,
+                      }}
+                    >
+                      <tr>
+                        {["Caller", "Phone", "Status", "Appointment"].map((heading) => (
+                          <th
+                            key={heading}
+                            className="px-4 py-3 text-left text-[10.5px] font-bold uppercase tracking-[0.12em] text-slate-500"
+                          >
+                            {heading}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {recentCalls.map((call) => (
+                        <tr
+                          key={call.id}
+                          className="border-t border-slate-100 transition-colors hover:bg-slate-50/80"
+                        >
+                          <td className="px-4 py-3.5">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <Avatar
+                                label={initials(call.callerName || call.patientName || "UC")}
+                                size="sm"
+                                className="size-9"
+                              />
+                              <div className="min-w-0">
+                                <p className="truncate text-[13px] font-bold text-slate-900">
+                                  {call.callerName || call.patientName || "Unknown"}
+                                </p>
+                                <p className="font-mono text-[11px] text-slate-400">
+                                  {formatWhen(call.endedAt || call.startedAt || call.createdAt)}
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5 font-mono text-[12px] font-semibold text-slate-600">
+                            {call.fromNumber || "—"}
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <Badge
+                              tone={call.status === "COMPLETED" ? "success" : "muted"}
+                              dot
+                              className="rounded-full px-2.5 py-0.5 text-[10px]"
+                            >
+                              {call.status}
+                            </Badge>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            {call.appointmentReference ? (
+                              <div className="min-w-0">
+                                <p className="truncate text-[12.5px] font-bold text-slate-900">
+                                  {call.appointmentReference}
+                                </p>
+                                {call.appointmentDate ? (
+                                  <p className="text-[11px] text-slate-400">
+                                    {call.appointmentDate} · {call.appointmentTime}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-slate-400">
+                                <AlertCircle className="size-3.5" />
+                                No booking
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="mt-7">
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-400">
+              Quick actions
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              {[
+                {
+                  to: "/admin/doctors" as const,
+                  label: "Doctors",
+                  icon: <Stethoscope className="size-5" strokeWidth={2.2} />,
+                },
+                {
+                  to: "/admin/earnings" as const,
+                  label: "Earnings",
+                  icon: <Wallet className="size-5" strokeWidth={2.2} />,
+                },
+                {
+                  to: "/admin/subscriptions" as const,
+                  label: "Subscriptions",
+                  icon: <CreditCard className="size-5" strokeWidth={2.2} />,
+                },
+                {
+                  to: "/admin/settings" as const,
+                  label: "Settings",
+                  icon: <Settings className="size-5" strokeWidth={2.2} />,
+                },
+              ].map((action) => (
+                <Link key={action.to} to={action.to}>
+                  <div
+                    className="flex items-center gap-3 rounded-[18px] p-4 transition-all duration-300 hover:-translate-y-0.5"
+                    style={CARD_STYLE}
+                  >
+                    <span
+                      className="grid size-11 place-items-center rounded-2xl"
+                      style={{ background: "rgba(37,99,235,0.1)", color: "#2563EB" }}
+                    >
+                      {action.icon}
+                    </span>
+                    <span className="text-[14px] font-bold text-slate-800">{action.label}</span>
+                    <Activity className="ml-auto size-4 text-slate-300" />
+                  </div>
+                </Link>
+              ))}
             </div>
           </div>
         </>

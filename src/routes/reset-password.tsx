@@ -43,7 +43,7 @@ function ResetPasswordPage() {
       const result = await authApi.resetPassword({ token: token.trim(), password });
       setSuccess(result.message);
       setTimeout(() => {
-        void navigate({ to: "/" });
+        void navigate({ to: "/login" });
       }, 1200);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Unable to reset password. Is the API running?");
@@ -55,10 +55,12 @@ function ResetPasswordPage() {
   return (
     <AuthLayout
       title="Set a new password"
-      description="Paste your reset token if needed, then choose a new password."
       footer={
         <p>
-          <Link to="/" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link
+            to="/login"
+            className="font-bold text-blue-600 no-underline hover:text-blue-700 hover:no-underline focus:no-underline active:no-underline"
+          >
             Back to sign in
           </Link>
         </p>
@@ -68,7 +70,7 @@ function ResetPasswordPage() {
         <Field label="Reset token">
           <Input value={token} onChange={(e) => setToken(e.target.value)} required />
         </Field>
-        <Field label="New password" hint="At least 8 characters.">
+        <Field label="New password">
           <Input
             type="password"
             value={password}

@@ -87,6 +87,8 @@ function AdminDoctorDetails() {
   const [form, setForm] = useState<FormState | null>(null);
   const [specialties, setSpecialties] = useState<ApiSpecialty[]>([]);
   const [openSlots, setOpenSlots] = useState<ApiAdminDoctorSlot[]>([]);
+  const [totalAppointments, setTotalAppointments] = useState(0);
+  const [upcomingAppointments, setUpcomingAppointments] = useState(0);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(true);
@@ -104,6 +106,8 @@ function AdminDoctorDetails() {
       setUser(crm.user);
       setProfile(crm.profile);
       setSubscription(crm.subscription);
+      setTotalAppointments(crm.totalAppointments ?? 0);
+      setUpcomingAppointments(crm.upcomingAppointments ?? 0);
       setForm(crm.profile ? profileToForm(crm.profile) : null);
       setSpecialties(specialtyResult.specialties);
       setOpenSlots(slotsResult.slots);
@@ -213,12 +217,11 @@ function AdminDoctorDetails() {
   return (
     <>
       <PageHeader
-        eyebrow="Doctor CRM"
         title={user?.fullName ?? "Doctor details"}
         description={
           user
             ? `${user.reference} · ${user.email}`
-            : "Account, clinical profile, and Synthflow verification."
+            : "Account, clinical profile, and portal access."
         }
         actions={
           <>
@@ -252,8 +255,29 @@ function AdminDoctorDetails() {
                 <dd>{user.email}</dd>
               </div>
               <div className="flex justify-between gap-2 border-b border-border pb-2">
-                <dt className="text-muted-foreground">Reference</dt>
-                <dd className="font-mono text-[11px]">{user.reference}</dd>
+                <dt className="text-muted-foreground">Phone</dt>
+                <dd>{profile?.phone?.trim() || "—"}</dd>
+              </div>
+              <div className="flex justify-between gap-2 border-b border-border pb-2">
+                <dt className="text-muted-foreground">Joined</dt>
+                <dd>
+                  {user.createdAt
+                    ? new Date(user.createdAt).toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                      })
+                    : "—"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-2 border-b border-border pb-2">
+                <dt className="text-muted-foreground">Appointments</dt>
+                <dd className="text-right">
+                  <span className="font-medium">{totalAppointments} total</span>
+                  <span className="block text-[11.5px] text-muted-foreground">
+                    {upcomingAppointments} upcoming
+                  </span>
+                </dd>
               </div>
               <div className="flex justify-between gap-2">
                 <dt className="text-muted-foreground">Portal access</dt>

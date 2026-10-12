@@ -251,15 +251,14 @@ export async function updateCustomActionUrl(actionId: string, url: string) {
  */
 const OPENING_RULE = `OPENING RULE:
 The greeting already includes the clinic welcome, the doctor's name, and the consultation fee only when that doctor has a fee.
-Do not add specialty, years of experience, qualifications, certifications, bio, languages, hospital, or any other profile detail.
 If the greeting did not already say the doctor's name, say only opening_doctor_line, then ask how you can help.
-If the caller asks about the doctor, repeat only the name and, when a fee is set, the consultation fee. If there is no fee, say only the name.`;
+If the caller asks about the doctor, answer from the latest Clinic doctor profile (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about). Never invent missing details.`;
 
 const AVAILABILITY_SPEAK_RULE = `AVAILABILITY SPEAK RULE:
 When the caller wants to book or asks for a time, call check_doctor_availability.
 Say spoken_summary exactly. It lists only currently open appointment times from the Doctor Dashboard availability.
-Do not add the doctor's specialty, experience, qualifications, bio, languages, hospital, fee, or any other profile detail.
-Do not invent a time. Then wait for the caller to choose one of those times.`;
+Do not invent a time. Then wait for the caller to choose one of those times.
+Bookable times come only from availability / open slots — not from weekly-hours text in the profile.`;
 
 const PHONE_APPOINTMENT_RULE = `PHONE APPOINTMENT RULE (FOLLOW BEFORE ANY BOOKING):
 Call check_existing_appointment only after the caller says a phone number. Do not call it when they say their name.

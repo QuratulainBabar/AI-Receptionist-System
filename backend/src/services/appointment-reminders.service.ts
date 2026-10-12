@@ -1,6 +1,7 @@
 import type { Appointment, AppointmentReminderKind, User } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { sendPatientReminderSms } from "./synthflow.client.js";
+import { isDoctorSmsEnabled } from "./doctor-sms-preferences.service.js";
 import { normalizePhone } from "../utils/phone.js";
 import {
   clinicTimeZoneLabel,
@@ -228,6 +229,17 @@ export async function dispatchDueAppointmentReminders(now = new Date()) {
     }
 
     try {
+      const remindersOn = await isDoctorSmsEnabled(appointment.doctorUserId, "appointmentReminders");
+      if (!remindersOn) {
+        await prisma.appointmentReminder.update({
+          where: { id: reminder.id },
+          data: {
+            status: "SKIPPED",
+            error: "Appointment reminder SMS is turned off in doctor Settings.",
+          },
+        });
+        continue;
+      }
       await sendPatientReminderSms({
         toPhone: phone,
         body: reminderBody(appointment, reminder.kind),

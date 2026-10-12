@@ -17,12 +17,29 @@ adminRouter.get("/appointments/:appointmentId", adminController.getAppointment);
 adminRouter.patch("/appointments/:appointmentId/status", adminController.updateAppointmentStatus);
 adminRouter.post("/appointments/:appointmentId/reschedule", adminController.rescheduleAppointment);
 adminRouter.get("/doctors", adminController.listDoctors);
+adminRouter.post("/doctors", adminController.createDoctor);
+adminRouter.delete("/doctors/:userId", adminController.deleteDoctor);
+adminRouter.post(
+  "/doctors/:userId/photo",
+  adminController.doctorPhotoUploadMiddleware,
+  adminController.uploadDoctorPhoto,
+);
 adminRouter.get("/doctors/:userId/crm", adminController.getDoctorCrm);
 adminRouter.put("/doctors/:userId/crm", adminController.updateDoctorCrm);
 adminRouter.patch("/doctors/:userId/verification", adminController.setDoctorVerification);
 adminRouter.get("/doctors/:userId/slots", adminController.listDoctorOpenSlots);
 adminRouter.post("/doctors/:userId/slots/generate", adminController.generateDoctorSlots);
 adminRouter.get("/patients", adminController.listPatients);
+adminRouter.get("/settings/profile", adminController.getSettingsProfile);
+adminRouter.patch("/settings/profile", adminController.updateSettingsProfile);
+adminRouter.post(
+  "/settings/profile/photo",
+  adminController.adminPhotoUploadMiddleware,
+  adminController.uploadSettingsPhoto,
+);
+adminRouter.delete("/settings/profile/photo", adminController.removeSettingsPhoto);
+adminRouter.get("/system-users", adminController.listSystemUsers);
+adminRouter.post("/system-users", adminController.createSystemUser);
 adminRouter.get("/users/:userId", adminController.getUser);
 adminRouter.patch("/users/:userId/status", adminController.setStatus);
 

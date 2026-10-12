@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Button,
   EmptyNote,
@@ -9,6 +9,11 @@ import {
   SectionLabel,
 } from "@/components/ui/primitives";
 import { doctorSubscriptionApi, formatApiError, type ApiSubscriptionPlan } from "@/lib/api";
+import {
+  findMatchingPlanId,
+  parseBillingCycleSlug,
+  parsePlanSlug,
+} from "@/lib/plan-selection";
 import {
   Stethoscope,
   Star,
@@ -25,6 +30,8 @@ export const Route = createFileRoute("/doctor/onboarding")({
   validateSearch: (search: Record<string, unknown>) => ({
     checkout: search["checkout"] === "cancelled" ? ("cancelled" as const) : undefined,
     payment: search["payment"] === "failed" ? ("failed" as const) : undefined,
+    plan: parsePlanSlug(search.plan),
+    cycle: parseBillingCycleSlug(search.cycle),
   }),
   head: () => ({
     meta: [{ title: "Choose a plan — Doctor onboarding" }],
@@ -38,6 +45,7 @@ function DoctorOnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
+  const autoCheckoutRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +91,22 @@ function DoctorOnboardingPage() {
       setBusyId("");
     }
   }
+
+  // Landing "Choose plan" → signup → here: open Stripe Checkout for the selected plan.
+  useEffect(() => {
+    if (loading || autoCheckoutRef.current || !search.plan) return;
+    if (search.checkout === "cancelled" || search.payment === "failed") return;
+    if (busyId) return;
+    const match = findMatchingPlanId(plans, search.plan, search.cycle ?? "monthly");
+    if (!match) {
+      setError(
+        `No matching ${search.plan} (${search.cycle ?? "monthly"}) plan is available yet. Pick a plan below or ask Super Admin to sync landing plans.`,
+      );
+      return;
+    }
+    autoCheckoutRef.current = true;
+    void startCheckout(match.id);
+  }, [loading, plans, search.plan, search.cycle, search.checkout, search.payment, busyId]);
 
   type PlanStyle = {
     gradient: string;
@@ -146,7 +170,7 @@ function DoctorOnboardingPage() {
             </span>
           </div>
           <h1
-            className="font-[--font-display] font-extrabold tracking-tight text-foreground text-balance"
+            className="font-sans font-extrabold tracking-tight text-foreground text-balance"
             style={{
               fontSize: "clamp(1.8rem, 4vw, 2.5rem)",
               letterSpacing: "-0.03em",
@@ -274,12 +298,12 @@ function DoctorOnboardingPage() {
                   >
                     {style.icon}
                   </div>
-                  <h3 className="font-[--font-display] text-[1.4rem] font-extrabold tracking-tight text-foreground">
+                  <h3 className="font-sans text-[1.4rem] font-extrabold tracking-tight text-foreground">
                     {plan.name}
                   </h3>
                   <div className="mt-3 flex items-baseline gap-1.5">
                     <span
-                      className="font-[--font-display] font-extrabold tracking-tight text-foreground"
+                      className="font-sans font-extrabold tracking-tight text-foreground"
                       style={{ fontSize: "2.5rem", letterSpacing: "-0.03em" }}
                     >
                       {plan.amountLabel}
@@ -392,7 +416,7 @@ function DoctorOnboardingPage() {
           border: "1px solid rgba(59, 130, 246, 0.16)",
         }}
       >
-        <h4 className="font-[--font-display] text-[1.15rem] font-extrabold tracking-tight text-foreground">
+        <h4 className="font-sans text-[1.15rem] font-extrabold tracking-tight text-foreground">
           Not sure which plan fits?
         </h4>
         <p

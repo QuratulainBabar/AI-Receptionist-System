@@ -76,7 +76,7 @@ function Confirmation() {
               <SectionLabel>Confirmation</SectionLabel>
               <Badge tone="success">{appointment.reference}</Badge>
             </div>
-            <p className="mt-3 font-display text-xl font-semibold">
+            <p className="mt-3 font-sans text-xl font-semibold">
               {appointment.date} · {appointment.time}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">

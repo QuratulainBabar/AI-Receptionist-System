@@ -202,11 +202,6 @@ function AdminAppointmentDetails() {
                 <p className="mt-1 text-sm font-semibold">{appointment.patientName}</p>
                 <p className="font-mono text-[11px] text-muted-foreground">{appointment.patientReference}</p>
                 <p className="text-xs text-muted-foreground">{appointment.patientEmail}</p>
-                <Link to="/admin/patients/$userId" params={{ userId: appointment.patientId }}>
-                  <Button size="sm" variant="outline" className="mt-2">
-                    Patient profile
-                  </Button>
-                </Link>
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">Doctor</p>

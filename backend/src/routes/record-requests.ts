@@ -3,13 +3,14 @@ import multer from "multer";
 import type { NextFunction, Request, Response } from "express";
 import { Role } from "@prisma/client";
 import { authenticate, requireRole } from "../middleware/auth.js";
+import { attachClinicContext } from "../middleware/clinic-context.js";
 import { requireDoctorReady } from "../middleware/enrollment.js";
 import { AppError } from "../utils/AppError.js";
 import * as recordRequestsController from "../controllers/record-requests.controller.js";
 
 export const doctorRecordRequestsRouter = Router({ mergeParams: true });
 
-doctorRecordRequestsRouter.use(authenticate, requireRole(Role.DOCTOR), requireDoctorReady);
+doctorRecordRequestsRouter.use(authenticate, requireRole(Role.DOCTOR, Role.CLINIC_STAFF), attachClinicContext, requireDoctorReady);
 doctorRecordRequestsRouter.post("/", recordRequestsController.requestForAppointment);
 
 export const publicRecordUploadsRouter = Router();

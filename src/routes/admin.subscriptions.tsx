@@ -45,17 +45,17 @@ const emptyForm = {
 
 const PLAN_ICON_MAP: Record<string, { icon: React.ReactNode; bg: string; iconColor: string }> = {
   starter: {
-    icon: <span className="font-display font-black text-[22px] text-white tracking-tight">S</span>,
+    icon: <span className="font-sans font-black text-[22px] text-white tracking-tight">S</span>,
     bg: "linear-gradient(135deg, #3B82F6 0%, #1D4ED8 100%)",
     iconColor: "#FFFFFF",
   },
   professional: {
-    icon: <span className="font-display font-black text-[22px] text-white tracking-tight">P</span>,
+    icon: <span className="font-sans font-black text-[22px] text-white tracking-tight">P</span>,
     bg: "linear-gradient(135deg, #2563EB 0%, #1E40AF 100%)",
     iconColor: "#FFFFFF",
   },
   enterprise: {
-    icon: <span className="font-display font-black text-[22px] text-white tracking-tight">E</span>,
+    icon: <span className="font-sans font-black text-[22px] text-white tracking-tight">E</span>,
     bg: "linear-gradient(135deg, #6366F1 0%, #4338CA 100%)",
     iconColor: "#FFFFFF",
   },
@@ -228,7 +228,7 @@ function AdminSubscriptionsPage() {
           </Button>
         </div>
         <div className="relative z-10 max-w-[19rem] pt-24 sm:max-w-[26rem] sm:pt-0 lg:max-w-[24rem] xl:max-w-[28rem]">
-            <h1 className="font-[--font-display] text-[clamp(2.1rem,3.6vw,3.15rem)] font-black leading-[1.02] tracking-tight">
+            <h1 className="font-sans text-[clamp(2.1rem,3.6vw,3.15rem)] font-black leading-[1.02] tracking-tight">
               Manage Your
               <br />
               <span
@@ -241,10 +241,8 @@ function AdminSubscriptionsPage() {
                 Subscriptions
               </span>
             </h1>
-            <p className="mt-4 text-[15px] leading-relaxed text-slate-600">
-              Create Stripe plans, assign doctors, and
-              <br />
-              track live subscription status from Stripe webhooks.
+            <p className="mt-3 max-w-sm text-[12.5px] leading-snug text-slate-500">
+              Create Stripe plans and track live doctor subscription status.
             </p>
         </div>
       </div>
@@ -289,7 +287,7 @@ function AdminSubscriptionsPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-bold text-slate-500">Current Subscribers</p>
-                <p className="mt-2 font-[--font-display] text-[30px] font-black leading-none tracking-tight text-slate-900">
+                <p className="mt-2 font-sans text-[30px] font-black leading-none tracking-tight text-slate-900">
                   {overview?.currentSubscribers ?? 0}
                 </p>
               </div>
@@ -338,7 +336,7 @@ function AdminSubscriptionsPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-bold text-slate-500">Active</p>
-                <p className="mt-2 font-[--font-display] text-[30px] font-black leading-none tracking-tight text-slate-900">
+                <p className="mt-2 font-sans text-[30px] font-black leading-none tracking-tight text-slate-900">
                   {overview?.active ?? 0}
                 </p>
               </div>
@@ -387,7 +385,7 @@ function AdminSubscriptionsPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-bold text-slate-500">Past due</p>
-                <p className="mt-2 font-[--font-display] text-[30px] font-black leading-none tracking-tight text-slate-900">
+                <p className="mt-2 font-sans text-[30px] font-black leading-none tracking-tight text-slate-900">
                   {overview?.pastDue ?? 0}
                 </p>
               </div>
@@ -436,7 +434,7 @@ function AdminSubscriptionsPage() {
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-[13px] font-bold text-slate-500">Plans</p>
-                <p className="mt-2 font-[--font-display] text-[30px] font-black leading-none tracking-tight text-slate-900">
+                <p className="mt-2 font-sans text-[30px] font-black leading-none tracking-tight text-slate-900">
                   {overview?.activePlans ?? 0}
                 </p>
               </div>
@@ -506,11 +504,11 @@ function AdminSubscriptionsPage() {
                           {iconCfg.icon}
                         </div>
                         <div className="min-w-0 pt-1">
-                          <h3 className="font-[--font-display] text-[20px] font-black tracking-tight text-slate-900">
+                          <h3 className="font-sans text-[20px] font-black tracking-tight text-slate-900">
                             {plan.name}
                           </h3>
                           <p className="mt-1 flex items-baseline gap-1">
-                            <span className="font-[--font-display] text-[22px] font-black tracking-tight text-slate-900">
+                            <span className="font-sans text-[22px] font-black tracking-tight text-slate-900">
                               {plan.amountLabel}
                             </span>
                             <span className="text-[13px] font-semibold text-slate-500">
@@ -637,7 +635,7 @@ function AdminSubscriptionsPage() {
                   }}
                 />
                 <div className="relative">
-                  <h2 className="font-[--font-display] text-[22px] font-black leading-tight tracking-tight text-white">
+                  <h2 className="font-sans text-[22px] font-black leading-tight tracking-tight text-white">
                     {editingId ? `Editing ${form.name || "Plan"}` : "Create Plan"}
                   </h2>
                   <p className="mt-1.5 max-w-sm text-[13px] leading-relaxed text-blue-100/80">

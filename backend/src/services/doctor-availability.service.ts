@@ -12,9 +12,12 @@ import {
   wallTimeToUtc,
   weekdayNameForCivilDate,
 } from "../utils/clinic-time.js";
-import { parseWeeklyHours, WEEKDAYS } from "../utils/doctor-profile.js";
-
-const SLOT_MINUTES = 30;
+import {
+  parseAvailabilityConfig,
+  SLOT_DURATION_OPTIONS,
+  WEEKDAYS,
+  type WeeklyHourSession,
+} from "../utils/doctor-profile.js";
 
 export type PublicDoctorSlot = {
   id: string;
@@ -100,10 +103,89 @@ function parseClock(value: string) {
   return { hour, minute };
 }
 
+function clockToMinutes(value: string) {
+  const clock = parseClock(value);
+  if (!clock) return null;
+  return clock.hour * 60 + clock.minute;
+}
+
 function weekdayName(dateKey: string) {
   const name = weekdayNameForCivilDate(dateKey);
   if (WEEKDAYS.includes(name as (typeof WEEKDAYS)[number])) return name;
   return "";
+}
+
+function subtractBreaks(sessions: WeeklyHourSession[], breaks: WeeklyHourSession[]) {
+  if (!breaks.length) return sessions;
+  const result: WeeklyHourSession[] = [];
+  for (const session of sessions) {
+    let pieces: WeeklyHourSession[] = [session];
+    for (const brk of breaks) {
+      const next: WeeklyHourSession[] = [];
+      for (const piece of pieces) {
+        const p0 = clockToMinutes(piece.startTime);
+        const p1 = clockToMinutes(piece.endTime);
+        const b0 = clockToMinutes(brk.startTime);
+        const b1 = clockToMinutes(brk.endTime);
+        if (p0 == null || p1 == null || b0 == null || b1 == null) {
+          next.push(piece);
+          continue;
+        }
+        if (b1 <= p0 || b0 >= p1) {
+          next.push(piece);
+          continue;
+        }
+        if (p0 < b0) {
+          next.push({
+            startTime: piece.startTime,
+            endTime: `${String(Math.floor(b0 / 60)).padStart(2, "0")}:${String(b0 % 60).padStart(2, "0")}`,
+          });
+        }
+        if (b1 < p1) {
+          next.push({
+            startTime: `${String(Math.floor(b1 / 60)).padStart(2, "0")}:${String(b1 % 60).padStart(2, "0")}`,
+            endTime: piece.endTime,
+          });
+        }
+      }
+      pieces = next;
+    }
+    result.push(...pieces);
+  }
+  return result.filter((s) => (clockToMinutes(s.startTime) ?? 0) < (clockToMinutes(s.endTime) ?? 0));
+}
+
+function expandSessionsToStarts(
+  dateKey: string,
+  sessions: WeeklyHourSession[],
+  slotMinutes: number,
+  now: Date,
+  zone: string,
+) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const starts: Date[] = [];
+  for (const session of sessions) {
+    const start = parseClock(session.startTime);
+    const end = parseClock(session.endTime);
+    if (!start || !end) continue;
+    let minuteOfDay = start.hour * 60 + start.minute;
+    const endMinute = end.hour * 60 + end.minute;
+    while (minuteOfDay + slotMinutes <= endMinute) {
+      const startsAt = wallTimeToUtc(
+        {
+          year: year!,
+          month: month!,
+          day: day!,
+          hour: Math.floor(minuteOfDay / 60),
+          minute: minuteOfDay % 60,
+        },
+        zone,
+      );
+      if (startsAt.getTime() > now.getTime()) starts.push(startsAt);
+      minuteOfDay += slotMinutes;
+    }
+  }
+  return starts;
 }
 
 export async function listSlotsForDoctor(
@@ -157,6 +239,59 @@ export async function createSlotForDoctor(doctorUserId: string, startsAtInput: s
   } catch {
     throw new AppError(409, "A slot already exists at this date and time");
   }
+}
+
+/** Create open slots from a date + start/end window using the chosen duration. */
+export async function createSlotsFromRangeForDoctor(
+  doctorUserId: string,
+  input: { date: string; startTime: string; endTime: string; durationMinutes?: number },
+) {
+  const profile = await requireDoctorProfile(doctorUserId);
+  const date = String(input.date || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new AppError(400, "Choose a valid date.");
+  }
+  const start = parseClock(input.startTime);
+  const end = parseClock(input.endTime);
+  if (!start || !end) throw new AppError(400, "Choose valid start and end times.");
+  const startMin = start.hour * 60 + start.minute;
+  const endMin = end.hour * 60 + end.minute;
+  if (endMin <= startMin) throw new AppError(400, "End time must be after start time.");
+
+  const config = parseAvailabilityConfig(profile.weeklyHours);
+  const duration =
+    input.durationMinutes &&
+    SLOT_DURATION_OPTIONS.includes(input.durationMinutes as (typeof SLOT_DURATION_OPTIONS)[number])
+      ? input.durationMinutes
+      : config.slotDurationMinutes;
+
+  const now = new Date();
+  const zone = clinicTimeZone();
+  const candidates = expandSessionsToStarts(
+    date,
+    [{ startTime: input.startTime, endTime: input.endTime }],
+    duration,
+    now,
+    zone,
+  );
+  if (!candidates.length) {
+    throw new AppError(400, "No future slots fall in that time range.");
+  }
+
+  const result = await prisma.availabilitySlot.createMany({
+    data: candidates.map((startsAt) => ({
+      doctorId: profile.id,
+      startsAt,
+      isBooked: false,
+    })),
+    skipDuplicates: true,
+  });
+
+  return {
+    created: result.count,
+    considered: candidates.length,
+    durationMinutes: duration,
+  };
 }
 
 export async function updateSlotForDoctor(
@@ -214,58 +349,74 @@ export async function deleteSlotForDoctor(doctorUserId: string, slotId: string) 
 
 export async function generateSlotsFromWeeklyHours(
   doctorUserId: string,
-  options?: { weeks?: number; requireActive?: boolean; allowEmpty?: boolean },
+  options?: {
+    weeks?: number;
+    requireActive?: boolean;
+    allowEmpty?: boolean;
+    replaceOpen?: boolean;
+  },
 ) {
   const profile = await requireDoctorProfile(doctorUserId, { requireActive: options?.requireActive });
+  const config = parseAvailabilityConfig(profile.weeklyHours);
   const weeks = Math.max(1, Math.min(8, Math.floor(options?.weeks ?? 2)));
-  const weeklyHours = parseWeeklyHours(profile.weeklyHours);
-  const byDay = new Map(weeklyHours.map((row) => [row.day, row]));
+  const slotMinutes = config.slotDurationMinutes;
+  const byDay = new Map(config.days.map((row) => [row.day, row]));
+  const overrides = new Map(config.dateOverrides.map((row) => [row.date, row]));
 
   const now = new Date();
-  const dayCount = weeks * 7;
-  const candidates: Date[] = [];
   const todayKey = civilDateKey(now);
   const zone = clinicTimeZone();
+  const dayCount = weeks * 7;
+  const candidates: Date[] = [];
 
   for (let offset = 0; offset < dayCount; offset += 1) {
     const dateKey = addCivilDays(todayKey, offset);
-    const template = byDay.get(weekdayName(dateKey));
-    if (!template?.enabled) continue;
+    if (config.scheduleFrom && dateKey < config.scheduleFrom) continue;
+    if (config.scheduleTo && dateKey > config.scheduleTo) continue;
 
-    const start = parseClock(template.startTime);
-    const end = parseClock(template.endTime);
-    if (!start || !end) continue;
+    const override = overrides.get(dateKey);
+    if (override?.type === "unavailable") continue;
 
-    const [year, month, day] = dateKey.split("-").map(Number);
-    let minuteOfDay = start.hour * 60 + start.minute;
-    const endMinute = end.hour * 60 + end.minute;
-
-    while (minuteOfDay + SLOT_MINUTES <= endMinute) {
-      const startsAt = wallTimeToUtc(
-        {
-          year: year!,
-          month: month!,
-          day: day!,
-          hour: Math.floor(minuteOfDay / 60),
-          minute: minuteOfDay % 60,
-        },
-        zone,
-      );
-      if (startsAt.getTime() > now.getTime()) {
-        candidates.push(startsAt);
+    let sessions: WeeklyHourSession[] = [];
+    if (override?.type === "custom") {
+      sessions = subtractBreaks(override.sessions, override.breaks);
+    } else {
+      const template = byDay.get(weekdayName(dateKey));
+      if (!template?.enabled) continue;
+      sessions = template.sessions?.length
+        ? template.sessions
+        : [{ startTime: template.startTime, endTime: template.endTime }];
+      if (override?.breaks?.length) {
+        sessions = subtractBreaks(sessions, override.breaks);
       }
-      minuteOfDay += SLOT_MINUTES;
     }
+
+    candidates.push(...expandSessionsToStarts(dateKey, sessions, slotMinutes, now, zone));
   }
 
   if (!candidates.length) {
     if (options?.allowEmpty) {
-      return { created: 0, considered: 0, weeks, slotMinutes: SLOT_MINUTES };
+      return { created: 0, considered: 0, weeks, slotMinutes };
     }
     throw new AppError(
       400,
       "No future slots to generate. Enable days and timings under weekly hours first.",
     );
+  }
+
+  const windowStart = candidates.reduce((min, d) => (d < min ? d : min), candidates[0]!);
+  const windowEnd = candidates.reduce((max, d) => (d > max ? d : max), candidates[0]!);
+
+  if (options?.replaceOpen) {
+    // Remove only unbooked open slots in the generated window — never booked appointments.
+    await prisma.availabilitySlot.deleteMany({
+      where: {
+        doctorId: profile.id,
+        isBooked: false,
+        appointment: null,
+        startsAt: { gte: windowStart, lte: windowEnd },
+      },
+    });
   }
 
   const result = await prisma.availabilitySlot.createMany({
@@ -281,6 +432,6 @@ export async function generateSlotsFromWeeklyHours(
     created: result.count,
     considered: candidates.length,
     weeks,
-    slotMinutes: SLOT_MINUTES,
+    slotMinutes,
   };
 }

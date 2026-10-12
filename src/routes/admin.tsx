@@ -9,7 +9,7 @@ export const Route = createFileRoute("/admin")({
     if (location.pathname === "/admin/login") return;
     const session = getSession();
     if (!session?.token || session.role !== "admin") {
-      throw redirect({ to: "/" });
+      throw redirect({ to: "/login" });
     }
   },
   component: AdminLayout,
@@ -17,11 +17,10 @@ export const Route = createFileRoute("/admin")({
 
 const nav: NavItem[] = [
   { to: "/admin", label: "Dashboard", group: "Overview" },
-  { to: "/admin/voice-calls", label: "Voice calls", group: "Phone AI" },
-  { to: "/admin/appointments", label: "Appointments", group: "Clinic" },
   { to: "/admin/doctors", label: "Doctors", group: "Users" },
   { to: "/admin/subscriptions", label: "Subscriptions", group: "Billing" },
-  { to: "/admin/patients", label: "Patients", group: "Users" },
+  { to: "/admin/earnings", label: "Earnings", group: "Billing" },
+  { to: "/admin/settings", label: "Settings", group: "Management" },
 ];
 
 function AdminLayout() {
@@ -34,7 +33,7 @@ function AdminLayout() {
     if (isLogin) return;
     const current = getSession();
     if (!current?.token || current.role !== "admin") {
-      void router.navigate({ to: "/" });
+      void router.navigate({ to: "/login" });
       return;
     }
     setSession(current);

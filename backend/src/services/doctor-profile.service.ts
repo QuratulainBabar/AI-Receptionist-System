@@ -1,17 +1,24 @@
+import fs from "node:fs";
+import path from "node:path";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
 import {
   CONSULTATION_TYPES,
-  defaultWeeklyHours,
+  defaultAvailabilityConfig,
   formatWeeklyHoursSummary,
-  parseWeeklyHours,
+  parseAvailabilityConfig,
+  toStoredAvailabilityConfig,
   splitListInput,
+  type AvailabilityConfig,
   type WeeklyHourSlot,
 } from "../utils/doctor-profile.js";
 import { clinicTimeZone } from "../utils/clinic-time.js";
+import { normalizePhone } from "../utils/phone.js";
 
 const UNSPECIFIED_SPECIALTY_ID = "unspecified";
+const PHOTO_UPLOAD_ROOT = path.resolve(process.cwd(), "uploads", "doctor-photos");
+const FEE_CURRENCIES = ["USD", "PKR", "EUR", "GBP", "AED", "INR", "CAD", "AUD"] as const;
 
 export type DoctorProfileDto = {
   id: string;
@@ -19,6 +26,9 @@ export type DoctorProfileDto = {
   fullName: string;
   email: string;
   reference: string;
+  isActive: boolean;
+  phone: string;
+  photoUrl: string;
   specialtyId: string;
   specialty: string;
   subSpecialty: string;
@@ -29,20 +39,26 @@ export type DoctorProfileDto = {
   areasOfExpertise: string[];
   clinic: string;
   fee: string;
+  feeCurrency: string;
   consultationType: string;
+  consultationServices: string[];
   languages: string[];
   location: string;
   weeklyHours: WeeklyHourSlot[];
   weeklyHoursSummary: string;
+  availabilityConfig: AvailabilityConfig;
   timezone: string;
   rating: number;
   reviews: number;
   isVerified: boolean;
   verifiedAt: string | null;
   verificationNote: string;
+  updatedAt: string;
 };
 
 export type UpdateDoctorProfileInput = {
+  fullName?: string;
+  phone?: string;
   specialtyId?: string;
   /** Free-text specialty for one-to-one clinics (creates/finds Specialty by name). */
   specialty?: string;
@@ -54,11 +70,28 @@ export type UpdateDoctorProfileInput = {
   areasOfExpertise?: string[] | string;
   clinic?: string;
   fee?: string;
+  feeCurrency?: string;
   consultationType?: string;
+  consultationServices?: string[] | string;
   languages?: string[] | string;
   location?: string;
   weeklyHours?: WeeklyHourSlot[] | unknown;
+  availabilityConfig?: AvailabilityConfig | unknown;
 };
+
+export function getDoctorPhotoUploadRoot() {
+  fs.mkdirSync(PHOTO_UPLOAD_ROOT, { recursive: true });
+  return PHOTO_UPLOAD_ROOT;
+}
+
+function publicPhotoUrl(stored: string) {
+  const value = stored.trim();
+  if (!value) return "";
+  if (value.startsWith("http://") || value.startsWith("https://") || value.startsWith("/")) {
+    return value;
+  }
+  return `/uploads/doctor-photos/${value.replace(/^\/+/, "")}`;
+}
 
 async function resolveSpecialtyId(input: { specialtyId?: string; specialty?: string }) {
   const specialtyId = input.specialtyId?.trim();
@@ -111,7 +144,11 @@ function toDto(profile: {
   areasOfExpertise: string[];
   clinic: string;
   fee: string;
+  feeCurrency?: string;
   consultationType: string;
+  consultationServices?: string[];
+  phone?: string;
+  photoUrl?: string;
   languages: string[];
   location: string;
   timezone?: string;
@@ -121,16 +158,21 @@ function toDto(profile: {
   isVerified: boolean;
   verifiedAt: Date | null;
   verificationNote: string;
+  updatedAt?: Date;
   user: { fullName: string; email: string; reference: string; isActive: boolean };
   specialty: { name: string };
 }): DoctorProfileDto {
-  const weeklyHours = parseWeeklyHours(profile.weeklyHours);
+  const availabilityConfig = parseAvailabilityConfig(profile.weeklyHours);
+  const weeklyHours = availabilityConfig.days;
   return {
     id: profile.id,
     userId: profile.userId,
     fullName: profile.user.fullName,
     email: profile.user.email,
     reference: profile.user.reference,
+    isActive: profile.user.isActive,
+    phone: profile.phone || "",
+    photoUrl: publicPhotoUrl(profile.photoUrl || ""),
     specialtyId: profile.specialtyId,
     specialty:
       profile.specialtyId === UNSPECIFIED_SPECIALTY_ID || !profile.specialty.name.trim()
@@ -144,17 +186,21 @@ function toDto(profile: {
     areasOfExpertise: profile.areasOfExpertise,
     clinic: profile.clinic,
     fee: profile.fee,
+    feeCurrency: (profile.feeCurrency || "USD").toUpperCase(),
     consultationType: profile.consultationType,
+    consultationServices: profile.consultationServices || [],
     languages: profile.languages,
     location: profile.location,
     weeklyHours,
     weeklyHoursSummary: formatWeeklyHoursSummary(weeklyHours),
+    availabilityConfig,
     timezone: clinicTimeZone(),
     rating: profile.rating,
     reviews: profile.reviews,
     isVerified: profile.isVerified,
     verifiedAt: profile.verifiedAt?.toISOString() ?? null,
     verificationNote: profile.verificationNote || "",
+    updatedAt: (profile.updatedAt ?? new Date()).toISOString(),
   };
 }
 
@@ -206,15 +252,19 @@ export async function ensureDoctorProfileForUser(userId: string) {
       experienceYears: 0,
       clinic: "",
       fee: "",
+      feeCurrency: "USD",
       about: "",
       qualifications: [],
       certifications: [],
       areasOfExpertise: [],
+      consultationServices: [],
       languages: [],
       location: "",
+      phone: "",
+      photoUrl: "",
       subSpecialty: "",
       timezone: clinicTimeZone(),
-      weeklyHours: defaultWeeklyHours() as unknown as Prisma.InputJsonValue,
+      weeklyHours: defaultAvailabilityConfig() as unknown as Prisma.InputJsonValue,
     },
     include: { user: true, specialty: true },
   });
@@ -274,8 +324,71 @@ export async function updateDoctorProfileForDoctor(
     throw new AppError(400, "Consultation type must be In clinic, Video call, or Both");
   }
 
-  const weeklyHours =
-    input.weeklyHours === undefined ? undefined : parseWeeklyHours(input.weeklyHours);
+  let feeCurrency: string | undefined;
+  if (input.feeCurrency !== undefined) {
+    const code = String(input.feeCurrency).trim().toUpperCase();
+    if (!FEE_CURRENCIES.includes(code as (typeof FEE_CURRENCIES)[number])) {
+      throw new AppError(400, `Fee currency must be one of: ${FEE_CURRENCIES.join(", ")}`);
+    }
+    feeCurrency = code;
+  }
+
+  const fullName =
+    input.fullName !== undefined ? String(input.fullName).trim().replace(/\s+/g, " ") : undefined;
+  if (fullName !== undefined && fullName.length < 2) {
+    throw new AppError(400, "Full name must be at least 2 characters");
+  }
+
+  let phone: string | undefined;
+  if (input.phone !== undefined) {
+    const raw = String(input.phone).trim();
+    phone = raw ? normalizePhone(raw) : "";
+    if (raw && phone.replace(/\D/g, "").length < 10) {
+      throw new AppError(400, "Enter a valid phone number (at least 10 digits)");
+    }
+  }
+
+  const availabilityPayload =
+    input.availabilityConfig !== undefined
+      ? input.availabilityConfig
+      : input.weeklyHours !== undefined
+        ? input.weeklyHours
+        : undefined;
+  const availabilityConfig =
+    availabilityPayload === undefined
+      ? undefined
+      : toStoredAvailabilityConfig(availabilityPayload);
+
+  if (availabilityConfig) {
+    for (const day of availabilityConfig.days) {
+      if (!day.enabled) continue;
+      for (const session of day.sessions) {
+        if (session.startTime >= session.endTime) {
+          throw new AppError(400, `${day.day}: session end must be after start.`);
+        }
+      }
+      for (let i = 0; i < day.sessions.length; i += 1) {
+        for (let j = i + 1; j < day.sessions.length; j += 1) {
+          const a = day.sessions[i]!;
+          const b = day.sessions[j]!;
+          const toMin = (t: string) => {
+            const [h, m] = t.split(":").map(Number);
+            return (h || 0) * 60 + (m || 0);
+          };
+          if (toMin(a.startTime) < toMin(b.endTime) && toMin(b.startTime) < toMin(a.endTime)) {
+            throw new AppError(400, `${day.day}: sessions cannot overlap.`);
+          }
+        }
+      }
+    }
+  }
+
+  if (fullName !== undefined) {
+    await prisma.user.update({
+      where: { id: doctorUserId },
+      data: { fullName },
+    });
+  }
 
   const data: Prisma.DoctorProfileUpdateInput = {
     ...(specialtyId
@@ -299,12 +412,17 @@ export async function updateDoctorProfileForDoctor(
       : {}),
     ...(input.clinic !== undefined ? { clinic: String(input.clinic).trim() } : {}),
     ...(input.fee !== undefined ? { fee: String(input.fee).trim() } : {}),
+    ...(feeCurrency !== undefined ? { feeCurrency } : {}),
     ...(consultationType ? { consultationType } : {}),
+    ...(input.consultationServices !== undefined
+      ? { consultationServices: splitListInput(input.consultationServices) }
+      : {}),
+    ...(phone !== undefined ? { phone } : {}),
     ...(input.languages !== undefined ? { languages: splitListInput(input.languages) } : {}),
     ...(input.location !== undefined ? { location: String(input.location).trim() } : {}),
     timezone: clinicTimeZone(),
-    ...(weeklyHours !== undefined
-      ? { weeklyHours: weeklyHours as unknown as Prisma.InputJsonValue }
+    ...(availabilityConfig !== undefined
+      ? { weeklyHours: availabilityConfig as unknown as Prisma.InputJsonValue }
       : {}),
   };
 
@@ -320,6 +438,45 @@ export async function updateDoctorProfileForDoctor(
   return toDto(updated);
 }
 
+function absolutePhotoPath(stored: string) {
+  const value = stored.trim().replace(/^\/uploads\/doctor-photos\//, "");
+  if (!value || value.includes("..") || path.isAbsolute(value)) return null;
+  return path.join(getDoctorPhotoUploadRoot(), value);
+}
+
+export async function updateDoctorPhotoForDoctor(
+  doctorUserId: string,
+  file: { filename: string; path: string },
+): Promise<DoctorProfileDto> {
+  const profile = await requireDoctorProfile(doctorUserId);
+  const previous = absolutePhotoPath(profile.photoUrl || "");
+  const updated = await prisma.doctorProfile.update({
+    where: { userId: doctorUserId },
+    data: { photoUrl: file.filename },
+    include: { user: true, specialty: true },
+  });
+  if (previous && previous !== file.path) {
+    fs.unlink(previous, () => undefined);
+  }
+  return toDto(updated);
+}
+
+export async function removeDoctorPhotoForDoctor(doctorUserId: string): Promise<DoctorProfileDto> {
+  const profile = await requireDoctorProfile(doctorUserId);
+  const previous = absolutePhotoPath(profile.photoUrl || "");
+  const updated = await prisma.doctorProfile.update({
+    where: { userId: doctorUserId },
+    data: { photoUrl: "" },
+    include: { user: true, specialty: true },
+  });
+  if (previous) fs.unlink(previous, () => undefined);
+  return toDto(updated);
+}
+
+function joinList(items?: string[]) {
+  return (items || []).map((item) => item.trim()).filter(Boolean).join(", ");
+}
+
 /** Format one doctor for Synthflow directory / inbound context. */
 export function formatDoctorDirectoryLine(input: {
   fullName: string;
@@ -328,25 +485,37 @@ export function formatDoctorDirectoryLine(input: {
   experienceYears?: number;
   clinic: string;
   fee: string;
+  feeCurrency?: string;
   weeklyHoursSummary?: string;
   nextSlots?: string;
-  /** @deprecated unused — kept for call-site compatibility */
   subSpecialty?: string;
   qualifications?: string[];
   certifications?: string[];
   about?: string;
   areasOfExpertise?: string[];
   consultationType?: string;
+  consultationServices?: string[];
   languages?: string[];
   location?: string;
 }) {
+  const feeLabel =
+    input.fee && input.fee !== "none"
+      ? `${input.fee}${input.feeCurrency ? ` ${input.feeCurrency}` : ""}`.trim()
+      : "none";
   return [
     `Doctor: ${input.fullName}`,
     `doctor_id: ${input.doctorId}`,
     `specialty: ${input.specialty}`,
     `experience_years: ${input.experienceYears ?? 0}`,
     `hospital: ${input.clinic}`,
-    `consultation_fee: ${input.fee}`,
+    `location: ${input.location || "none"}`,
+    `consultation_fee: ${feeLabel}`,
+    `consultation_type: ${input.consultationType || "none"}`,
+    `languages: ${joinList(input.languages) || "none"}`,
+    `qualifications: ${joinList(input.qualifications) || "none"}`,
+    `certifications: ${joinList(input.certifications) || "none"}`,
+    `expertise: ${joinList(input.areasOfExpertise) || "none"}`,
+    `services: ${joinList(input.consultationServices) || "none"}`,
     `available_days_timings: ${input.weeklyHoursSummary || "see next_slots"}`,
     `next_slots: ${input.nextSlots || "none"}`,
   ].join(" | ");
@@ -359,11 +528,14 @@ export function formatDoctorSpokenBlurb(input: {
   experienceYears?: number;
   clinic?: string;
   fee?: string;
-  /** @deprecated unused — kept for call-site compatibility */
+  feeCurrency?: string;
   qualifications?: string[];
   certifications?: string[];
   about?: string;
   languages?: string[];
+  consultationType?: string;
+  location?: string;
+  areasOfExpertise?: string[];
 }) {
   const lead = [
     `${input.fullName} is a ${input.specialty}`,
@@ -371,10 +543,19 @@ export function formatDoctorSpokenBlurb(input: {
   ]
     .filter(Boolean)
     .join(" ");
+  const fee =
+    input.fee?.trim() && input.fee.trim().toLowerCase() !== "none"
+      ? `${input.fee.trim()}${input.feeCurrency ? ` ${input.feeCurrency}` : ""}`.trim()
+      : "";
   const parts = [
     lead,
     input.clinic?.trim() ? `Hospital: ${input.clinic.trim()}` : "",
-    input.fee?.trim() ? `Fee ${input.fee.trim()}` : "",
+    input.location?.trim() ? `Location: ${input.location.trim()}` : "",
+    fee ? `Fee ${fee}` : "",
+    input.consultationType?.trim() ? `Consultations: ${input.consultationType.trim()}` : "",
+    joinList(input.languages) ? `Languages: ${joinList(input.languages)}` : "",
+    joinList(input.qualifications) ? `Qualifications: ${joinList(input.qualifications)}` : "",
+    joinList(input.areasOfExpertise) ? `Expertise: ${joinList(input.areasOfExpertise)}` : "",
   ].filter(Boolean);
   return `- ${parts.join(". ")}.`;
 }

@@ -15,7 +15,7 @@ export const Route = createFileRoute("/patient")({
     if (typeof window === "undefined") return;
     const session = getSession();
     if (!session?.token || session.role !== "patient") {
-      throw redirect({ to: "/" });
+      throw redirect({ to: "/login" });
     }
   },
   component: PatientLayout,
@@ -61,7 +61,7 @@ export const Route = createFileRoute("/patient")({
     if (typeof window === "undefined") return;
     const session = getSession();
     if (!session?.token || session.role !== "patient") {
-      throw redirect({ to: "/" });
+      throw redirect({ to: "/login" });
     }
   },
   component: PatientLayout,

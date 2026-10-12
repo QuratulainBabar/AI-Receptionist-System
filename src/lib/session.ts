@@ -33,7 +33,7 @@ export function homeForRole(role: AuthRole) {
 }
 
 export function loginPathForRole(_role: AuthRole) {
-  return "/";
+  return "/login";
 }
 
 export function sessionFromUser(user: ApiUser, token: string): Session {
@@ -58,6 +58,16 @@ export function saveAuth(user: ApiUser, token: string) {
 
 export function getSession(): Session | null {
   return readJson<Session>(SESSION_KEY);
+}
+
+/** Patch display fields on the current session (e.g. after My Profile rename). */
+export function patchSession(patch: Partial<Pick<Session, "name" | "email" | "initials" | "isActive">>) {
+  if (typeof window === "undefined") return;
+  const current = getSession();
+  if (!current) return;
+  const next = { ...current, ...patch };
+  if (patch.name) next.initials = initials(patch.name);
+  window.localStorage.setItem(SESSION_KEY, JSON.stringify(next));
 }
 
 export function getToken(): string | null {

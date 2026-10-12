@@ -104,9 +104,15 @@ export function clinicDoctorProfileBlock(doctor: NonNullable<ClinicDoctorRow>) {
   return {
     doctorName: doctor.user.fullName,
     doctorId: doctor.userId,
-    specialty: doctor.specialty.name,
+    specialty:
+      doctor.specialtyId === "unspecified" || !doctor.specialty.name.trim()
+        ? ""
+        : doctor.specialty.name,
     hospital: doctor.clinic || "none",
     fee: doctor.fee || "none",
+    feeCurrency: doctor.feeCurrency || "USD",
+    consultationType: doctor.consultationType || "In clinic",
+    consultationServices: doctor.consultationServices || [],
     experienceYears: doctor.experienceYears,
     bio: doctor.about?.trim() || "none",
     weeklyHoursSummary: weeklyHoursSummary || "none",

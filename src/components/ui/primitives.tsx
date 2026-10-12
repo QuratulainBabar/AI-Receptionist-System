@@ -273,7 +273,7 @@ export function PageHeader({
           <SectionLabel className="text-[11px] text-blue-600/80">{eyebrow}</SectionLabel>
         ) : null}
         <h1
-          className="mt-1.5 font-[--font-display] font-bold tracking-tight text-foreground text-balance"
+          className="mt-1.5 font-sans font-bold tracking-tight text-foreground text-balance"
           style={{ fontSize: "clamp(1.5rem, 2.5vw, 2rem)" }}
         >
           {title}
@@ -422,7 +422,7 @@ export function StatCard({
             {label}
           </p>
           <p
-            className="mt-2.5 font-[--font-display] font-bold tracking-tight text-foreground leading-none"
+            className="mt-2.5 font-sans font-bold tracking-tight text-foreground leading-none"
             style={{ fontSize: "clamp(1.6rem, 3vw, 2.1rem)" }}
           >
             {value}

@@ -14,26 +14,24 @@ import {
   doctorAvailabilityApi,
   doctorProfileApi,
   formatApiError,
+  type ApiAvailabilityConfig,
+  type ApiDateOverride,
   type ApiDoctorSlot,
+  type ApiWeeklyHourSession,
   type ApiWeeklyHourSlot,
 } from "@/lib/api";
 import {
   CalendarDays,
-  Clock as ClockIcon,
-  CalendarClock,
-  List,
-  Settings as SettingsIcon,
+  CalendarRange,
   ChevronLeft,
   ChevronRight,
-  Timer,
-  Hourglass,
-  CalendarRange,
-  SlidersHorizontal,
-  Search,
-  Download,
-  MoreHorizontal,
+  Clock,
+  Copy,
+  Plus,
   Pencil,
   Trash2,
+  Ban,
+  Coffee,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -43,23 +41,15 @@ export const Route = createFileRoute("/doctor/availability")({
       { title: "Availability — Doctor portal" },
       {
         name: "description",
-        content: "Set weekly hours and manage open appointment slots patients and the phone AI can book.",
+        content:
+          "Set weekly hours, date overrides, and bookable slots for patients and the phone AI receptionist.",
       },
     ],
   }),
   component: DoctorAvailabilityPage,
 });
 
-const TABS = [
-  { id: "schedule", label: "Weekly Schedule", icon: <CalendarDays className="size-[17px]" strokeWidth={2} /> },
-  { id: "slots", label: "Open Slots", icon: <ClockIcon className="size-[17px]" strokeWidth={2} /> },
-  { id: "appointments", label: "Appointment List", icon: <List className="size-[17px]" strokeWidth={2} /> },
-  { id: "settings", label: "Settings", icon: <SettingsIcon className="size-[17px]" strokeWidth={2} /> },
-] as const;
-
-type TabId = (typeof TABS)[number]["id"];
-
-const DEFAULT_WEEKLY_HOURS: ApiWeeklyHourSlot[] = [
+const WEEKDAYS = [
   "Monday",
   "Tuesday",
   "Wednesday",
@@ -67,18 +57,112 @@ const DEFAULT_WEEKLY_HOURS: ApiWeeklyHourSlot[] = [
   "Friday",
   "Saturday",
   "Sunday",
-].map((day) => ({
-  day,
-  enabled: day !== "Saturday" && day !== "Sunday",
-  startTime: "09:00",
-  endTime: "17:00",
-}));
+] as const;
 
-const DOWS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const DAY_ORDER = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const SLOT_DURATIONS = [15, 30, 45, 60] as const;
+type SlotDuration = (typeof SLOT_DURATIONS)[number];
 
-function slotInputValue(slot: ApiDoctorSlot) {
-  return slot.startsAtLocal || "";
+const TABS = [
+  { id: "schedule", label: "Weekly Schedule", icon: CalendarDays },
+  { id: "calendar", label: "Calendar", icon: CalendarRange },
+  { id: "dates", label: "Specific Dates & Breaks", icon: Coffee },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
+function defaultDay(day: string, enabled = true): ApiWeeklyHourSlot {
+  return {
+    day,
+    enabled,
+    startTime: "09:00",
+    endTime: "17:00",
+    sessions: [{ startTime: "09:00", endTime: "17:00" }],
+  };
+}
+
+function defaultConfig(): ApiAvailabilityConfig {
+  return {
+    version: 2,
+    slotDurationMinutes: 30,
+    scheduleFrom: null,
+    scheduleTo: null,
+    days: WEEKDAYS.map((day) => defaultDay(day, day !== "Saturday" && day !== "Sunday")),
+    dateOverrides: [],
+  };
+}
+
+function normalizeConfig(raw?: ApiAvailabilityConfig | null, weeklyHours?: ApiWeeklyHourSlot[]): ApiAvailabilityConfig {
+  const base = defaultConfig();
+  if (raw && Array.isArray(raw.days) && raw.days.length) {
+    const byDay = new Map(raw.days.map((d) => [d.day, d]));
+    return {
+      version: 2,
+      slotDurationMinutes: (SLOT_DURATIONS.includes(raw.slotDurationMinutes as SlotDuration)
+        ? raw.slotDurationMinutes
+        : 30) as SlotDuration,
+      scheduleFrom: raw.scheduleFrom ?? null,
+      scheduleTo: raw.scheduleTo ?? null,
+      days: WEEKDAYS.map((day) => {
+        const row = byDay.get(day) || defaultDay(day, day !== "Saturday" && day !== "Sunday");
+        const sessions =
+          row.sessions && row.sessions.length
+            ? row.sessions
+            : [{ startTime: row.startTime || "09:00", endTime: row.endTime || "17:00" }];
+        return {
+          day,
+          enabled: Boolean(row.enabled),
+          startTime: sessions[0]?.startTime || "09:00",
+          endTime: sessions[0]?.endTime || "17:00",
+          sessions,
+        };
+      }),
+      dateOverrides: Array.isArray(raw.dateOverrides) ? raw.dateOverrides : [],
+    };
+  }
+  if (weeklyHours?.length) {
+    const byDay = new Map(weeklyHours.map((d) => [d.day, d]));
+    return {
+      ...base,
+      days: WEEKDAYS.map((day) => {
+        const row = byDay.get(day) || defaultDay(day, day !== "Saturday" && day !== "Sunday");
+        const sessions =
+          row.sessions && row.sessions.length
+            ? row.sessions
+            : [{ startTime: row.startTime || "09:00", endTime: row.endTime || "17:00" }];
+        return {
+          day,
+          enabled: Boolean(row.enabled),
+          startTime: sessions[0]?.startTime || "09:00",
+          endTime: sessions[0]?.endTime || "17:00",
+          sessions,
+        };
+      }),
+    };
+  }
+  return base;
+}
+
+function toMinutes(t: string) {
+  const [h, m] = t.split(":").map(Number);
+  return (h || 0) * 60 + (m || 0);
+}
+
+function sessionsOverlap(a: ApiWeeklyHourSession, b: ApiWeeklyHourSession) {
+  return toMinutes(a.startTime) < toMinutes(b.endTime) && toMinutes(b.startTime) < toMinutes(a.endTime);
+}
+
+function validateSessions(sessions: ApiWeeklyHourSession[]) {
+  for (const s of sessions) {
+    if (s.startTime >= s.endTime) return "Each session end time must be after its start.";
+  }
+  for (let i = 0; i < sessions.length; i += 1) {
+    for (let j = i + 1; j < sessions.length; j += 1) {
+      if (sessionsOverlap(sessions[i]!, sessions[j]!)) {
+        return "Sessions on the same day cannot overlap.";
+      }
+    }
+  }
+  return null;
 }
 
 function timeToLabel(t: string) {
@@ -88,26 +172,56 @@ function timeToLabel(t: string) {
     const m = parseInt(mStr, 10);
     const ampm = h >= 12 ? "PM" : "AM";
     const h12 = h % 12 === 0 ? 12 : h % 12;
-    const mm = m === 0 ? "00" : String(m).padStart(2, "0");
-    return `${h12}:${mm} ${ampm}`;
+    return `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
   } catch {
     return t;
   }
 }
 
-function hoursBetween(start24: string, end24: string) {
-  try {
-    const [sh, sm] = start24.split(":").map(Number) as [number, number];
-    const [eh, em] = end24.split(":").map(Number) as [number, number];
-    const diffMin = eh * 60 + em - (sh * 60 + sm);
-    if (diffMin <= 0) return "0h";
-    const hrs = Math.floor(diffMin / 60);
-    const mins = diffMin % 60;
-    if (mins === 0) return `${hrs}h`;
-    return `${hrs}h ${mins}m`;
-  } catch {
-    return "8h";
+function startOfLocalDay(d: Date) {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function addDays(d: Date, n: number) {
+  const next = new Date(d);
+  next.setDate(next.getDate() + n);
+  return next;
+}
+
+function startOfWeekMonday(d: Date) {
+  const day = startOfLocalDay(d);
+  const dow = day.getDay();
+  const offset = dow === 0 ? -6 : 1 - dow;
+  return addDays(day, offset);
+}
+
+function localDateKey(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function slotDate(slot: ApiDoctorSlot) {
+  if (slot.startsAt) {
+    const parsed = new Date(slot.startsAt);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
   }
+  if (slot.startsAtLocal) {
+    const parsed = new Date(slot.startsAtLocal);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  const fallback = new Date(`${slot.date}T12:00:00`);
+  return Number.isNaN(fallback.getTime()) ? new Date() : fallback;
+}
+
+function toDatetimeLocalValue(d: Date) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day}T${h}:${min}`;
 }
 
 function ToggleSwitch({
@@ -127,20 +241,13 @@ function ToggleSwitch({
         "relative inline-flex h-6 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/30",
         checked ? "shadow shadow-blue-500/30" : "bg-[#CBD5E1]",
       )}
-      style={
-        checked
-          ? { background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)" }
-          : undefined
-      }
+      style={checked ? { background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%)" } : undefined}
     >
       <span
         className={cn(
-          "pointer-events-none inline-block size-[18px] transform rounded-full bg-white ring-0 shadow transition duration-200 ease-in-out mt-0",
+          "pointer-events-none inline-block size-[18px] transform rounded-full bg-white shadow transition duration-200 ease-in-out",
           checked ? "translate-x-[18px]" : "translate-x-0",
         )}
-        style={{
-          boxShadow: checked ? "0 1px 6px -2px rgba(37, 99, 235, 0.5)" : "0 1px 2px rgba(15,23,42,0.15)",
-        }}
       />
     </button>
   );
@@ -149,44 +256,49 @@ function ToggleSwitch({
 function DoctorAvailabilityPage() {
   const [activeTab, setActiveTab] = useState<TabId>("schedule");
   const [slots, setSlots] = useState<ApiDoctorSlot[]>([]);
-  const [weeklyHours, setWeeklyHours] = useState<ApiWeeklyHourSlot[]>(DEFAULT_WEEKLY_HOURS);
+  const [config, setConfig] = useState<ApiAvailabilityConfig>(defaultConfig);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [savingHours, setSavingHours] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [clinicTimeZoneLabel, setClinicTimeZoneLabel] = useState("the clinic US time zone");
-  const [newStartsAt, setNewStartsAt] = useState("");
+
+  const [weekCursor, setWeekCursor] = useState(() => startOfWeekMonday(new Date()));
+  const [selectedDate, setSelectedDate] = useState(() => startOfLocalDay(new Date()));
+
+  const [rangeDate, setRangeDate] = useState(() => localDateKey(new Date()));
+  const [rangeStart, setRangeStart] = useState("09:00");
+  const [rangeEnd, setRangeEnd] = useState("12:00");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editStartsAt, setEditStartsAt] = useState("");
 
-  const [monthCursor, setMonthCursor] = useState(() => {
-    const d = new Date();
-    return new Date(d.getFullYear(), d.getMonth(), 1);
-  });
+  const [copyFromDay, setCopyFromDay] = useState<string | null>(null);
+  const [copyTargets, setCopyTargets] = useState<string[]>([]);
 
-  const [slotDuration, setSlotDuration] = useState("15 minutes");
-  const [bufferTime, setBufferTime] = useState("10 minutes");
-  const [maxAdvance, setMaxAdvance] = useState("30 days");
-  const [slotSearch, setSlotSearch] = useState("");
+  const [overrideDate, setOverrideDate] = useState(() => localDateKey(new Date()));
+  const [overrideType, setOverrideType] = useState<"unavailable" | "custom">("unavailable");
+  const [overrideSessions, setOverrideSessions] = useState<ApiWeeklyHourSession[]>([
+    { startTime: "09:00", endTime: "12:00" },
+  ]);
+  const [overrideBreaks, setOverrideBreaks] = useState<ApiWeeklyHourSession[]>([
+    { startTime: "12:00", endTime: "13:00" },
+  ]);
 
   async function refreshSlots() {
-    const result = await doctorAvailabilityApi.list();
+    const result = await doctorAvailabilityApi.list({ includeBooked: true });
     setSlots(result.slots);
     if (result.clinicTimeZoneLabel) setClinicTimeZoneLabel(result.clinicTimeZoneLabel);
   }
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([doctorAvailabilityApi.list(), doctorProfileApi.get()])
+    void Promise.all([doctorAvailabilityApi.list({ includeBooked: true }), doctorProfileApi.get()])
       .then(([slotsResult, profileResult]) => {
         if (cancelled) return;
         setSlots(slotsResult.slots);
         if (slotsResult.clinicTimeZoneLabel) setClinicTimeZoneLabel(slotsResult.clinicTimeZoneLabel);
-        const hours = profileResult.profile.weeklyHours;
-        setWeeklyHours(
-          Array.isArray(hours) && hours.length > 0 ? hours : DEFAULT_WEEKLY_HOURS,
-        );
+        setConfig(normalizeConfig(profileResult.profile.availabilityConfig, profileResult.profile.weeklyHours));
       })
       .catch((err) => {
         if (!cancelled) setError(formatApiError(err, "Unable to load availability."));
@@ -199,131 +311,220 @@ function DoctorAvailabilityPage() {
     };
   }, []);
 
-  const grouped = useMemo(() => {
+  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekCursor, i)), [weekCursor]);
+
+  const slotsByDate = useMemo(() => {
     const map = new Map<string, ApiDoctorSlot[]>();
     for (const slot of slots) {
-      const key = slot.date;
+      const key = localDateKey(slotDate(slot));
       const list = map.get(key) || [];
       list.push(slot);
       map.set(key, list);
     }
-    return [...map.entries()];
+    for (const list of map.values()) {
+      list.sort((a, b) => slotDate(a).getTime() - slotDate(b).getTime());
+    }
+    return map;
   }, [slots]);
 
-  const filteredSlots = useMemo(() => {
-    if (!slotSearch.trim()) return slots;
-    const q = slotSearch.toLowerCase();
-    return slots.filter((s) =>
-      `${s.date} ${s.time} ${s.isBooked ? "booked" : "available"} ${s.patientName ?? ""}`
-        .toLowerCase()
-        .includes(q),
-    );
-  }, [slots, slotSearch]);
-
-  const slotsTableData = useMemo(() => {
-    return filteredSlots
-      .slice()
-      .sort((a, b) => {
-        const da = new Date(a.startsAt || a.date + " " + a.time).getTime();
-        const db = new Date(b.startsAt || b.date + " " + b.time).getTime();
-        return da - db;
-      })
-      .map((slot) => {
-        const d = new Date(slot.startsAt || slot.date + "T00:00:00");
-        const dateStr = d.toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "short",
-          day: "numeric",
-        });
-        const dow = d.toLocaleDateString("en-US", { weekday: "long" });
-        const start = slot.time;
-        const startD = new Date(slot.startsAt || slot.date + " " + start);
-        const endD = new Date(startD.getTime() + 15 * 60000);
-        const end = endD.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          hour12: true,
-        });
+  function updateDay(day: string, patch: Partial<ApiWeeklyHourSlot>) {
+    setConfig((current) => ({
+      ...current,
+      days: current.days.map((row) => {
+        if (row.day !== day) return row;
+        const next = { ...row, ...patch };
+        const sessions = next.sessions?.length
+          ? next.sessions
+          : [{ startTime: next.startTime, endTime: next.endTime }];
         return {
-          slot,
-          date: dateStr,
-          day: dow,
-          time: `${start} – ${end}`,
-          duration: slotDuration,
+          ...next,
+          sessions,
+          startTime: sessions[0]?.startTime || next.startTime,
+          endTime: sessions[0]?.endTime || next.endTime,
         };
-      });
-  }, [filteredSlots, slotDuration]);
-
-  function updateWeeklyHour(day: string, patch: Partial<ApiWeeklyHourSlot>) {
-    setWeeklyHours((current) =>
-      current.map((slot) => (slot.day === day ? { ...slot, ...patch } : slot)),
-    );
+      }),
+    }));
     setSuccess("");
   }
 
-  async function saveWeeklyHours() {
-    setSavingHours(true);
-    setError("");
+  function updateSession(day: string, index: number, patch: Partial<ApiWeeklyHourSession>) {
+    setConfig((current) => ({
+      ...current,
+      days: current.days.map((row) => {
+        if (row.day !== day) return row;
+        const sessions = (row.sessions || []).map((s, i) => (i === index ? { ...s, ...patch } : s));
+        return {
+          ...row,
+          sessions,
+          startTime: sessions[0]?.startTime || row.startTime,
+          endTime: sessions[0]?.endTime || row.endTime,
+        };
+      }),
+    }));
     setSuccess("");
-    try {
-      const result = await doctorProfileApi.update({ weeklyHours });
-      const hours = result.profile.weeklyHours;
-      setWeeklyHours(Array.isArray(hours) && hours.length > 0 ? hours : DEFAULT_WEEKLY_HOURS);
-      setSuccess("Weekly hours saved. Bookable slots were generated for the phone agent.");
-    } catch (err) {
-      setError(formatApiError(err, "Unable to save weekly hours."));
-    } finally {
-      setSavingHours(false);
+  }
+
+  function addSession(day: string) {
+    setConfig((current) => ({
+      ...current,
+      days: current.days.map((row) => {
+        if (row.day !== day) return row;
+        const sessions = [...(row.sessions || []), { startTime: "14:00", endTime: "17:00" }];
+        return { ...row, enabled: true, sessions };
+      }),
+    }));
+  }
+
+  function removeSession(day: string, index: number) {
+    setConfig((current) => ({
+      ...current,
+      days: current.days.map((row) => {
+        if (row.day !== day) return row;
+        const sessions = (row.sessions || []).filter((_, i) => i !== index);
+        const nextSessions = sessions.length ? sessions : [{ startTime: "09:00", endTime: "17:00" }];
+        return {
+          ...row,
+          sessions: nextSessions,
+          startTime: nextSessions[0]!.startTime,
+          endTime: nextSessions[0]!.endTime,
+          enabled: sessions.length > 0 ? row.enabled : false,
+        };
+      }),
+    }));
+  }
+
+  function applyCopyToDays() {
+    if (!copyFromDay || !copyTargets.length) return;
+    const source = config.days.find((d) => d.day === copyFromDay);
+    if (!source) return;
+    setConfig((current) => ({
+      ...current,
+      days: current.days.map((row) => {
+        if (!copyTargets.includes(row.day)) return row;
+        const sessions = (source.sessions || []).map((s) => ({ ...s }));
+        return {
+          ...row,
+          enabled: source.enabled,
+          startTime: sessions[0]?.startTime || source.startTime,
+          endTime: sessions[0]?.endTime || source.endTime,
+          sessions,
+        };
+      }),
+    }));
+    setCopyFromDay(null);
+    setCopyTargets([]);
+    setSuccess(`Copied ${copyFromDay} schedule to ${copyTargets.length} day${copyTargets.length === 1 ? "" : "s"}.`);
+  }
+
+  function validateConfigLocal(): string | null {
+    for (const day of config.days) {
+      if (!day.enabled) continue;
+      const msg = validateSessions(day.sessions || []);
+      if (msg) return `${day.day}: ${msg}`;
     }
+    if (config.scheduleFrom && config.scheduleTo && config.scheduleFrom > config.scheduleTo) {
+      return "Schedule end date must be on or after the start date.";
+    }
+    return null;
   }
 
-  async function createSlot() {
-    if (!newStartsAt) {
-      setError("Choose a date and time for the new slot.");
+  async function saveConfig(andGenerate = false) {
+    const validation = validateConfigLocal();
+    if (validation) {
+      setError(validation);
       return;
     }
-    setBusyId("create");
+    setSaving(true);
     setError("");
     setSuccess("");
     try {
-      await doctorAvailabilityApi.create(newStartsAt);
-      setNewStartsAt("");
-      await refreshSlots();
-      setSuccess("Slot created.");
+      const payload: ApiAvailabilityConfig = {
+        version: 2,
+        slotDurationMinutes: config.slotDurationMinutes,
+        scheduleFrom: config.scheduleFrom || null,
+        scheduleTo: config.scheduleTo || null,
+        days: config.days.map((day) => {
+          const sessions = day.enabled
+            ? day.sessions && day.sessions.length
+              ? day.sessions
+              : [{ startTime: day.startTime, endTime: day.endTime }]
+            : day.sessions?.length
+              ? day.sessions
+              : [{ startTime: "09:00", endTime: "17:00" }];
+          return {
+            day: day.day,
+            enabled: day.enabled,
+            startTime: sessions[0]?.startTime || "09:00",
+            endTime: sessions[0]?.endTime || "17:00",
+            sessions,
+          };
+        }),
+        dateOverrides: config.dateOverrides || [],
+      };
+      const result = await doctorProfileApi.update({ availabilityConfig: payload });
+      setConfig(normalizeConfig(result.profile.availabilityConfig, result.profile.weeklyHours));
+      if (andGenerate) {
+        const gen = await doctorAvailabilityApi.generate(2, true);
+        await refreshSlots();
+        setSuccess(
+          gen.message ||
+            `Schedule saved. Created ${gen.created} open slot${gen.created === 1 ? "" : "s"} for the phone agent.`,
+        );
+      } else {
+        await refreshSlots();
+        setSuccess(result.message || "Availability schedule saved.");
+      }
     } catch (err) {
-      setError(formatApiError(err, "Unable to create slot."));
+      setError(formatApiError(err, "Unable to save availability."));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function createRangeSlots() {
+    if (!rangeDate || !rangeStart || !rangeEnd) {
+      setError("Choose a date and start/end time.");
+      return;
+    }
+    if (rangeStart >= rangeEnd) {
+      setError("End time must be after start time.");
+      return;
+    }
+    setBusyId("range");
+    setError("");
+    setSuccess("");
+    try {
+      const result = await doctorAvailabilityApi.createRange({
+        date: rangeDate,
+        startTime: rangeStart,
+        endTime: rangeEnd,
+        durationMinutes: config.slotDurationMinutes as SlotDuration,
+      });
+      await refreshSlots();
+      setSuccess(result.message || `Created ${result.created} slot${result.created === 1 ? "" : "s"}.`);
+      setActiveTab("calendar");
+      setSelectedDate(new Date(`${rangeDate}T12:00:00`));
+      setWeekCursor(startOfWeekMonday(new Date(`${rangeDate}T12:00:00`)));
+    } catch (err) {
+      setError(formatApiError(err, "Unable to create slots for that range."));
     } finally {
       setBusyId(null);
     }
   }
 
-  async function generateSlots() {
-    setBusyId("generate");
+  async function saveEditSlot() {
+    if (!editingId || !editStartsAt) return;
+    setBusyId(editingId);
     setError("");
     setSuccess("");
     try {
-      const result = await doctorAvailabilityApi.generate(2);
+      const result = await doctorAvailabilityApi.update(editingId, editStartsAt);
       await refreshSlots();
-      setSuccess(result.message || `Created ${result.created} slots.`);
-    } catch (err) {
-      setError(formatApiError(err, "Unable to generate slots from weekly hours."));
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  async function saveEdit(slotId: string) {
-    if (!editStartsAt) return;
-    setBusyId(slotId);
-    setError("");
-    setSuccess("");
-    try {
-      await doctorAvailabilityApi.update(slotId, editStartsAt);
       setEditingId(null);
-      await refreshSlots();
-      setSuccess("Slot updated.");
+      setEditStartsAt("");
+      setSuccess(result.message || "Slot updated.");
     } catch (err) {
-      setError(formatApiError(err, "Unable to update slot."));
+      setError(formatApiError(err, "Unable to update slot. Booked appointments cannot be moved here."));
     } finally {
       setBusyId(null);
     }
@@ -334,84 +535,87 @@ function DoctorAvailabilityPage() {
     setError("");
     setSuccess("");
     try {
-      await doctorAvailabilityApi.remove(slotId);
+      const result = await doctorAvailabilityApi.remove(slotId);
       await refreshSlots();
-      setSuccess("Slot removed.");
+      setSuccess(result.message || "Slot removed.");
     } catch (err) {
-      setError(formatApiError(err, "Unable to remove slot."));
+      setError(formatApiError(err, "Unable to remove slot. Booked appointments are protected."));
     } finally {
       setBusyId(null);
     }
   }
 
-  const monthLabel = monthCursor.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-
-  const monthDays = useMemo(() => {
-    const year = monthCursor.getFullYear();
-    const month = monthCursor.getMonth();
-    const first = new Date(year, month, 1);
-    const last = new Date(year, month + 1, 0);
-    const startDow = first.getDay();
-    const totalDays = last.getDate();
-    const out: Array<{ date: Date | null; key: string }> = [];
-    for (let i = 0; i < startDow; i++) out.push({ date: null, key: `pre-${i}` });
-    for (let d = 1; d <= totalDays; d++) {
-      out.push({ date: new Date(year, month, d), key: `day-${d}` });
+  function upsertOverride() {
+    if (!overrideDate) {
+      setError("Choose a date for the override.");
+      return;
     }
-    while (out.length % 7 !== 0) out.push({ date: null, key: `post-${out.length}` });
-    return out;
-  }, [monthCursor]);
-
-  const todayDate = new Date();
-  const todayKey = `${todayDate.getFullYear()}-${todayDate.getMonth()}-${todayDate.getDate()}`;
-
-  const weeklyHoursByDay = useMemo(() => {
-    const map = new Map<string, ApiWeeklyHourSlot>();
-    for (const h of weeklyHours) map.set(h.day, h);
-    return map;
-  }, [weeklyHours]);
-
-  function hasBookingOn(d: Date) {
-    const label = d.toLocaleDateString(undefined, {
-      weekday: "short",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
-    const label2 = d.toLocaleDateString(undefined, {
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    });
-    for (const [dateKey] of grouped) {
-      if (dateKey.includes(label.slice(0, 3)) || label2.includes(dateKey) || dateKey === label || dateKey === label2) {
-        return true;
+    if (overrideType === "custom") {
+      const msg = validateSessions(overrideSessions);
+      if (msg) {
+        setError(msg);
+        return;
+      }
+      for (const br of overrideBreaks) {
+        if (br.startTime >= br.endTime) {
+          setError("Each break end time must be after its start.");
+          return;
+        }
       }
     }
-    const iso = d.toISOString().slice(0, 10);
-    const slotsOnDate = slots.filter((s) => s.startsAt?.slice(0, 10) === iso);
-    return slotsOnDate.length > 0;
+    setConfig((current) => {
+      const rest = (current.dateOverrides || []).filter((o) => o.date !== overrideDate);
+      const next: ApiDateOverride = {
+        date: overrideDate,
+        type: overrideType,
+        sessions: overrideType === "custom" ? overrideSessions.map((s) => ({ ...s })) : [],
+        breaks: overrideType === "custom" ? overrideBreaks.map((s) => ({ ...s })) : [],
+      };
+      return {
+        ...current,
+        dateOverrides: [...rest, next].sort((a, b) => a.date.localeCompare(b.date)),
+      };
+    });
+    setSuccess(
+      overrideType === "unavailable"
+        ? `${overrideDate} marked unavailable. Save schedule to apply.`
+        : `Custom hours saved for ${overrideDate}. Save schedule to apply.`,
+    );
+    setError("");
   }
 
-  return (
-    <div className="w-full max-w-full overflow-x-hidden">
-      <div className="mb-5">
-        <PageHeader
-          title="Availability slots"
-          description="Set your usual weekly hours, then generate or add the open slots patients and the phone receptionist can book."
-          actions={
-            <Button onClick={() => void generateSlots()} disabled={busyId === "generate" || loading}>
-              <CalendarClock className="size-[17px]" strokeWidth={2} />
-              {busyId === "generate" ? "Generating…" : "Generate 2 weeks"}
-            </Button>
-          }
-        />
-      </div>
+  function removeOverride(date: string) {
+    setConfig((current) => ({
+      ...current,
+      dateOverrides: (current.dateOverrides || []).filter((o) => o.date !== date),
+    }));
+    setSuccess(`Removed override for ${date}. Save schedule to apply.`);
+  }
 
-      <Panel className="mb-6 p-1.5 w-full max-w-full overflow-hidden">
-        <div className="flex flex-wrap gap-1.5 w-full">
+  const selectedKey = localDateKey(selectedDate);
+  const selectedSlots = slotsByDate.get(selectedKey) || [];
+  const selectedOverride = (config.dateOverrides || []).find((o) => o.date === selectedKey);
+
+  return (
+    <div className="w-full max-w-full">
+      <PageHeader
+        title="Availability slots"
+        description="Set your usual weekly hours, then generate or add the open slots patients and the phone receptionist can book."
+      />
+
+      {error ? (
+        <div className="mb-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
+      ) : null}
+      {success ? (
+        <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {success}
+        </div>
+      ) : null}
+
+      <Panel className="mb-5 border border-sky-100 bg-sky-50/60 p-1.5">
+        <div className="flex flex-wrap gap-1">
           {TABS.map((tab) => {
+            const Icon = tab.icon;
             const active = activeTab === tab.id;
             return (
               <button
@@ -419,689 +623,704 @@ function DoctorAvailabilityPage() {
                 type="button"
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  "inline-flex items-center gap-2.5 rounded-xl px-4 py-2.5 text-[13px] font-semibold transition-all",
+                  "inline-flex items-center gap-2 rounded-lg px-4 py-2.5 text-[13px] font-semibold transition-all",
                   active
-                    ? "text-primary"
-                    : "text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                    ? "bg-white text-blue-700 shadow-sm ring-1 ring-sky-200"
+                    : "text-slate-600 hover:bg-white/70 hover:text-slate-900",
                 )}
-                style={
-                  active
-                    ? {
-                        background:
-                          "linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(37, 99, 235, 0.06) 100%)",
-                        boxShadow: "inset 0 0 0 1px rgba(59, 130, 246, 0.2)",
-                      }
-                    : undefined
-                }
               >
-                <span className={active ? "text-primary" : "text-muted-foreground/80"}>
-                  {tab.icon}
-                </span>
-                <span>{tab.label}</span>
-                {active ? (
-                  <span
-                    aria-hidden
-                    className="mx-auto h-0.5 w-6 rounded-full"
-                    style={{
-                      background: "linear-gradient(90deg, #2563EB, #1D4ED8)",
-                      position: "relative",
-                      marginBottom: "-2px",
-                    }}
-                  />
-                ) : null}
+                <Icon className="size-4" strokeWidth={2} />
+                {tab.label}
               </button>
             );
           })}
         </div>
       </Panel>
 
-      {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
-      {success ? <p className="mb-4 text-sm text-primary">{success}</p> : null}
+      <p className="mb-5 text-[12.5px] text-slate-500">
+        Times use {clinicTimeZoneLabel}. Booked appointments are never overwritten when you regenerate open slots.
+      </p>
 
-      {activeTab === "schedule" ? (
-        <>
-          <div className="grid gap-4 lg:grid-cols-2 mb-6 w-full max-w-full overflow-hidden">
-            <Panel className="p-4 w-full max-w-full overflow-hidden">
-              <div className="flex items-center justify-between mb-6">
-                <h2
-                  className="font-[--font-display] font-bold tracking-tight text-foreground"
-                  style={{ fontSize: "1.35rem" }}
-                >
-                  {monthLabel}
-                </h2>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMonthCursor(
-                        new Date(monthCursor.getFullYear(), monthCursor.getMonth() - 1, 1),
-                      )
-                    }
-                    className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-all hover:bg-secondary hover:text-foreground"
-                  >
-                    <ChevronLeft className="size-4.5" strokeWidth={2} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setMonthCursor(
-                        new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1),
-                      )
-                    }
-                    className="grid size-9 place-items-center rounded-xl border border-border bg-card text-muted-foreground transition-all hover:bg-secondary hover:text-foreground"
-                  >
-                    <ChevronRight className="size-4.5" strokeWidth={2} />
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-7 gap-1 mb-2 w-full max-w-full overflow-hidden">
-                {DOWS.map((d) => (
-                  <div
-                    key={d}
-                    className="py-1.5 text-center text-[11px] font-bold uppercase tracking-wider text-muted-foreground truncate"
-                  >
-                    {d}
-                  </div>
+      {loading ? (
+        <EmptyNote>Loading availability…</EmptyNote>
+      ) : activeTab === "schedule" ? (
+        <div className="space-y-5">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Panel className="border border-sky-100 bg-sky-50/40 p-4">
+              <SectionLabel>Slot duration</SectionLabel>
+              <select
+                className="mt-2 h-11 w-full rounded-xl border border-sky-200/80 bg-white px-3 text-sm font-medium text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/25"
+                value={config.slotDurationMinutes}
+                onChange={(e) =>
+                  setConfig((c) => ({
+                    ...c,
+                    slotDurationMinutes: Number(e.target.value) as SlotDuration,
+                  }))
+                }
+              >
+                {SLOT_DURATIONS.map((d) => (
+                  <option key={d} value={d}>
+                    {d} minutes
+                  </option>
                 ))}
-              </div>
-
-              <div className="grid grid-cols-7 gap-1 w-full max-w-full overflow-hidden">
-                {monthDays.map((cell) => {
-                  if (!cell.date)
-                    return <div key={cell.key} className="h-10 rounded-lg w-full" />;
-                  const d = cell.date;
-                  const dKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
-                  const isToday = dKey === todayKey;
-                  const dowName = DAY_ORDER[d.getDay()!];
-                  const avail = weeklyHoursByDay.get(dowName!)?.enabled ?? false;
-                  const hasSlots = hasBookingOn(d);
-                  return (
-                    <div
-                      key={cell.key}
-                      className={cn(
-                        "relative h-10 w-full grid place-items-center rounded-lg text-[12.5px] font-medium transition-all overflow-hidden",
-                        isToday
-                          ? "text-white shadow-md shadow-blue-500/30"
-                          : avail
-                            ? "text-foreground hover:bg-blue-50 cursor-pointer"
-                            : "text-muted-foreground/60",
-                      )}
-                      style={
-                        isToday
-                          ? { background: "linear-gradient(135deg, #2563EB 0%, #1D4ED8 50%, #1E40AF 100%)" }
-                          : undefined
-                      }
-                    >
-                      {d.getDate()}
-                      {avail || hasSlots ? (
-                        <span
-                          className="absolute bottom-1 size-1 rounded-full"
-                          style={{
-                            background: isToday
-                              ? "rgba(255,255,255,0.9)"
-                              : hasSlots
-                                ? "#2563EB"
-                                : "#93C5FD",
-                          }}
-                        />
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-
-              <div className="mt-5 flex flex-wrap items-center gap-5 text-[12px]">
-                <div className="inline-flex items-center gap-2">
-                  <span className="size-2 rounded-full bg-[#2563EB]" />
-                  <span className="text-muted-foreground">Available</span>
-                </div>
-                <div className="inline-flex items-center gap-2">
-                  <span className="size-2 rounded-full bg-[#93C5FD]" />
-                  <span className="text-muted-foreground">Partially filled</span>
-                </div>
-                <div className="inline-flex items-center gap-2">
-                  <span className="size-2 rounded-full bg-[#94A3B8]" />
-                  <span className="text-muted-foreground">Fully booked</span>
-                </div>
-              </div>
+              </select>
             </Panel>
-
-            <Panel className="p-4 w-full max-w-full overflow-hidden">
-              <div className="flex items-center justify-between mb-5">
-                <h2
-                  className="font-[--font-display] font-bold tracking-tight text-foreground"
-                  style={{ fontSize: "1.25rem" }}
-                >
-                  Weekly Schedule
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => void saveWeeklyHours()}
-                  disabled={savingHours || loading}
-                  className="inline-flex items-center gap-2 rounded-xl px-3.5 py-2 text-[13px] font-semibold text-primary transition-all hover:bg-blue-50 disabled:opacity-50"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, rgba(59, 130, 246, 0.12), rgba(37, 99, 235, 0.05))",
-                    border: "1px solid rgba(59, 130, 246, 0.2)",
-                  }}
-                >
-                  <Pencil className="size-4" strokeWidth={2} />
-                  {savingHours ? "Saving…" : "Edit Schedule"}
-                </button>
-              </div>
-
-              <div className="space-y-1.5">
-                {weeklyHours.map((slot, i) => {
-                  const active = slot.enabled;
-                  return (
-                    <div
-                      key={slot.day}
-                      className={cn(
-                        "flex flex-wrap items-center gap-x-2.5 gap-y-2 rounded-xl px-3 py-3 transition-all",
-                        active && i === 2
-                          ? "bg-blue-50/70 ring-1 ring-blue-200/70"
-                          : "hover:bg-muted/30",
-                      )}
-                    >
-                      <div
-                        className={cn(
-                          "w-[5.75rem] shrink-0 text-[13.5px] font-semibold",
-                          active ? "text-foreground" : "text-muted-foreground",
-                          i === 2 && active ? "text-primary" : undefined,
-                        )}
-                      >
-                        {slot.day}
-                      </div>
-                      <ToggleSwitch
-                        checked={slot.enabled}
-                        onChange={(v) => updateWeeklyHour(slot.day, { enabled: v })}
-                      />
-                      <div className="flex min-w-[20.5rem] flex-1 items-center gap-1.5">
-                        {active ? (
-                          <>
-                            <Input
-                              type="time"
-                              aria-label={`${slot.day} start time`}
-                              className="h-9 w-[9.75rem] shrink-0 px-2 text-[13px]"
-                              value={slot.startTime}
-                              onChange={(e) =>
-                                updateWeeklyHour(slot.day, { startTime: e.target.value })
-                              }
-                            />
-                            <span className="shrink-0 text-[12px] text-muted-foreground">–</span>
-                            <Input
-                              type="time"
-                              aria-label={`${slot.day} end time`}
-                              className="h-9 w-[9.75rem] shrink-0 px-2 text-[13px]"
-                              value={slot.endTime}
-                              onChange={(e) =>
-                                updateWeeklyHour(slot.day, { endTime: e.target.value })
-                              }
-                            />
-                          </>
-                        ) : (
-                          <span className="text-[13px] font-medium text-muted-foreground">–</span>
-                        )}
-                      </div>
-                      <div className="ml-auto flex items-center gap-1">
-                        <span
-                          className={cn(
-                            "w-8 text-right text-[12px] font-bold",
-                            active ? "text-muted-foreground" : "text-muted-foreground/60",
-                          )}
-                        >
-                          {active ? hoursBetween(slot.startTime, slot.endTime) : "0h"}
-                        </span>
-                        <button
-                          type="button"
-                          className="grid size-6 place-items-center rounded-lg text-muted-foreground/60 hover:bg-secondary hover:text-foreground"
-                        >
-                          <ChevronRight className="size-3.5" strokeWidth={2.25} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </Panel>
-          </div>
-
-          <div className="grid gap-3 mb-5 md:grid-cols-2 xl:grid-cols-4 w-full max-w-full overflow-hidden">
-            <SettingsCard
-              icon={<Timer className="size-5" strokeWidth={2} />}
-              label="Slot Duration"
-              value={slotDuration}
-              options={["10 minutes", "15 minutes", "20 minutes", "30 minutes", "45 minutes", "60 minutes"]}
-              onChange={setSlotDuration}
-            />
-            <SettingsCard
-              icon={<Hourglass className="size-5" strokeWidth={2} />}
-              label="Buffer Time"
-              value={bufferTime}
-              options={["0 minutes", "5 minutes", "10 minutes", "15 minutes", "20 minutes"]}
-              onChange={setBufferTime}
-            />
-            <SettingsCard
-              icon={<CalendarRange className="size-5" strokeWidth={2} />}
-              label="Max Booking Advance"
-              value={maxAdvance}
-              options={["7 days", "14 days", "30 days", "60 days", "90 days"]}
-              onChange={setMaxAdvance}
-            />
-            <Panel className="p-4 flex items-center justify-between group cursor-pointer transition-all w-full max-w-full overflow-hidden min-w-0">
-              <div className="flex items-center gap-3 min-w-0 flex-1">
-                <div
-                  className="grid size-10 shrink-0 place-items-center rounded-2xl text-primary"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(37, 99, 235, 0.06))",
-                  }}
-                >
-                  <SlidersHorizontal className="size-5" strokeWidth={2} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-[12px] font-semibold text-muted-foreground mb-1">
-                    Advanced Filters
-                  </p>
-                  <p className="truncate text-[13px] font-semibold text-foreground">
-                    Configure rules
-                  </p>
-                </div>
-              </div>
-              <ChevronRight
-                className="size-4.5 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5"
-                strokeWidth={2}
+            <Panel className="border border-sky-100 bg-sky-50/40 p-4">
+              <SectionLabel>Schedule starts</SectionLabel>
+              <Input
+                type="date"
+                className="mt-2 bg-white"
+                value={config.scheduleFrom || ""}
+                onChange={(e) => setConfig((c) => ({ ...c, scheduleFrom: e.target.value || null }))}
               />
             </Panel>
+            <Panel className="border border-sky-100 bg-sky-50/40 p-4">
+              <SectionLabel>Schedule ends</SectionLabel>
+              <Input
+                type="date"
+                className="mt-2 bg-white"
+                value={config.scheduleTo || ""}
+                onChange={(e) => setConfig((c) => ({ ...c, scheduleTo: e.target.value || null }))}
+              />
+            </Panel>
+            <Panel className="flex flex-col justify-end gap-2 border border-sky-100 bg-sky-50/40 p-4">
+              <Button variant="outline" onClick={() => void saveConfig(false)} disabled={saving}>
+                {saving ? "Saving…" : "Save schedule"}
+              </Button>
+              <Button onClick={() => void saveConfig(true)} disabled={saving}>
+                {saving ? "Saving…" : "Save & generate slots"}
+              </Button>
+            </Panel>
           </div>
 
-          <Panel className="p-4 w-full max-w-full overflow-hidden">
-            <div className="flex flex-wrap items-center justify-between gap-4 mb-5">
-              <div className="flex items-center gap-3.5">
-                <div
-                  className="grid size-11 shrink-0 place-items-center rounded-2xl text-primary"
-                  style={{
-                    background:
-                      "linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(37, 99, 235, 0.06))",
+          <Panel className="overflow-hidden border border-sky-100 p-0">
+            <div className="border-b border-sky-100 bg-gradient-to-r from-sky-50 to-blue-50/50 px-5 py-4">
+              <h3 className="text-[15px] font-semibold text-slate-900">Weekly hours</h3>
+              <p className="mt-0.5 text-[12.5px] text-slate-500">
+                Enable days and add multiple sessions (e.g. morning and afternoon). Copy a day to others when ready.
+              </p>
+            </div>
+            <div className="divide-y divide-sky-100/80">
+              {config.days.map((day) => {
+                const sessions = day.sessions?.length
+                  ? day.sessions
+                  : [{ startTime: day.startTime, endTime: day.endTime }];
+                return (
+                  <div
+                    key={day.day}
+                    className={cn(
+                      "px-5 py-4 transition-colors",
+                      day.enabled ? "bg-white" : "bg-slate-50/80",
+                    )}
+                  >
+                    <div className="flex flex-wrap items-center gap-3">
+                      <ToggleSwitch
+                        checked={day.enabled}
+                        onChange={(enabled) => updateDay(day.day, { enabled })}
+                      />
+                      <div className="min-w-[7.5rem] text-[14px] font-semibold text-slate-900">{day.day}</div>
+                      {!day.enabled ? (
+                        <Badge className="bg-slate-100 text-slate-500">Closed</Badge>
+                      ) : (
+                        <span className="text-[12px] text-slate-500">
+                          {sessions.length} session{sessions.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                      <div className="ml-auto flex flex-wrap gap-2">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={!day.enabled}
+                          onClick={() => {
+                            setCopyFromDay(day.day);
+                            setCopyTargets(WEEKDAYS.filter((d) => d !== day.day) as string[]);
+                          }}
+                        >
+                          <Copy className="size-3.5" />
+                          Copy
+                        </Button>
+                        <Button
+                          variant="soft"
+                          size="sm"
+                          disabled={!day.enabled}
+                          onClick={() => addSession(day.day)}
+                        >
+                          <Plus className="size-3.5" />
+                          Add session
+                        </Button>
+                      </div>
+                    </div>
+
+                    {day.enabled ? (
+                      <div className="mt-3 space-y-2 pl-0 sm:pl-14">
+                        {sessions.map((session, index) => (
+                          <div
+                            key={`${day.day}-${index}`}
+                            className="flex flex-wrap items-end gap-2 rounded-xl border border-sky-100 bg-sky-50/50 p-3"
+                          >
+                            <Field label="Start">
+                              <Input
+                                type="time"
+                                value={session.startTime}
+                                onChange={(e) => updateSession(day.day, index, { startTime: e.target.value })}
+                              />
+                            </Field>
+                            <Field label="End">
+                              <Input
+                                type="time"
+                                value={session.endTime}
+                                onChange={(e) => updateSession(day.day, index, { endTime: e.target.value })}
+                              />
+                            </Field>
+                            <div className="pb-1 text-[12px] font-medium text-slate-500">
+                              {timeToLabel(session.startTime)} – {timeToLabel(session.endTime)}
+                            </div>
+                            {sessions.length > 1 ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="ml-auto text-red-600"
+                                onClick={() => removeSession(day.day, index)}
+                              >
+                                <Trash2 className="size-3.5" />
+                                Remove
+                              </Button>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+            </div>
+          </Panel>
+
+          {copyFromDay ? (
+            <Panel className="border border-blue-200 bg-blue-50/40 p-5">
+              <SectionLabel>Copy “{copyFromDay}” to</SectionLabel>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {WEEKDAYS.filter((d) => d !== copyFromDay).map((day) => {
+                  const checked = copyTargets.includes(day);
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      onClick={() =>
+                        setCopyTargets((current) =>
+                          checked ? current.filter((d) => d !== day) : [...current, day],
+                        )
+                      }
+                      className={cn(
+                        "rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors",
+                        checked
+                          ? "bg-blue-600 text-white"
+                          : "bg-white text-slate-600 ring-1 ring-slate-200 hover:bg-sky-50",
+                      )}
+                    >
+                      {day.slice(0, 3)}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <Button size="sm" onClick={applyCopyToDays} disabled={!copyTargets.length}>
+                  Apply copy
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setCopyFromDay(null);
+                    setCopyTargets([]);
                   }}
                 >
-                  <CalendarDays className="size-5" strokeWidth={2} />
-                </div>
-                <div>
-                  <h2
-                    className="font-[--font-display] font-bold tracking-tight text-foreground"
-                    style={{ fontSize: "1.2rem" }}
-                  >
-                    Available Appointment Slots
-                  </h2>
-                </div>
+                  Cancel
+                </Button>
               </div>
-              <div className="flex flex-wrap items-center gap-2.5">
-                <div className="relative w-full max-w-full">
-                  <Search
-                    className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 size-4 text-muted-foreground"
-                    strokeWidth={2}
-                  />
-                  <input
-                    type="text"
-                    value={slotSearch}
-                    onChange={(e) => setSlotSearch(e.target.value)}
-                    placeholder="Search time slots..."
-                    className="h-10 w-56 max-w-full rounded-xl border-2 border-transparent bg-input-fill pl-10 pr-4 text-[13px] text-foreground placeholder:text-muted-foreground/60 transition-all focus-visible:border-blue-500/30 focus-visible:bg-card focus-visible:ring-4 focus-visible:ring-blue-500/10 focus-visible:outline-none"
-                    style={{ boxShadow: "inset 0 1px 2px 0 rgba(15, 23, 42, 0.03)" }}
-                  />
-                </div>
-                <Button variant="outline">
-                  <Download className="size-4" strokeWidth={2} />
-                  Export
+            </Panel>
+          ) : null}
+
+          <Panel className="border border-sky-100 bg-sky-50/30 p-5">
+            <div className="mb-3 flex items-center gap-2">
+              <Clock className="size-4 text-blue-600" />
+              <h3 className="text-[14px] font-semibold text-slate-900">Add availability for a date</h3>
+            </div>
+            <p className="mb-4 text-[12.5px] text-slate-500">
+              Creates bookable slots between the start and end times using your slot duration. Existing booked
+              appointments are left untouched.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 lg:items-end">
+              <Field label="Date">
+                <Input type="date" value={rangeDate} onChange={(e) => setRangeDate(e.target.value)} />
+              </Field>
+              <Field label="Start">
+                <Input type="time" value={rangeStart} onChange={(e) => setRangeStart(e.target.value)} />
+              </Field>
+              <Field label="End">
+                <Input type="time" value={rangeEnd} onChange={(e) => setRangeEnd(e.target.value)} />
+              </Field>
+              <Field label="Duration">
+                <Input value={`${config.slotDurationMinutes} min`} disabled />
+              </Field>
+              <Button onClick={() => void createRangeSlots()} disabled={busyId === "range"}>
+                <Plus className="size-4" />
+                {busyId === "range" ? "Adding…" : "Add slots"}
+              </Button>
+            </div>
+          </Panel>
+        </div>
+      ) : activeTab === "calendar" ? (
+        <div className="space-y-5">
+          <Panel className="border border-sky-100 p-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-[15px] font-semibold text-slate-900">Week view</h3>
+                <p className="text-[12.5px] text-slate-500">
+                  Open slots in blue · Booked appointments in amber. Click a day to manage slots.
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWeekCursor((w) => addDays(w, -7))}
+                  aria-label="Previous week"
+                >
+                  <ChevronLeft className="size-4" />
+                </Button>
+                <Button
+                  variant="soft"
+                  size="sm"
+                  onClick={() => {
+                    const today = startOfLocalDay(new Date());
+                    setWeekCursor(startOfWeekMonday(today));
+                    setSelectedDate(today);
+                  }}
+                >
+                  Today
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setWeekCursor((w) => addDays(w, 7))}
+                  aria-label="Next week"
+                >
+                  <ChevronRight className="size-4" />
                 </Button>
               </div>
             </div>
 
-            {loading ? (
-              <EmptyNote>Loading slots…</EmptyNote>
-            ) : slotsTableData.length === 0 ? (
-              <EmptyNote>
-                No slots yet. Save weekly hours above, generate 2 weeks, or add a slot manually.
-              </EmptyNote>
-            ) : (
-              <div className="overflow-x-auto w-full max-w-full -mx-1">
-                <table className="w-full min-w-[720px] table-fixed">
-                  <thead>
-                    <tr
-                      className="border-b"
-                      style={{ borderColor: "#EEF2F7" }}
-                    >
-                      <th className="w-[44px] px-5 py-3.5">
-                        <input
-                          type="checkbox"
-                          className="size-4 rounded border-border accent-blue-600"
-                        />
-                      </th>
-                      <th className="px-3 py-3.5 text-left">
-                        <SectionLabel className="text-[10.5px]" style={{ letterSpacing: "0.1em" }}>
-                          Date
-                        </SectionLabel>
-                      </th>
-                      <th className="px-3 py-3.5 text-left">
-                        <SectionLabel className="text-[10.5px]" style={{ letterSpacing: "0.1em" }}>
-                          Day
-                        </SectionLabel>
-                      </th>
-                      <th className="px-3 py-3.5 text-left">
-                        <SectionLabel className="text-[10.5px]" style={{ letterSpacing: "0.1em" }}>
-                          Time
-                        </SectionLabel>
-                      </th>
-                      <th className="px-3 py-3.5 text-left">
-                        <SectionLabel className="text-[10.5px]" style={{ letterSpacing: "0.1em" }}>
-                          Duration
-                        </SectionLabel>
-                      </th>
-                      <th className="px-3 py-3.5 text-left">
-                        <SectionLabel className="text-[10.5px]" style={{ letterSpacing: "0.1em" }}>
-                          Status
-                        </SectionLabel>
-                      </th>
-                      <th className="px-5 py-3.5 text-right">
-                        <SectionLabel className="text-[10.5px]" style={{ letterSpacing: "0.1em" }}>
-                          Actions
-                        </SectionLabel>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {slotsTableData.slice(0, 50).map((row) => {
-                      const s = row.slot;
-                      return (
-                        <tr
-                          key={s.id}
-                          className="border-b transition-colors hover:bg-muted/30"
-                          style={{ borderColor: "#F1F5F9" }}
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-7">
+              {weekDays.map((day) => {
+                const key = localDateKey(day);
+                const daySlots = slotsByDate.get(key) || [];
+                const openCount = daySlots.filter((s) => !s.isBooked).length;
+                const bookedCount = daySlots.filter((s) => s.isBooked).length;
+                const isSelected = sameLocalDay(day, selectedDate);
+                const isToday = sameLocalDay(day, new Date());
+                const override = (config.dateOverrides || []).find((o) => o.date === key);
+                return (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDate(startOfLocalDay(day));
+                      setRangeDate(key);
+                    }}
+                    className={cn(
+                      "min-h-[140px] rounded-2xl border p-3 text-left transition-all",
+                      isSelected
+                        ? "border-blue-400 bg-blue-50 shadow-sm ring-2 ring-blue-200/60"
+                        : "border-sky-100 bg-white hover:border-sky-200 hover:bg-sky-50/40",
+                      override?.type === "unavailable" && "bg-slate-50",
+                    )}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                          {day.toLocaleDateString("en-US", { weekday: "short" })}
+                        </div>
+                        <div
+                          className={cn(
+                            "text-[18px] font-semibold",
+                            isToday ? "text-blue-700" : "text-slate-900",
+                          )}
                         >
-                          <td className="px-5 py-3.5 align-middle">
-                            <input
-                              type="checkbox"
-                              className="size-4 rounded border-border accent-blue-600"
-                            />
-                          </td>
-                          <td className="px-3 py-3.5 align-middle">
-                            <p className="text-[13px] font-semibold text-foreground">
-                              {row.date}
-                            </p>
-                          </td>
-                          <td className="px-3 py-3.5 align-middle">
-                            <p className="text-[13px] text-foreground">{row.day}</p>
-                          </td>
-                          <td className="px-3 py-3.5 align-middle">
-                            <p className="text-[13px] font-medium text-foreground">{row.time}</p>
-                          </td>
-                          <td className="px-3 py-3.5 align-middle">
-                            <p className="text-[13px] text-muted-foreground">{row.duration}</p>
-                          </td>
-                          <td className="px-3 py-3.5 align-middle">
-                            {s.isBooked ? (
-                              <Badge tone="info" dot>
-                                Booked
-                              </Badge>
-                            ) : (
-                              <Badge tone="success" dot>
-                                Available
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="px-5 py-3.5 align-middle">
-                            {s.isBooked ? null : editingId === s.id ? (
-                              <div className="flex items-center justify-end gap-2">
-                                <Input
-                                  type="datetime-local"
-                                  value={editStartsAt}
-                                  onChange={(e) => setEditStartsAt(e.target.value)}
-                                  className="h-9 w-56"
-                                />
-                                <Button
-                                  size="sm"
-                                  onClick={() => void saveEdit(s.id)}
-                                  disabled={busyId === s.id}
-                                >
-                                  Save
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => setEditingId(null)}
-                                >
-                                  Cancel
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center justify-end gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => {
-                                    setEditingId(s.id);
-                                    setEditStartsAt(slotInputValue(s));
-                                  }}
-                                >
-                                  <Pencil className="size-3.5" strokeWidth={2} />
-                                  Edit
-                                </Button>
-                                <button
-                                  type="button"
-                                  className="grid size-9 place-items-center rounded-lg border border-border bg-card text-muted-foreground transition-all hover:bg-secondary hover:text-foreground disabled:opacity-40"
-                                  onClick={() => void removeSlot(s.id)}
-                                  disabled={busyId === s.id}
-                                >
-                                  <MoreHorizontal className="size-4" strokeWidth={2} />
-                                </button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Panel>
-        </>
-      ) : activeTab === "slots" ? (
-        <>
-          <Panel className="mb-6 grid gap-3 p-5 sm:grid-cols-[1fr_auto] sm:items-end">
-            <Field label="Add open slot">
-              <Input
-                type="datetime-local"
-                value={newStartsAt}
-                onChange={(e) => setNewStartsAt(e.target.value)}
-              />
-            </Field>
-            <Button onClick={() => void createSlot()} disabled={busyId === "create"}>
-              {busyId === "create" ? "Adding…" : "Add slot"}
-            </Button>
+                          {day.getDate()}
+                        </div>
+                      </div>
+                      {override?.type === "unavailable" ? (
+                        <Badge className="bg-slate-200 text-slate-600">Off</Badge>
+                      ) : null}
+                    </div>
+                    <div className="space-y-1">
+                      {daySlots.slice(0, 4).map((slot) => (
+                        <div
+                          key={slot.id}
+                          className={cn(
+                            "truncate rounded-md px-1.5 py-0.5 text-[11px] font-medium",
+                            slot.isBooked
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-blue-100 text-blue-800",
+                          )}
+                        >
+                          {slot.time}
+                          {slot.isBooked ? " · booked" : ""}
+                        </div>
+                      ))}
+                      {daySlots.length > 4 ? (
+                        <div className="text-[11px] text-slate-400">+{daySlots.length - 4} more</div>
+                      ) : null}
+                      {!daySlots.length ? (
+                        <div className="text-[11px] text-slate-400">No slots</div>
+                      ) : null}
+                    </div>
+                    {(openCount > 0 || bookedCount > 0) && daySlots.length > 4 ? (
+                      <div className="mt-2 flex gap-2 text-[10px] text-slate-500">
+                        <span>{openCount} open</span>
+                        <span>{bookedCount} booked</span>
+                      </div>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
           </Panel>
 
-          {loading ? (
-            <EmptyNote>Loading slots…</EmptyNote>
-          ) : grouped.length === 0 ? (
-            <EmptyNote>
-              No slots yet. Save weekly hours above, generate 2 weeks, or add a slot manually.
-            </EmptyNote>
-          ) : (
-            <div className="space-y-5">
-              {grouped.map(([date, daySlots]) => (
-                <section key={date} className="space-y-2">
-                  <SectionLabel>{date}</SectionLabel>
-                  <div className="space-y-2">
-                    {daySlots.map((slot) => (
-                      <Panel key={slot.id} className="flex flex-wrap items-center gap-3 p-3.5">
-                        <div className="min-w-0 flex-1">
-                          {editingId === slot.id ? (
+          <Panel className="border border-sky-100 p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h3 className="text-[15px] font-semibold text-slate-900">
+                  {selectedDate.toLocaleDateString("en-US", {
+                    weekday: "long",
+                    month: "long",
+                    day: "numeric",
+                    year: "numeric",
+                  })}
+                </h3>
+                {selectedOverride ? (
+                  <p className="mt-1 text-[12.5px] text-slate-500">
+                    {selectedOverride.type === "unavailable"
+                      ? "Marked unavailable in weekly exceptions."
+                      : "Custom hours override for this date."}
+                  </p>
+                ) : null}
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setRangeDate(selectedKey);
+                  setActiveTab("schedule");
+                }}
+              >
+                <Plus className="size-3.5" />
+                Add slots for this day
+              </Button>
+            </div>
+
+            {!selectedSlots.length ? (
+              <EmptyNote>No slots on this day. Add a time range or generate from weekly hours.</EmptyNote>
+            ) : (
+              <div className="space-y-2">
+                {selectedSlots.map((slot) => (
+                  <div
+                    key={slot.id}
+                    className={cn(
+                      "flex flex-wrap items-center gap-3 rounded-xl border px-3.5 py-3",
+                      slot.isBooked
+                        ? "border-amber-200 bg-amber-50/60"
+                        : "border-sky-100 bg-sky-50/40",
+                    )}
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[14px] font-semibold text-slate-900">{slot.time}</span>
+                        <Badge
+                          className={
+                            slot.isBooked
+                              ? "bg-amber-100 text-amber-800"
+                              : "bg-emerald-100 text-emerald-800"
+                          }
+                        >
+                          {slot.isBooked ? "Booked" : "Available"}
+                        </Badge>
+                        {slot.patientName ? (
+                          <span className="text-[12.5px] text-slate-500">{slot.patientName}</span>
+                        ) : null}
+                      </div>
+                      {editingId === slot.id ? (
+                        <div className="mt-2 flex flex-wrap items-end gap-2">
+                          <Field label="New start">
                             <Input
                               type="datetime-local"
                               value={editStartsAt}
                               onChange={(e) => setEditStartsAt(e.target.value)}
-                              className="max-w-xs"
                             />
-                          ) : (
-                            <>
-                              <p className="text-sm font-medium">{slot.time}</p>
-                              <p className="font-mono text-[11px] text-muted-foreground">
-                                {slot.isBooked
-                                  ? `${slot.appointmentReference || "Booked"} · ${slot.patientName || "Patient"}`
-                                  : "Open for booking"}
-                              </p>
-                            </>
-                          )}
+                          </Field>
+                          <Button size="sm" onClick={() => void saveEditSlot()} disabled={busyId === slot.id}>
+                            Save
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setEditingId(null);
+                              setEditStartsAt("");
+                            }}
+                          >
+                            Cancel
+                          </Button>
                         </div>
-                        <Badge tone={slot.isBooked ? "warning" : "success"}>
-                          {slot.isBooked ? "Booked" : "Open"}
-                        </Badge>
-                        {slot.isBooked ? null : editingId === slot.id ? (
-                          <>
-                            <Button
-                              size="sm"
-                              onClick={() => void saveEdit(slot.id)}
-                              disabled={busyId === slot.id}
-                            >
-                              Save
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setEditingId(null)}
-                            >
-                              Cancel
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setEditingId(slot.id);
-                                setEditStartsAt(slotInputValue(slot));
-                              }}
-                            >
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="danger"
-                              disabled={busyId === slot.id}
-                              onClick={() => void removeSlot(slot.id)}
-                            >
-                              <Trash2 className="size-3.5" strokeWidth={2} />
-                              Remove
-                            </Button>
-                          </>
-                        )}
-                      </Panel>
-                    ))}
+                      ) : null}
+                    </div>
+                    {!slot.isBooked ? (
+                      <div className="flex gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={busyId === slot.id}
+                          onClick={() => {
+                            setEditingId(slot.id);
+                            setEditStartsAt(
+                              slot.startsAtLocal || toDatetimeLocalValue(slotDate(slot)),
+                            );
+                          }}
+                        >
+                          <Pencil className="size-3.5" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="text-red-600"
+                          disabled={busyId === slot.id}
+                          onClick={() => void removeSlot(slot.id)}
+                        >
+                          <Trash2 className="size-3.5" />
+                          Delete
+                        </Button>
+                      </div>
+                    ) : (
+                      <span className="text-[12px] text-amber-700">Protected booking</span>
+                    )}
                   </div>
-                </section>
-              ))}
-            </div>
-          )}
-        </>
-      ) : activeTab === "appointments" ? (
-        <Panel className="p-8">
-          <EmptyNote>Appointment list view coming soon.</EmptyNote>
-        </Panel>
-      ) : (
-        <Panel className="space-y-4 p-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <SettingsCard
-              icon={<Timer className="size-5" strokeWidth={2} />}
-              label="Slot Duration"
-              value={slotDuration}
-              options={["10 minutes", "15 minutes", "20 minutes", "30 minutes", "45 minutes", "60 minutes"]}
-              onChange={setSlotDuration}
-            />
-            <SettingsCard
-              icon={<Hourglass className="size-5" strokeWidth={2} />}
-              label="Buffer Time"
-              value={bufferTime}
-              options={["0 minutes", "5 minutes", "10 minutes", "15 minutes", "20 minutes"]}
-              onChange={setBufferTime}
-            />
-            <SettingsCard
-              icon={<CalendarRange className="size-5" strokeWidth={2} />}
-              label="Max Booking Advance"
-              value={maxAdvance}
-              options={["7 days", "14 days", "30 days", "60 days", "90 days"]}
-              onChange={setMaxAdvance}
-            />
-            <div className="rounded-2xl p-5 border border-border flex items-center justify-between">
-              <div>
-                <SectionLabel className="mb-1.5">Save Weekly Hours</SectionLabel>
-                <p className="text-[13px] text-muted-foreground">
-                  Save current weekly hours configuration.
-                </p>
+                ))}
               </div>
-              <Button onClick={() => void saveWeeklyHours()} disabled={savingHours || loading}>
-                {savingHours ? "Saving…" : "Save"}
+            )}
+          </Panel>
+        </div>
+      ) : (
+        <div className="space-y-5">
+          <Panel className="border border-sky-100 p-5">
+            <h3 className="text-[15px] font-semibold text-slate-900">Date exceptions</h3>
+            <p className="mt-1 text-[12.5px] text-slate-500">
+              Mark a day off, or set custom hours and breaks that override the weekly template when you generate
+              slots.
+            </p>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4 lg:items-end">
+              <Field label="Date">
+                <Input type="date" value={overrideDate} onChange={(e) => setOverrideDate(e.target.value)} />
+              </Field>
+              <Field label="Type">
+                <select
+                  className="h-11 w-full rounded-xl border border-border bg-card px-3 text-sm outline-none focus:ring-2 focus:ring-blue-500/25"
+                  value={overrideType}
+                  onChange={(e) => setOverrideType(e.target.value as "unavailable" | "custom")}
+                >
+                  <option value="unavailable">Unavailable (day off)</option>
+                  <option value="custom">Custom hours + breaks</option>
+                </select>
+              </Field>
+              <div className="lg:col-span-2">
+                <Button onClick={upsertOverride}>
+                  {overrideType === "unavailable" ? (
+                    <>
+                      <Ban className="size-4" />
+                      Mark unavailable
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="size-4" />
+                      Save date override
+                    </>
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            {overrideType === "custom" ? (
+              <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <div>
+                  <SectionLabel>Sessions</SectionLabel>
+                  <div className="mt-2 space-y-2">
+                    {overrideSessions.map((session, index) => (
+                      <div key={`os-${index}`} className="flex flex-wrap items-end gap-2 rounded-xl border border-sky-100 bg-sky-50/50 p-3">
+                        <Field label="Start">
+                          <Input
+                            type="time"
+                            value={session.startTime}
+                            onChange={(e) =>
+                              setOverrideSessions((rows) =>
+                                rows.map((s, i) => (i === index ? { ...s, startTime: e.target.value } : s)),
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="End">
+                          <Input
+                            type="time"
+                            value={session.endTime}
+                            onChange={(e) =>
+                              setOverrideSessions((rows) =>
+                                rows.map((s, i) => (i === index ? { ...s, endTime: e.target.value } : s)),
+                              )
+                            }
+                          />
+                        </Field>
+                        {overrideSessions.length > 1 ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setOverrideSessions((rows) => rows.filter((_, i) => i !== index))}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
+                    <Button
+                      variant="soft"
+                      size="sm"
+                      onClick={() =>
+                        setOverrideSessions((rows) => [...rows, { startTime: "14:00", endTime: "17:00" }])
+                      }
+                    >
+                      <Plus className="size-3.5" />
+                      Add session
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <SectionLabel>Breaks</SectionLabel>
+                  <div className="mt-2 space-y-2">
+                    {overrideBreaks.map((br, index) => (
+                      <div key={`ob-${index}`} className="flex flex-wrap items-end gap-2 rounded-xl border border-amber-100 bg-amber-50/40 p-3">
+                        <Field label="Start">
+                          <Input
+                            type="time"
+                            value={br.startTime}
+                            onChange={(e) =>
+                              setOverrideBreaks((rows) =>
+                                rows.map((s, i) => (i === index ? { ...s, startTime: e.target.value } : s)),
+                              )
+                            }
+                          />
+                        </Field>
+                        <Field label="End">
+                          <Input
+                            type="time"
+                            value={br.endTime}
+                            onChange={(e) =>
+                              setOverrideBreaks((rows) =>
+                                rows.map((s, i) => (i === index ? { ...s, endTime: e.target.value } : s)),
+                              )
+                            }
+                          />
+                        </Field>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setOverrideBreaks((rows) => rows.filter((_, i) => i !== index))}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </Button>
+                      </div>
+                    ))}
+                    <Button
+                      variant="soft"
+                      size="sm"
+                      onClick={() =>
+                        setOverrideBreaks((rows) => [...rows, { startTime: "12:00", endTime: "13:00" }])
+                      }
+                    >
+                      <Plus className="size-3.5" />
+                      Add break
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+          </Panel>
+
+          <Panel className="border border-sky-100 p-5">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-[15px] font-semibold text-slate-900">Saved overrides</h3>
+              <Button size="sm" onClick={() => void saveConfig(true)} disabled={saving}>
+                {saving ? "Saving…" : "Save & generate slots"}
               </Button>
             </div>
-          </div>
-        </Panel>
+            {!(config.dateOverrides || []).length ? (
+              <EmptyNote>No date overrides yet.</EmptyNote>
+            ) : (
+              <div className="space-y-2">
+                {(config.dateOverrides || []).map((row) => (
+                  <div
+                    key={row.date}
+                    className="flex flex-wrap items-center gap-3 rounded-xl border border-sky-100 bg-white px-4 py-3"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[14px] font-semibold text-slate-900">
+                        {new Date(`${row.date}T12:00:00`).toLocaleDateString("en-US", {
+                          weekday: "short",
+                          month: "short",
+                          day: "numeric",
+                          year: "numeric",
+                        })}
+                      </div>
+                      <div className="text-[12.5px] text-slate-500">
+                        {row.type === "unavailable"
+                          ? "Unavailable all day"
+                          : [
+                              ...(row.sessions || []).map(
+                                (s) => `${timeToLabel(s.startTime)}–${timeToLabel(s.endTime)}`,
+                              ),
+                              ...(row.breaks || []).map(
+                                (s) => `break ${timeToLabel(s.startTime)}–${timeToLabel(s.endTime)}`,
+                              ),
+                            ].join(" · ") || "Custom hours"}
+                      </div>
+                    </div>
+                    <Badge
+                      className={
+                        row.type === "unavailable"
+                          ? "bg-slate-100 text-slate-600"
+                          : "bg-blue-100 text-blue-800"
+                      }
+                    >
+                      {row.type === "unavailable" ? "Day off" : "Custom"}
+                    </Badge>
+                    <Button variant="ghost" size="sm" className="text-red-600" onClick={() => removeOverride(row.date)}>
+                      <Trash2 className="size-3.5" />
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Panel>
+        </div>
       )}
     </div>
   );
 }
 
-function SettingsCard({
-  icon,
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  options: string[];
-  onChange: (v: string) => void;
-}) {
+function sameLocalDay(a: Date, b: Date) {
   return (
-    <Panel className="p-4 transition-all w-full max-w-full overflow-hidden">
-      <div className="flex items-start justify-between gap-2.5">
-        <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div
-            className="grid size-10 shrink-0 place-items-center rounded-2xl text-primary"
-            style={{
-              background:
-                "linear-gradient(135deg, rgba(59, 130, 246, 0.14), rgba(37, 99, 235, 0.06))",
-            }}
-          >
-            {icon}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-[12px] font-semibold text-muted-foreground mb-1">{label}</p>
-            <div className="relative w-full">
-              <select
-                value={value}
-                onChange={(e) => onChange(e.target.value)}
-                className="h-9 w-full appearance-none rounded-xl border-2 border-transparent bg-input-fill pl-2.5 pr-8 text-[13px] font-semibold text-foreground transition-all focus-visible:border-blue-500/30 focus-visible:bg-card focus-visible:ring-4 focus-visible:ring-blue-500/10 focus-visible:outline-none truncate"
-                style={{ boxShadow: "inset 0 1px 2px 0 rgba(15, 23, 42, 0.03)" }}
-              >
-                {options.map((o) => (
-                  <option key={o} value={o}>
-                    {o}
-                  </option>
-                ))}
-              </select>
-              <ChevronRight
-                className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 -rotate-90 size-3.5 text-muted-foreground"
-                strokeWidth={2.5}
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-    </Panel>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
   );
 }

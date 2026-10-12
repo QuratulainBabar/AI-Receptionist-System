@@ -37,7 +37,7 @@ function DoctorNotifications() {
     void doctorNotificationsApi
       .list()
       .then((result) => {
-        if (!cancelled) setNotifications(result.notifications);
+        if (!cancelled) setNotifications(result.notifications.slice(0, 2));
       })
       .catch((err) => {
         if (!cancelled) setError(formatApiError(err, "Unable to load notifications."));

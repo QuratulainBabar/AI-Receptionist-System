@@ -19,6 +19,18 @@ export default defineConfig({
     },
   },
   vite: {
+    // Landing is imported as a source folder only — ignore its standalone Vite entry/config.
+    server: {
+      watch: {
+        ignored: [
+          "**/landing/index.html",
+          "**/landing/vite.config.ts",
+          "**/landing/tsconfig*.json",
+          "**/landing/package*.json",
+          "**/landing/node_modules/**",
+        ],
+      },
+    },
     environments: {
       client: {
         build: {
@@ -35,3 +47,4 @@ export default defineConfig({
     },
   },
 });
+

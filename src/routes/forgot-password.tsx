@@ -41,10 +41,12 @@ function ForgotPasswordPage() {
   return (
     <AuthLayout
       title="Forgot password"
-      description="Enter the email on your account and we'll send reset instructions."
       footer={
         <p>
-          <Link to="/" className="font-medium text-primary underline-offset-4 hover:underline">
+          <Link
+            to="/login"
+            className="font-bold text-blue-600 no-underline hover:text-blue-700 hover:no-underline focus:no-underline active:no-underline"
+          >
             Back to sign in
           </Link>
         </p>

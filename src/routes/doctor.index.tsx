@@ -25,7 +25,6 @@ import {
   PageHeader,
   Panel,
   SectionLabel,
-  StatCard,
   Badge,
   CardHeader,
   Avatar,
@@ -75,11 +74,11 @@ export const Route = createFileRoute("/doctor/")({
 });
 
 const quickActions = [
-  { to: "/doctor/schedule", label: "Full schedule" },
+  { to: "/doctor/appointments", label: "All appointments" },
   { to: "/doctor/patients", label: "Patient list" },
   { to: "/doctor/notifications", label: "Notifications" },
   { to: "/doctor/records", label: "History & reports" },
-  { to: "/doctor/subscription", label: "Subscription" },
+  { to: "/doctor/subscription", label: "Plans" },
 ] as const;
 
 function greetingForHour(hour: number) {
@@ -160,17 +159,6 @@ function DoctorDashboard() {
     return firstNameFromDoctor(name);
   }, [dashboard?.doctorName, session?.name]);
 
-  const description = useMemo(() => {
-    if (dashboard?.speciality && dashboard.clinic) {
-      return `${dashboard.speciality} · ${dashboard.clinic}`;
-    }
-    return (
-      dashboard?.speciality ||
-      dashboard?.clinic ||
-      "Here's what's happening with your practice today."
-    );
-  }, [dashboard?.clinic, dashboard?.speciality]);
-
   const scheduleDateLabel = scheduleDate.toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
@@ -187,9 +175,17 @@ function DoctorDashboard() {
   }
 
   const todayAppointmentsCount = dashboard?.todayVisitsCount ?? 0;
-  const totalPatients = 1248;
-  const upcomingConsultations = 18;
-  const pendingFollowUps = 42;
+  const totalPatients = dashboard?.patientsCount ?? 0;
+  const awaitingConfirmCount = dashboard?.awaitingConfirmCount ?? 0;
+  const unreadAlerts = dashboard?.unreadAlerts ?? 0;
+  const clinicLabel = dashboard?.clinic?.trim() || "Your clinic";
+  const specialtyLabel = dashboard?.speciality?.trim() || "";
+  const todayFullLabel = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  });
 
   const samplePatients = [
     {
@@ -241,46 +237,84 @@ function DoctorDashboard() {
 
   return (
     <>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-5">
-        <div className="min-w-0 max-w-3xl">
-          <p className="text-[13.5px] font-medium" style={{ color: "#64748B" }}>
-            {greeting},
-          </p>
-          <h1
-            className="font-jakarta font-extrabold tracking-tight text-foreground text-balance flex items-center gap-3 flex-wrap"
-            style={{
-              fontSize: "clamp(1.8rem, 3.2vw, 2.3rem)",
-              letterSpacing: "-0.03em",
-            }}
-          >
-            <span>Dr. {firstName}</span>
-            <span className="text-3xl">👋</span>
-          </h1>
-          <p
-            className="mt-2 text-[14.5px] leading-relaxed text-muted-foreground max-w-2xl"
-            style={{ color: "#5A6A85" }}
-          >
-            Here's what's happening with your practice today.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2.5">
+      <section
+        className="relative mb-4 overflow-hidden rounded-[22px] px-5 py-6 sm:px-7 sm:py-7"
+        style={{
+          background: "linear-gradient(115deg, #0B1E4B 0%, #123A8A 48%, #1D4ED8 100%)",
+          boxShadow: "0 18px 40px -24px rgba(29, 78, 216, 0.5)",
+        }}
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-0 opacity-40"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 88% 18%, rgba(147,197,253,0.35) 0%, transparent 42%), radial-gradient(circle at 8% 90%, rgba(99,102,241,0.25) 0%, transparent 45%)",
+          }}
+        />
+        <div className="relative flex flex-wrap items-start justify-between gap-5">
+          <div className="min-w-0 max-w-2xl">
+            <h1 className="font-jakarta text-[clamp(1.55rem,2.8vw,2.1rem)] font-extrabold tracking-tight text-white">
+              {greeting}, Dr. {firstName} 👋
+            </h1>
+            <p className="mt-2 text-[13px] leading-snug text-blue-100/85">
+              {specialtyLabel
+                ? `${specialtyLabel} · ${clinicLabel}`
+                : "Here's what's happening with your practice today."}
+            </p>
+            <p className="mt-3 inline-flex items-center gap-2 text-[12.5px] font-semibold text-blue-200/80">
+              <Calendar className="size-3.5" strokeWidth={2.2} />
+              {todayFullLabel}
+            </p>
+          </div>
           {access.ready ? (
-            <>
-              <Link to="/doctor/schedule">
-                <Button size="md" variant="outline" className="rounded-xl">
-                  <Calendar className="size-4.5" strokeWidth={2} />
-                  View Calendar
+            <div className="flex flex-wrap items-center gap-2.5">
+              <Link to="/doctor/appointments">
+                <Button
+                  size="md"
+                  className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+                >
+                  <Calendar className="size-4.5 text-white" strokeWidth={2} />
+                  Appointments
                 </Button>
               </Link>
               <Link to="/doctor/patients">
-                <Button size="md" className="rounded-xl">
-                  <Stethoscope className="size-4.5" strokeWidth={2} />
-                  Open schedule
+                <Button
+                  size="md"
+                  className="rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white [&_svg]:text-white"
+                >
+                  <Stethoscope className="size-4.5 text-white" strokeWidth={2} />
+                  Patients
                 </Button>
               </Link>
-            </>
+            </div>
           ) : null}
         </div>
+      </section>
+
+      <div
+        className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200/90 bg-white px-4 py-3.5 shadow-sm"
+        style={{ boxShadow: "0 1px 2px rgba(15,23,42,0.03), 0 8px 22px -16px rgba(15,23,42,0.12)" }}
+      >
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="h-10 w-1 shrink-0 rounded-full bg-emerald-500" aria-hidden />
+          <div className="min-w-0">
+            <p className="truncate font-jakarta text-[15px] font-bold text-slate-900">{clinicLabel}</p>
+            <p className="text-[12.5px] text-slate-500">
+              {access.ready ? "Accepting appointments" : "Finish setup to open booking"}
+            </p>
+          </div>
+        </div>
+        <span
+          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-bold ${
+            access.ready ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+          }`}
+        >
+          <span
+            className={`size-1.5 rounded-full ${access.ready ? "bg-emerald-500" : "bg-amber-500"}`}
+          />
+          {access.ready ? "Live" : "Setup"}
+        </span>
       </div>
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
@@ -375,35 +409,79 @@ function DoctorDashboard() {
         <EmptyNote>Loading your dashboard…</EmptyNote>
       ) : (
         <>
+          <div className="mb-3">
+            <h2 className="font-jakarta text-[15px] font-bold text-slate-900">Practice overview</h2>
+            <p className="text-[12.5px] text-slate-500">Key clinic metrics for today</p>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <StatCard
-              label="Today's Appointments"
-              value={String(todayAppointmentsCount)}
-              icon="appointments"
-              miniChart={[14, 18, 16, 22, 19, 21, 24]}
-              miniChartColor="#2563EB"
-            />
-            <StatCard
-              label="Total Patients"
-              value={String(totalPatients)}
-              icon="patients"
-              miniChart={[980, 1020, 1080, 1120, 1160, 1195, 1248]}
-              miniChartColor="#0D9488"
-            />
-            <StatCard
-              label="Upcoming Consultations"
-              value={String(upcomingConsultations)}
-              icon="consultations"
-              miniChart={[8, 10, 9, 13, 11, 14, 18]}
-              miniChartColor="#8B5CF6"
-            />
-            <StatCard
-              label="Pending Follow-ups"
-              value={String(pendingFollowUps)}
-              icon="followups"
-              miniChart={[20, 25, 28, 32, 36, 40, 42]}
-              miniChartColor="#F59E0B"
-            />
+            {[
+              {
+                label: "Today's appointments",
+                value: String(todayAppointmentsCount),
+                detail: "Visits on your schedule today",
+                icon: <Calendar className="size-5" strokeWidth={2.2} />,
+                iconBg: "rgba(37,99,235,0.12)",
+                iconColor: "#2563EB",
+                valueColor: "#0F172A",
+              },
+              {
+                label: "Total patients",
+                value: String(totalPatients),
+                detail: "Patients linked to your clinic",
+                icon: <Users className="size-5" strokeWidth={2.2} />,
+                iconBg: "rgba(13,148,136,0.12)",
+                iconColor: "#0D9488",
+                valueColor: "#047857",
+              },
+              {
+                label: "Awaiting confirmation",
+                value: String(awaitingConfirmCount),
+                detail: "Pending appointment requests",
+                icon: <Clock className="size-5" strokeWidth={2.2} />,
+                iconBg: "rgba(139,92,246,0.12)",
+                iconColor: "#7C3AED",
+                valueColor: "#6D28D9",
+              },
+              {
+                label: "Unread alerts",
+                value: String(unreadAlerts),
+                detail: "Notifications needing attention",
+                icon: <Bell className="size-5" strokeWidth={2.2} />,
+                iconBg: "rgba(245,158,11,0.14)",
+                iconColor: "#D97706",
+                valueColor: "#B45309",
+              },
+            ].map((card) => (
+              <div
+                key={card.label}
+                className="rounded-[18px] border border-slate-200/90 bg-white p-5 transition-all duration-300 hover:-translate-y-0.5"
+                style={{
+                  boxShadow:
+                    "0 1px 2px 0 rgba(15,23,42,0.03), 0 10px 28px -16px rgba(15,23,42,0.12)",
+                }}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.1em] text-slate-500">
+                      {card.label}
+                    </p>
+                    <p
+                      className="mt-2.5 font-jakarta text-[clamp(1.65rem,2.5vw,2rem)] font-extrabold leading-none tracking-tight"
+                      style={{ color: card.valueColor }}
+                    >
+                      {card.value}
+                    </p>
+                    <p className="mt-2.5 text-[12px] font-medium text-slate-500">{card.detail}</p>
+                  </div>
+                  <div
+                    className="grid size-11 shrink-0 place-items-center rounded-2xl"
+                    style={{ background: card.iconBg, color: card.iconColor }}
+                  >
+                    {card.icon}
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-3 xl:grid-cols-4">
@@ -1242,10 +1320,10 @@ function DoctorDashboard() {
                   <EmptyNote>
                     No visits scheduled for today.{" "}
                     <Link
-                      to="/doctor/schedule"
+                      to="/doctor/appointments"
                       className="font-bold text-blue-600 underline-offset-2 hover:underline"
                     >
-                      Open full schedule
+                      Open all appointments
                     </Link>
                     .
                   </EmptyNote>
@@ -1276,7 +1354,7 @@ function DoctorDashboard() {
                   <SectionLabel>Latest notifications</SectionLabel>
                   {dashboard?.latestNotifications.length ? (
                     <ul className="mt-3 space-y-3">
-                      {dashboard.latestNotifications.map((note) => (
+                      {dashboard.latestNotifications.slice(0, 2).map((note) => (
                         <li
                           key={note.id}
                           className="p-3 -mx-1 rounded-xl transition-colors hover:bg-muted/50"

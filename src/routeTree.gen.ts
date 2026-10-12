@@ -13,27 +13,34 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as DoctorRouteImport } from './routes/doctor'
 import { Route as ForgotPasswordRouteImport } from './routes/forgot-password'
+import { Route as LoginRouteImport } from './routes/login'
 import { Route as PatientRouteImport } from './routes/patient'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAppointmentsRouteImport } from './routes/admin.appointments'
 import { Route as AdminDoctorsRouteImport } from './routes/admin.doctors'
+import { Route as AdminEarningsRouteImport } from './routes/admin.earnings'
 import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminPatientsRouteImport } from './routes/admin.patients'
+import { Route as AdminSettingsRouteImport } from './routes/admin.settings'
 import { Route as AdminSubscriptionsRouteImport } from './routes/admin.subscriptions'
 import { Route as AdminVoiceCallsRouteImport } from './routes/admin.voice-calls'
 import { Route as DoctorIndexRouteImport } from './routes/doctor.index'
 import { Route as DoctorActivityRouteImport } from './routes/doctor.activity'
+import { Route as DoctorAppointmentsRouteImport } from './routes/doctor.appointments'
 import { Route as DoctorAvailabilityRouteImport } from './routes/doctor.availability'
+import { Route as DoctorClinicRouteImport } from './routes/doctor.clinic'
 import { Route as DoctorNotificationsRouteImport } from './routes/doctor.notifications'
 import { Route as DoctorOnboardingRouteImport } from './routes/doctor.onboarding'
 import { Route as DoctorPatientsRouteImport } from './routes/doctor.patients'
 import { Route as DoctorProfileRouteImport } from './routes/doctor.profile'
 import { Route as DoctorRecordsRouteImport } from './routes/doctor.records'
 import { Route as DoctorScheduleRouteImport } from './routes/doctor.schedule'
+import { Route as DoctorSettingsRouteImport } from './routes/doctor.settings'
 import { Route as DoctorSubscriptionRouteImport } from './routes/doctor.subscription'
 import { Route as DoctorSynthflowRouteImport } from './routes/doctor.synthflow'
+import { Route as DoctorTeamRouteImport } from './routes/doctor.team'
 import { Route as PatientIndexRouteImport } from './routes/patient.index'
 import { Route as PatientActivityRouteImport } from './routes/patient.activity'
 import { Route as PatientAppointmentsRouteImport } from './routes/patient.appointments'
@@ -47,6 +54,13 @@ import { Route as PatientRecordsRouteImport } from './routes/patient.records'
 import { Route as AdminAppointmentsAppointmentIdRouteImport } from './routes/admin.appointments.$appointmentId'
 import { Route as AdminDoctorsUserIdRouteImport } from './routes/admin.doctors.$userId'
 import { Route as AdminPatientsUserIdRouteImport } from './routes/admin.patients.$userId'
+import { Route as DoctorAppointmentsIndexRouteImport } from './routes/doctor.appointments.index'
+import { Route as DoctorAppointmentsCancelledRouteImport } from './routes/doctor.appointments.cancelled'
+import { Route as DoctorAppointmentsCompletedRouteImport } from './routes/doctor.appointments.completed'
+import { Route as DoctorAppointmentsConfirmedRouteImport } from './routes/doctor.appointments.confirmed'
+import { Route as DoctorAppointmentsFollowUpsRouteImport } from './routes/doctor.appointments.follow-ups'
+import { Route as DoctorAppointmentsNewRouteImport } from './routes/doctor.appointments.new'
+import { Route as DoctorAppointmentsPendingRouteImport } from './routes/doctor.appointments.pending'
 import { Route as DoctorPatientsPatientIdRouteImport } from './routes/doctor.patients.$patientId'
 import { Route as PatientAppointmentsAppointmentIdRouteImport } from './routes/patient.appointments.$appointmentId'
 import { Route as PatientDoctorsDoctorIdRouteImport } from './routes/patient.doctors.$doctorId'
@@ -69,6 +83,11 @@ const DoctorRoute = DoctorRouteImport.update({
 const ForgotPasswordRoute = ForgotPasswordRouteImport.update({
   id: '/forgot-password',
   path: '/forgot-password',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const LoginRoute = LoginRouteImport.update({
+  id: '/login',
+  path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PatientRoute = PatientRouteImport.update({
@@ -101,6 +120,11 @@ const AdminDoctorsRoute = AdminDoctorsRouteImport.update({
   path: '/doctors',
   getParentRoute: () => AdminRoute,
 } as any)
+const AdminEarningsRoute = AdminEarningsRouteImport.update({
+  id: '/earnings',
+  path: '/earnings',
+  getParentRoute: () => AdminRoute,
+} as any)
 const AdminLoginRoute = AdminLoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -109,6 +133,11 @@ const AdminLoginRoute = AdminLoginRouteImport.update({
 const AdminPatientsRoute = AdminPatientsRouteImport.update({
   id: '/patients',
   path: '/patients',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminSettingsRoute = AdminSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminSubscriptionsRoute = AdminSubscriptionsRouteImport.update({
@@ -131,9 +160,19 @@ const DoctorActivityRoute = DoctorActivityRouteImport.update({
   path: '/activity',
   getParentRoute: () => DoctorRoute,
 } as any)
+const DoctorAppointmentsRoute = DoctorAppointmentsRouteImport.update({
+  id: '/appointments',
+  path: '/appointments',
+  getParentRoute: () => DoctorRoute,
+} as any)
 const DoctorAvailabilityRoute = DoctorAvailabilityRouteImport.update({
   id: '/availability',
   path: '/availability',
+  getParentRoute: () => DoctorRoute,
+} as any)
+const DoctorClinicRoute = DoctorClinicRouteImport.update({
+  id: '/clinic',
+  path: '/clinic',
   getParentRoute: () => DoctorRoute,
 } as any)
 const DoctorNotificationsRoute = DoctorNotificationsRouteImport.update({
@@ -166,6 +205,11 @@ const DoctorScheduleRoute = DoctorScheduleRouteImport.update({
   path: '/schedule',
   getParentRoute: () => DoctorRoute,
 } as any)
+const DoctorSettingsRoute = DoctorSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => DoctorRoute,
+} as any)
 const DoctorSubscriptionRoute = DoctorSubscriptionRouteImport.update({
   id: '/subscription',
   path: '/subscription',
@@ -174,6 +218,11 @@ const DoctorSubscriptionRoute = DoctorSubscriptionRouteImport.update({
 const DoctorSynthflowRoute = DoctorSynthflowRouteImport.update({
   id: '/synthflow',
   path: '/synthflow',
+  getParentRoute: () => DoctorRoute,
+} as any)
+const DoctorTeamRoute = DoctorTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
   getParentRoute: () => DoctorRoute,
 } as any)
 const PatientIndexRoute = PatientIndexRouteImport.update({
@@ -242,6 +291,46 @@ const AdminPatientsUserIdRoute = AdminPatientsUserIdRouteImport.update({
   path: '/$userId',
   getParentRoute: () => AdminPatientsRoute,
 } as any)
+const DoctorAppointmentsIndexRoute = DoctorAppointmentsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => DoctorAppointmentsRoute,
+} as any)
+const DoctorAppointmentsCancelledRoute =
+  DoctorAppointmentsCancelledRouteImport.update({
+    id: '/cancelled',
+    path: '/cancelled',
+    getParentRoute: () => DoctorAppointmentsRoute,
+  } as any)
+const DoctorAppointmentsCompletedRoute =
+  DoctorAppointmentsCompletedRouteImport.update({
+    id: '/completed',
+    path: '/completed',
+    getParentRoute: () => DoctorAppointmentsRoute,
+  } as any)
+const DoctorAppointmentsConfirmedRoute =
+  DoctorAppointmentsConfirmedRouteImport.update({
+    id: '/confirmed',
+    path: '/confirmed',
+    getParentRoute: () => DoctorAppointmentsRoute,
+  } as any)
+const DoctorAppointmentsFollowUpsRoute =
+  DoctorAppointmentsFollowUpsRouteImport.update({
+    id: '/follow-ups',
+    path: '/follow-ups',
+    getParentRoute: () => DoctorAppointmentsRoute,
+  } as any)
+const DoctorAppointmentsNewRoute = DoctorAppointmentsNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => DoctorAppointmentsRoute,
+} as any)
+const DoctorAppointmentsPendingRoute =
+  DoctorAppointmentsPendingRouteImport.update({
+    id: '/pending',
+    path: '/pending',
+    getParentRoute: () => DoctorAppointmentsRoute,
+  } as any)
 const DoctorPatientsPatientIdRoute = DoctorPatientsPatientIdRouteImport.update({
   id: '/$patientId',
   path: '/$patientId',
@@ -264,25 +353,32 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRouteWithChildren
   '/doctor': typeof DoctorRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRoute
   '/patient': typeof PatientRouteWithChildren
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/admin/appointments': typeof AdminAppointmentsRouteWithChildren
   '/admin/doctors': typeof AdminDoctorsRouteWithChildren
+  '/admin/earnings': typeof AdminEarningsRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
   '/doctor/activity': typeof DoctorActivityRoute
+  '/doctor/appointments': typeof DoctorAppointmentsRouteWithChildren
   '/doctor/availability': typeof DoctorAvailabilityRoute
+  '/doctor/clinic': typeof DoctorClinicRoute
   '/doctor/notifications': typeof DoctorNotificationsRoute
   '/doctor/onboarding': typeof DoctorOnboardingRoute
   '/doctor/patients': typeof DoctorPatientsRouteWithChildren
   '/doctor/profile': typeof DoctorProfileRoute
   '/doctor/records': typeof DoctorRecordsRoute
   '/doctor/schedule': typeof DoctorScheduleRoute
+  '/doctor/settings': typeof DoctorSettingsRoute
   '/doctor/subscription': typeof DoctorSubscriptionRoute
   '/doctor/synthflow': typeof DoctorSynthflowRoute
+  '/doctor/team': typeof DoctorTeamRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -298,31 +394,44 @@ export interface FileRoutesByFullPath {
   '/admin/appointments/$appointmentId': typeof AdminAppointmentsAppointmentIdRoute
   '/admin/doctors/$userId': typeof AdminDoctorsUserIdRoute
   '/admin/patients/$userId': typeof AdminPatientsUserIdRoute
+  '/doctor/appointments/cancelled': typeof DoctorAppointmentsCancelledRoute
+  '/doctor/appointments/completed': typeof DoctorAppointmentsCompletedRoute
+  '/doctor/appointments/confirmed': typeof DoctorAppointmentsConfirmedRoute
+  '/doctor/appointments/follow-ups': typeof DoctorAppointmentsFollowUpsRoute
+  '/doctor/appointments/new': typeof DoctorAppointmentsNewRoute
+  '/doctor/appointments/pending': typeof DoctorAppointmentsPendingRoute
   '/doctor/patients/$patientId': typeof DoctorPatientsPatientIdRoute
   '/patient/appointments/$appointmentId': typeof PatientAppointmentsAppointmentIdRoute
   '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
+  '/doctor/appointments/': typeof DoctorAppointmentsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRoute
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/admin/appointments': typeof AdminAppointmentsRouteWithChildren
   '/admin/doctors': typeof AdminDoctorsRouteWithChildren
+  '/admin/earnings': typeof AdminEarningsRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
   '/doctor/activity': typeof DoctorActivityRoute
   '/doctor/availability': typeof DoctorAvailabilityRoute
+  '/doctor/clinic': typeof DoctorClinicRoute
   '/doctor/notifications': typeof DoctorNotificationsRoute
   '/doctor/onboarding': typeof DoctorOnboardingRoute
   '/doctor/patients': typeof DoctorPatientsRouteWithChildren
   '/doctor/profile': typeof DoctorProfileRoute
   '/doctor/records': typeof DoctorRecordsRoute
   '/doctor/schedule': typeof DoctorScheduleRoute
+  '/doctor/settings': typeof DoctorSettingsRoute
   '/doctor/subscription': typeof DoctorSubscriptionRoute
   '/doctor/synthflow': typeof DoctorSynthflowRoute
+  '/doctor/team': typeof DoctorTeamRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -338,9 +447,16 @@ export interface FileRoutesByTo {
   '/admin/appointments/$appointmentId': typeof AdminAppointmentsAppointmentIdRoute
   '/admin/doctors/$userId': typeof AdminDoctorsUserIdRoute
   '/admin/patients/$userId': typeof AdminPatientsUserIdRoute
+  '/doctor/appointments/cancelled': typeof DoctorAppointmentsCancelledRoute
+  '/doctor/appointments/completed': typeof DoctorAppointmentsCompletedRoute
+  '/doctor/appointments/confirmed': typeof DoctorAppointmentsConfirmedRoute
+  '/doctor/appointments/follow-ups': typeof DoctorAppointmentsFollowUpsRoute
+  '/doctor/appointments/new': typeof DoctorAppointmentsNewRoute
+  '/doctor/appointments/pending': typeof DoctorAppointmentsPendingRoute
   '/doctor/patients/$patientId': typeof DoctorPatientsPatientIdRoute
   '/patient/appointments/$appointmentId': typeof PatientAppointmentsAppointmentIdRoute
   '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
+  '/doctor/appointments': typeof DoctorAppointmentsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -348,25 +464,32 @@ export interface FileRoutesById {
   '/admin': typeof AdminRouteWithChildren
   '/doctor': typeof DoctorRouteWithChildren
   '/forgot-password': typeof ForgotPasswordRoute
+  '/login': typeof LoginRoute
   '/patient': typeof PatientRouteWithChildren
   '/reset-password': typeof ResetPasswordRoute
   '/signup': typeof SignupRoute
   '/admin/appointments': typeof AdminAppointmentsRouteWithChildren
   '/admin/doctors': typeof AdminDoctorsRouteWithChildren
+  '/admin/earnings': typeof AdminEarningsRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/patients': typeof AdminPatientsRouteWithChildren
+  '/admin/settings': typeof AdminSettingsRoute
   '/admin/subscriptions': typeof AdminSubscriptionsRoute
   '/admin/voice-calls': typeof AdminVoiceCallsRoute
   '/doctor/activity': typeof DoctorActivityRoute
+  '/doctor/appointments': typeof DoctorAppointmentsRouteWithChildren
   '/doctor/availability': typeof DoctorAvailabilityRoute
+  '/doctor/clinic': typeof DoctorClinicRoute
   '/doctor/notifications': typeof DoctorNotificationsRoute
   '/doctor/onboarding': typeof DoctorOnboardingRoute
   '/doctor/patients': typeof DoctorPatientsRouteWithChildren
   '/doctor/profile': typeof DoctorProfileRoute
   '/doctor/records': typeof DoctorRecordsRoute
   '/doctor/schedule': typeof DoctorScheduleRoute
+  '/doctor/settings': typeof DoctorSettingsRoute
   '/doctor/subscription': typeof DoctorSubscriptionRoute
   '/doctor/synthflow': typeof DoctorSynthflowRoute
+  '/doctor/team': typeof DoctorTeamRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -382,9 +505,16 @@ export interface FileRoutesById {
   '/admin/appointments/$appointmentId': typeof AdminAppointmentsAppointmentIdRoute
   '/admin/doctors/$userId': typeof AdminDoctorsUserIdRoute
   '/admin/patients/$userId': typeof AdminPatientsUserIdRoute
+  '/doctor/appointments/cancelled': typeof DoctorAppointmentsCancelledRoute
+  '/doctor/appointments/completed': typeof DoctorAppointmentsCompletedRoute
+  '/doctor/appointments/confirmed': typeof DoctorAppointmentsConfirmedRoute
+  '/doctor/appointments/follow-ups': typeof DoctorAppointmentsFollowUpsRoute
+  '/doctor/appointments/new': typeof DoctorAppointmentsNewRoute
+  '/doctor/appointments/pending': typeof DoctorAppointmentsPendingRoute
   '/doctor/patients/$patientId': typeof DoctorPatientsPatientIdRoute
   '/patient/appointments/$appointmentId': typeof PatientAppointmentsAppointmentIdRoute
   '/patient/doctors/$doctorId': typeof PatientDoctorsDoctorIdRoute
+  '/doctor/appointments/': typeof DoctorAppointmentsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -393,25 +523,32 @@ export interface FileRouteTypes {
     | '/admin'
     | '/doctor'
     | '/forgot-password'
+    | '/login'
     | '/patient'
     | '/reset-password'
     | '/signup'
     | '/admin/appointments'
     | '/admin/doctors'
+    | '/admin/earnings'
     | '/admin/login'
     | '/admin/patients'
+    | '/admin/settings'
     | '/admin/subscriptions'
     | '/admin/voice-calls'
     | '/doctor/activity'
+    | '/doctor/appointments'
     | '/doctor/availability'
+    | '/doctor/clinic'
     | '/doctor/notifications'
     | '/doctor/onboarding'
     | '/doctor/patients'
     | '/doctor/profile'
     | '/doctor/records'
     | '/doctor/schedule'
+    | '/doctor/settings'
     | '/doctor/subscription'
     | '/doctor/synthflow'
+    | '/doctor/team'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -427,31 +564,44 @@ export interface FileRouteTypes {
     | '/admin/appointments/$appointmentId'
     | '/admin/doctors/$userId'
     | '/admin/patients/$userId'
+    | '/doctor/appointments/cancelled'
+    | '/doctor/appointments/completed'
+    | '/doctor/appointments/confirmed'
+    | '/doctor/appointments/follow-ups'
+    | '/doctor/appointments/new'
+    | '/doctor/appointments/pending'
     | '/doctor/patients/$patientId'
     | '/patient/appointments/$appointmentId'
     | '/patient/doctors/$doctorId'
+    | '/doctor/appointments/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/forgot-password'
+    | '/login'
     | '/reset-password'
     | '/signup'
     | '/admin/appointments'
     | '/admin/doctors'
+    | '/admin/earnings'
     | '/admin/login'
     | '/admin/patients'
+    | '/admin/settings'
     | '/admin/subscriptions'
     | '/admin/voice-calls'
     | '/doctor/activity'
     | '/doctor/availability'
+    | '/doctor/clinic'
     | '/doctor/notifications'
     | '/doctor/onboarding'
     | '/doctor/patients'
     | '/doctor/profile'
     | '/doctor/records'
     | '/doctor/schedule'
+    | '/doctor/settings'
     | '/doctor/subscription'
     | '/doctor/synthflow'
+    | '/doctor/team'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -467,34 +617,48 @@ export interface FileRouteTypes {
     | '/admin/appointments/$appointmentId'
     | '/admin/doctors/$userId'
     | '/admin/patients/$userId'
+    | '/doctor/appointments/cancelled'
+    | '/doctor/appointments/completed'
+    | '/doctor/appointments/confirmed'
+    | '/doctor/appointments/follow-ups'
+    | '/doctor/appointments/new'
+    | '/doctor/appointments/pending'
     | '/doctor/patients/$patientId'
     | '/patient/appointments/$appointmentId'
     | '/patient/doctors/$doctorId'
+    | '/doctor/appointments'
   id:
     | '__root__'
     | '/'
     | '/admin'
     | '/doctor'
     | '/forgot-password'
+    | '/login'
     | '/patient'
     | '/reset-password'
     | '/signup'
     | '/admin/appointments'
     | '/admin/doctors'
+    | '/admin/earnings'
     | '/admin/login'
     | '/admin/patients'
+    | '/admin/settings'
     | '/admin/subscriptions'
     | '/admin/voice-calls'
     | '/doctor/activity'
+    | '/doctor/appointments'
     | '/doctor/availability'
+    | '/doctor/clinic'
     | '/doctor/notifications'
     | '/doctor/onboarding'
     | '/doctor/patients'
     | '/doctor/profile'
     | '/doctor/records'
     | '/doctor/schedule'
+    | '/doctor/settings'
     | '/doctor/subscription'
     | '/doctor/synthflow'
+    | '/doctor/team'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -510,9 +674,16 @@ export interface FileRouteTypes {
     | '/admin/appointments/$appointmentId'
     | '/admin/doctors/$userId'
     | '/admin/patients/$userId'
+    | '/doctor/appointments/cancelled'
+    | '/doctor/appointments/completed'
+    | '/doctor/appointments/confirmed'
+    | '/doctor/appointments/follow-ups'
+    | '/doctor/appointments/new'
+    | '/doctor/appointments/pending'
     | '/doctor/patients/$patientId'
     | '/patient/appointments/$appointmentId'
     | '/patient/doctors/$doctorId'
+    | '/doctor/appointments/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -520,6 +691,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRouteWithChildren
   DoctorRoute: typeof DoctorRouteWithChildren
   ForgotPasswordRoute: typeof ForgotPasswordRoute
+  LoginRoute: typeof LoginRoute
   PatientRoute: typeof PatientRouteWithChildren
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
@@ -553,6 +725,13 @@ declare module '@tanstack/react-router' {
       path: '/forgot-password'
       fullPath: '/forgot-password'
       preLoaderRoute: typeof ForgotPasswordRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/login': {
+      id: '/login'
+      path: '/login'
+      fullPath: '/login'
+      preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/patient': {
@@ -597,6 +776,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminDoctorsRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/earnings': {
+      id: '/admin/earnings'
+      path: '/earnings'
+      fullPath: '/admin/earnings'
+      preLoaderRoute: typeof AdminEarningsRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/login': {
       id: '/admin/login'
       path: '/login'
@@ -609,6 +795,13 @@ declare module '@tanstack/react-router' {
       path: '/patients'
       fullPath: '/admin/patients'
       preLoaderRoute: typeof AdminPatientsRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/settings': {
+      id: '/admin/settings'
+      path: '/settings'
+      fullPath: '/admin/settings'
+      preLoaderRoute: typeof AdminSettingsRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/subscriptions': {
@@ -639,11 +832,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DoctorActivityRouteImport
       parentRoute: typeof DoctorRoute
     }
+    '/doctor/appointments': {
+      id: '/doctor/appointments'
+      path: '/appointments'
+      fullPath: '/doctor/appointments'
+      preLoaderRoute: typeof DoctorAppointmentsRouteImport
+      parentRoute: typeof DoctorRoute
+    }
     '/doctor/availability': {
       id: '/doctor/availability'
       path: '/availability'
       fullPath: '/doctor/availability'
       preLoaderRoute: typeof DoctorAvailabilityRouteImport
+      parentRoute: typeof DoctorRoute
+    }
+    '/doctor/clinic': {
+      id: '/doctor/clinic'
+      path: '/clinic'
+      fullPath: '/doctor/clinic'
+      preLoaderRoute: typeof DoctorClinicRouteImport
       parentRoute: typeof DoctorRoute
     }
     '/doctor/notifications': {
@@ -688,6 +895,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof DoctorScheduleRouteImport
       parentRoute: typeof DoctorRoute
     }
+    '/doctor/settings': {
+      id: '/doctor/settings'
+      path: '/settings'
+      fullPath: '/doctor/settings'
+      preLoaderRoute: typeof DoctorSettingsRouteImport
+      parentRoute: typeof DoctorRoute
+    }
     '/doctor/subscription': {
       id: '/doctor/subscription'
       path: '/subscription'
@@ -700,6 +914,13 @@ declare module '@tanstack/react-router' {
       path: '/synthflow'
       fullPath: '/doctor/synthflow'
       preLoaderRoute: typeof DoctorSynthflowRouteImport
+      parentRoute: typeof DoctorRoute
+    }
+    '/doctor/team': {
+      id: '/doctor/team'
+      path: '/team'
+      fullPath: '/doctor/team'
+      preLoaderRoute: typeof DoctorTeamRouteImport
       parentRoute: typeof DoctorRoute
     }
     '/patient/': {
@@ -793,6 +1014,55 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminPatientsUserIdRouteImport
       parentRoute: typeof AdminPatientsRoute
     }
+    '/doctor/appointments/': {
+      id: '/doctor/appointments/'
+      path: '/'
+      fullPath: '/doctor/appointments/'
+      preLoaderRoute: typeof DoctorAppointmentsIndexRouteImport
+      parentRoute: typeof DoctorAppointmentsRoute
+    }
+    '/doctor/appointments/cancelled': {
+      id: '/doctor/appointments/cancelled'
+      path: '/cancelled'
+      fullPath: '/doctor/appointments/cancelled'
+      preLoaderRoute: typeof DoctorAppointmentsCancelledRouteImport
+      parentRoute: typeof DoctorAppointmentsRoute
+    }
+    '/doctor/appointments/completed': {
+      id: '/doctor/appointments/completed'
+      path: '/completed'
+      fullPath: '/doctor/appointments/completed'
+      preLoaderRoute: typeof DoctorAppointmentsCompletedRouteImport
+      parentRoute: typeof DoctorAppointmentsRoute
+    }
+    '/doctor/appointments/confirmed': {
+      id: '/doctor/appointments/confirmed'
+      path: '/confirmed'
+      fullPath: '/doctor/appointments/confirmed'
+      preLoaderRoute: typeof DoctorAppointmentsConfirmedRouteImport
+      parentRoute: typeof DoctorAppointmentsRoute
+    }
+    '/doctor/appointments/follow-ups': {
+      id: '/doctor/appointments/follow-ups'
+      path: '/follow-ups'
+      fullPath: '/doctor/appointments/follow-ups'
+      preLoaderRoute: typeof DoctorAppointmentsFollowUpsRouteImport
+      parentRoute: typeof DoctorAppointmentsRoute
+    }
+    '/doctor/appointments/new': {
+      id: '/doctor/appointments/new'
+      path: '/new'
+      fullPath: '/doctor/appointments/new'
+      preLoaderRoute: typeof DoctorAppointmentsNewRouteImport
+      parentRoute: typeof DoctorAppointmentsRoute
+    }
+    '/doctor/appointments/pending': {
+      id: '/doctor/appointments/pending'
+      path: '/pending'
+      fullPath: '/doctor/appointments/pending'
+      preLoaderRoute: typeof DoctorAppointmentsPendingRouteImport
+      parentRoute: typeof DoctorAppointmentsRoute
+    }
     '/doctor/patients/$patientId': {
       id: '/doctor/patients/$patientId'
       path: '/$patientId'
@@ -855,8 +1125,10 @@ const AdminPatientsRouteWithChildren = AdminPatientsRoute._addFileChildren(
 interface AdminRouteChildren {
   AdminAppointmentsRoute: typeof AdminAppointmentsRouteWithChildren
   AdminDoctorsRoute: typeof AdminDoctorsRouteWithChildren
+  AdminEarningsRoute: typeof AdminEarningsRoute
   AdminLoginRoute: typeof AdminLoginRoute
   AdminPatientsRoute: typeof AdminPatientsRouteWithChildren
+  AdminSettingsRoute: typeof AdminSettingsRoute
   AdminSubscriptionsRoute: typeof AdminSubscriptionsRoute
   AdminVoiceCallsRoute: typeof AdminVoiceCallsRoute
   AdminIndexRoute: typeof AdminIndexRoute
@@ -865,14 +1137,39 @@ interface AdminRouteChildren {
 const AdminRouteChildren: AdminRouteChildren = {
   AdminAppointmentsRoute: AdminAppointmentsRouteWithChildren,
   AdminDoctorsRoute: AdminDoctorsRouteWithChildren,
+  AdminEarningsRoute: AdminEarningsRoute,
   AdminLoginRoute: AdminLoginRoute,
   AdminPatientsRoute: AdminPatientsRouteWithChildren,
+  AdminSettingsRoute: AdminSettingsRoute,
   AdminSubscriptionsRoute: AdminSubscriptionsRoute,
   AdminVoiceCallsRoute: AdminVoiceCallsRoute,
   AdminIndexRoute: AdminIndexRoute,
 }
 
 const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
+
+interface DoctorAppointmentsRouteChildren {
+  DoctorAppointmentsCancelledRoute: typeof DoctorAppointmentsCancelledRoute
+  DoctorAppointmentsCompletedRoute: typeof DoctorAppointmentsCompletedRoute
+  DoctorAppointmentsConfirmedRoute: typeof DoctorAppointmentsConfirmedRoute
+  DoctorAppointmentsFollowUpsRoute: typeof DoctorAppointmentsFollowUpsRoute
+  DoctorAppointmentsNewRoute: typeof DoctorAppointmentsNewRoute
+  DoctorAppointmentsPendingRoute: typeof DoctorAppointmentsPendingRoute
+  DoctorAppointmentsIndexRoute: typeof DoctorAppointmentsIndexRoute
+}
+
+const DoctorAppointmentsRouteChildren: DoctorAppointmentsRouteChildren = {
+  DoctorAppointmentsCancelledRoute: DoctorAppointmentsCancelledRoute,
+  DoctorAppointmentsCompletedRoute: DoctorAppointmentsCompletedRoute,
+  DoctorAppointmentsConfirmedRoute: DoctorAppointmentsConfirmedRoute,
+  DoctorAppointmentsFollowUpsRoute: DoctorAppointmentsFollowUpsRoute,
+  DoctorAppointmentsNewRoute: DoctorAppointmentsNewRoute,
+  DoctorAppointmentsPendingRoute: DoctorAppointmentsPendingRoute,
+  DoctorAppointmentsIndexRoute: DoctorAppointmentsIndexRoute,
+}
+
+const DoctorAppointmentsRouteWithChildren =
+  DoctorAppointmentsRoute._addFileChildren(DoctorAppointmentsRouteChildren)
 
 interface DoctorPatientsRouteChildren {
   DoctorPatientsPatientIdRoute: typeof DoctorPatientsPatientIdRoute
@@ -888,29 +1185,37 @@ const DoctorPatientsRouteWithChildren = DoctorPatientsRoute._addFileChildren(
 
 interface DoctorRouteChildren {
   DoctorActivityRoute: typeof DoctorActivityRoute
+  DoctorAppointmentsRoute: typeof DoctorAppointmentsRouteWithChildren
   DoctorAvailabilityRoute: typeof DoctorAvailabilityRoute
+  DoctorClinicRoute: typeof DoctorClinicRoute
   DoctorNotificationsRoute: typeof DoctorNotificationsRoute
   DoctorOnboardingRoute: typeof DoctorOnboardingRoute
   DoctorPatientsRoute: typeof DoctorPatientsRouteWithChildren
   DoctorProfileRoute: typeof DoctorProfileRoute
   DoctorRecordsRoute: typeof DoctorRecordsRoute
   DoctorScheduleRoute: typeof DoctorScheduleRoute
+  DoctorSettingsRoute: typeof DoctorSettingsRoute
   DoctorSubscriptionRoute: typeof DoctorSubscriptionRoute
   DoctorSynthflowRoute: typeof DoctorSynthflowRoute
+  DoctorTeamRoute: typeof DoctorTeamRoute
   DoctorIndexRoute: typeof DoctorIndexRoute
 }
 
 const DoctorRouteChildren: DoctorRouteChildren = {
   DoctorActivityRoute: DoctorActivityRoute,
+  DoctorAppointmentsRoute: DoctorAppointmentsRouteWithChildren,
   DoctorAvailabilityRoute: DoctorAvailabilityRoute,
+  DoctorClinicRoute: DoctorClinicRoute,
   DoctorNotificationsRoute: DoctorNotificationsRoute,
   DoctorOnboardingRoute: DoctorOnboardingRoute,
   DoctorPatientsRoute: DoctorPatientsRouteWithChildren,
   DoctorProfileRoute: DoctorProfileRoute,
   DoctorRecordsRoute: DoctorRecordsRoute,
   DoctorScheduleRoute: DoctorScheduleRoute,
+  DoctorSettingsRoute: DoctorSettingsRoute,
   DoctorSubscriptionRoute: DoctorSubscriptionRoute,
   DoctorSynthflowRoute: DoctorSynthflowRoute,
+  DoctorTeamRoute: DoctorTeamRoute,
   DoctorIndexRoute: DoctorIndexRoute,
 }
 
@@ -974,6 +1279,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRouteWithChildren,
   DoctorRoute: DoctorRouteWithChildren,
   ForgotPasswordRoute: ForgotPasswordRoute,
+  LoginRoute: LoginRoute,
   PatientRoute: PatientRouteWithChildren,
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,

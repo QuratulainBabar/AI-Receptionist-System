@@ -3,16 +3,36 @@ import { useState } from "react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { Button, Field, Input } from "@/components/ui/primitives";
 import { authApi, formatApiError } from "@/lib/api";
+import {
+  parseBillingCycleSlug,
+  parsePlanSlug,
+} from "@/lib/plan-selection";
 import { getSession, homeForRole, saveAuth } from "@/lib/session";
 import { Mail, Lock, UserCircle2, ArrowRight, CheckCircle2 } from "lucide-react";
 
+const LANDING_PRICING_URL = "/#pricing";
+
 export const Route = createFileRoute("/signup")({
-  beforeLoad: () => {
+  validateSearch: (search: Record<string, unknown>) => ({
+    plan: parsePlanSlug(search.plan),
+    cycle: parseBillingCycleSlug(search.cycle),
+  }),
+  beforeLoad: ({ search }) => {
     if (typeof window === "undefined") return;
     const session = getSession();
-    if (session?.token) {
-      throw redirect({ to: homeForRole(session.role) });
+    if (!session?.token) return;
+    if (session.role === "doctor" && search.plan) {
+      throw redirect({
+        to: "/doctor/onboarding",
+        search: {
+          checkout: undefined,
+          payment: undefined,
+          plan: search.plan,
+          cycle: search.cycle ?? "monthly",
+        },
+      });
     }
+    throw redirect({ to: homeForRole(session.role) });
   },
   head: () => ({
     meta: [
@@ -33,6 +53,7 @@ export const Route = createFileRoute("/signup")({
 
 function SignupPage() {
   const navigate = useNavigate();
+  const search = Route.useSearch();
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -70,7 +91,12 @@ function SignupPage() {
       if (result.user.role === "doctor") {
         await navigate({
           to: "/doctor/onboarding",
-          search: { checkout: undefined, payment: undefined },
+          search: {
+            checkout: undefined,
+            payment: undefined,
+            plan: search.plan,
+            cycle: search.cycle ?? (search.plan ? "monthly" : undefined),
+          },
         });
       } else {
         await navigate({ to: homeForRole(result.user.role) });
@@ -86,17 +112,27 @@ function SignupPage() {
     <AuthLayout
       variant="signup"
       title="Create your clinic account"
-      description="Set up your practice on AI Receptionist and start receiving AI-managed appointments today."
       footer={
-        <p>
-          Already have an account?{" "}
-          <Link
-            to="/"
-            className="font-bold text-blue-600 underline-offset-4 hover:underline transition-colors"
-          >
-            Sign in
-          </Link>
-        </p>
+        <div className="space-y-2.5">
+          <p>
+            New clinic?{" "}
+            <a
+              href={LANDING_PRICING_URL}
+              className="font-bold text-blue-600 no-underline transition-colors hover:text-blue-700 hover:no-underline focus:no-underline active:no-underline"
+            >
+              Choose a plan & sign up
+            </a>
+          </p>
+          <p>
+            Already have an account?{" "}
+            <Link
+              to="/login"
+              className="font-bold text-blue-600 no-underline transition-colors hover:text-blue-700 hover:no-underline focus:no-underline active:no-underline"
+            >
+              Sign in
+            </Link>
+          </p>
+        </div>
       }
     >
       <form className="space-y-2.5" onSubmit={submit}>
@@ -116,7 +152,7 @@ function SignupPage() {
           </div>
         </Field>
 
-        <Field label="Work email" required>
+        <Field label="Email" required>
           <div className="relative">
             <Mail
               className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 size-4.5 text-muted-foreground/60"
@@ -197,14 +233,14 @@ function SignupPage() {
           </div>
           <span className="text-[12.5px] leading-relaxed text-muted-foreground">
             I agree to the{" "}
-            <a href="#" className="font-bold text-blue-600 underline-offset-2 hover:underline">
+            <a href="#" className="font-bold text-blue-600 no-underline hover:no-underline focus:no-underline active:no-underline">
               Terms of Service
             </a>{" "}
             and{" "}
-            <a href="#" className="font-bold text-blue-600 underline-offset-2 hover:underline">
+            <a href="#" className="font-bold text-blue-600 no-underline hover:no-underline focus:no-underline active:no-underline">
               Privacy Policy
             </a>
-            , including consent to process my clinical data securely.
+            .
           </span>
         </label>
 

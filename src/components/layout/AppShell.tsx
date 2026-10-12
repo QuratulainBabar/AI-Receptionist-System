@@ -1,6 +1,7 @@
-import { Link, useNavigate, type LinkProps } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState, type LinkProps } from "@tanstack/react-router";
 import {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Bell,
   MessageSquare,
@@ -18,15 +19,34 @@ import {
   Shield,
   Phone,
   CreditCard,
+  Wallet,
   Stethoscope,
+  ClipboardList,
+  Sparkles,
+  Hourglass,
+  CheckCircle2,
+  CircleCheck,
+  Ban,
+  RefreshCw,
 } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/primitives";
-import { doctorNotificationsApi, type ApiDoctorNotification } from "@/lib/api";
+import { doctorNotificationsApi, doctorProfileApi, type ApiDoctorNotification } from "@/lib/api";
 import { clearSession, type Session } from "@/lib/session";
 
-export type NavItem = { to: string; label: string; group: string; icon?: string };
+const SIDEBAR_COLLAPSED_KEY = "ai-receptionist-sidebar-collapsed";
+
+export type NavChild = { to: string; label: string };
+
+export type NavItem = {
+  to: string;
+  label: string;
+  group: string;
+  icon?: string;
+  /** When set, parent toggles submenu only — it does not navigate. */
+  children?: NavChild[];
+};
 
 const ICON_MAP: Record<string, ReactNode> = {
   Dashboard: <Home className="size-[18px]" strokeWidth={2} />,
@@ -47,20 +67,41 @@ const ICON_MAP: Record<string, ReactNode> = {
   "Activity History": <Activity className="size-[18px]" strokeWidth={2} />,
   Activity: <Activity className="size-[18px]" strokeWidth={2} />,
   Synthflow: <Phone className="size-[18px]" strokeWidth={2} />,
+  "My Clinic": <Phone className="size-[18px]" strokeWidth={2} />,
   "Voice calls": <Phone className="size-[18px]" strokeWidth={2} />,
   Doctors: <Stethoscope className="size-[18px]" strokeWidth={2} />,
   Subscriptions: <CreditCard className="size-[18px]" strokeWidth={2} />,
+  Earnings: <Wallet className="size-[18px]" strokeWidth={2} />,
   "Medical history": <FileText className="size-[18px]" strokeWidth={2} />,
   "Reports & records": <FileText className="size-[18px]" strokeWidth={2} />,
   "Manage doctors": <Stethoscope className="size-[18px]" strokeWidth={2} />,
   "Manage patients": <Users className="size-[18px]" strokeWidth={2} />,
   Subscription: <CreditCard className="size-[18px]" strokeWidth={2} />,
+  Plans: <CreditCard className="size-[18px]" strokeWidth={2} />,
   Billing: <CreditCard className="size-[18px]" strokeWidth={2} />,
   Overview: <Shield className="size-[18px]" strokeWidth={2} />,
+  Users: <Users className="size-[18px]" strokeWidth={2} />,
+  "Team Members": <Users className="size-[18px]" strokeWidth={2} />,
+  "Team members": <Users className="size-[18px]" strokeWidth={2} />,
 };
 
 function getIcon(label: string): ReactNode {
   return ICON_MAP[label] || <Activity className="size-[18px]" strokeWidth={2} />;
+}
+
+const SUBNAV_ICON_MAP: Record<string, ReactNode> = {
+  "All Appointments": <ClipboardList className="size-[15px]" strokeWidth={2} />,
+  New: <Sparkles className="size-[15px]" strokeWidth={2} />,
+  Pending: <Hourglass className="size-[15px]" strokeWidth={2} />,
+  Confirmed: <CheckCircle2 className="size-[15px]" strokeWidth={2} />,
+  Completed: <CircleCheck className="size-[15px]" strokeWidth={2} />,
+  Cancelled: <Ban className="size-[15px]" strokeWidth={2} />,
+  "Follow-Up Appointments": <RefreshCw className="size-[15px]" strokeWidth={2} />,
+  "Team members": <Users className="size-[15px]" strokeWidth={2} />,
+};
+
+function getSubnavIcon(label: string): ReactNode {
+  return SUBNAV_ICON_MAP[label] || <ChevronRight className="size-[14px]" strokeWidth={2} />;
 }
 
 export function AppShell({
@@ -77,13 +118,71 @@ export function AppShell({
   children: ReactNode;
 }) {
   const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  });
   const [accountOpen, setAccountOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<ApiDoctorNotification[]>([]);
+  const [expandedNav, setExpandedNav] = useState<Record<string, boolean>>({});
   const accountRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
+  const [doctorSpecialty, setDoctorSpecialty] = useState("");
   const groups = Array.from(new Set(nav.map((item) => item.group)));
+
+  useEffect(() => {
+    window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
+  }, [collapsed]);
+
+  const autoExpanded = useMemo(() => {
+    const next: Record<string, boolean> = {};
+    for (const item of nav) {
+      if (!item.children?.length) continue;
+      const childActive = item.children.some((child) => {
+        const base = child.to.replace(/\/$/, "");
+        return pathname === child.to || pathname === base || pathname.startsWith(`${base}/`);
+      });
+      if (childActive) next[item.label] = true;
+    }
+    return next;
+  }, [nav, pathname]);
+
+  useEffect(() => {
+    setExpandedNav((current) => ({ ...current, ...autoExpanded }));
+  }, [autoExpanded]);
+
+  useEffect(() => {
+    if (session.role !== "doctor") return;
+    let cancelled = false;
+
+    async function loadSpecialty() {
+      try {
+        const result = await doctorProfileApi.get();
+        if (!cancelled) setDoctorSpecialty(result.profile.specialty.trim());
+      } catch {
+        if (!cancelled) setDoctorSpecialty("");
+      }
+    }
+
+    void loadSpecialty();
+
+    function onSpecialtyUpdated(event: Event) {
+      const specialty = (event as CustomEvent<string>).detail;
+      setDoctorSpecialty(typeof specialty === "string" ? specialty.trim() : "");
+    }
+
+    window.addEventListener("doctor-specialty-updated", onSpecialtyUpdated);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("doctor-specialty-updated", onSpecialtyUpdated);
+    };
+  }, [session.role, session.userId]);
+
+  const roleLabel =
+    session.role === "doctor" ? doctorSpecialty : session.role === "patient" ? "Patient" : "";
 
   const accountLinks =
     accountMenu ??
@@ -102,10 +201,9 @@ export function AppShell({
         : []);
 
   function signOut() {
-    const loginPath = "/";
     clearSession();
     setAccountOpen(false);
-    void navigate({ to: loginPath });
+    void navigate({ to: "/login" });
   }
 
   useEffect(() => {
@@ -167,12 +265,22 @@ export function AppShell({
   const notificationsCount = session.role === "doctor" ? notifications.length : 0;
   const notificationBadge = notificationsCount > 99 ? "99+" : String(notificationsCount);
 
+  function toggleCollapsed() {
+    setCollapsed((value) => {
+      const next = !value;
+      if (next) setExpandedNav({});
+      return next;
+    });
+  }
+
   return (
     <div className="flex h-dvh overflow-hidden bg-background">
       <aside
+        data-collapsed={collapsed ? "true" : "false"}
         className={cn(
-          "fixed inset-y-0 left-0 z-40 flex h-dvh w-[268px] shrink-0 flex-col transition-transform duration-300 lg:static lg:translate-x-0",
+          "fixed inset-y-0 left-0 z-40 flex h-dvh w-[268px] shrink-0 flex-col transition-[width,transform] duration-300 ease-in-out lg:static lg:translate-x-0",
           open ? "translate-x-0" : "-translate-x-full",
+          collapsed && "lg:w-[76px]",
         )}
         style={{
           background: "linear-gradient(180deg, #0B1E4B 0%, #0E2358 45%, #0F2556 100%)",
@@ -188,7 +296,12 @@ export function AppShell({
                 "radial-gradient(circle at 80% 0%, rgba(59, 130, 246, 0.25) 0%, transparent 55%), radial-gradient(circle at 0% 100%, rgba(139, 92, 246, 0.18) 0%, transparent 50%)",
             }}
           />
-          <div className="relative flex items-center gap-3 px-6 py-5">
+          <div
+            className={cn(
+              "relative flex items-center gap-3 py-5",
+              collapsed ? "lg:flex-col lg:gap-2.5 lg:px-2 lg:pt-5" : "px-5",
+            )}
+          >
             <div
               className="grid size-11 shrink-0 place-items-center rounded-2xl text-white"
               style={{
@@ -198,8 +311,8 @@ export function AppShell({
             >
               <Stethoscope className="size-5.5" strokeWidth={2.2} />
             </div>
-            <div className="leading-tight">
-              <p className="font-[--font-display] text-[15.5px] font-bold text-white tracking-tight">
+            <div className={cn("min-w-0 flex-1 leading-tight", collapsed && "lg:hidden")}>
+              <p className="font-sans text-[15.5px] font-bold text-white tracking-tight">
                 AI Receptionist
               </p>
               {brandSuffix ? (
@@ -208,42 +321,176 @@ export function AppShell({
                 </p>
               ) : null}
             </div>
+            <button
+              type="button"
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              onClick={toggleCollapsed}
+              className={cn(
+                "hidden lg:grid size-7 shrink-0 place-items-center rounded-lg text-white/55 transition-colors hover:bg-white/10 hover:text-white",
+                collapsed && "lg:mt-0.5",
+              )}
+            >
+              {collapsed ? (
+                <ChevronRight className="size-4" strokeWidth={2.2} aria-hidden />
+              ) : (
+                <ChevronLeft className="size-4" strokeWidth={2.2} aria-hidden />
+              )}
+            </button>
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto px-4 pb-5 sidebar-scroll scroll-clip">
+        <nav
+          className={cn(
+            "flex-1 overflow-y-auto pb-5 sidebar-scroll scroll-clip",
+            collapsed ? "lg:px-2 px-4" : "px-4",
+          )}
+        >
           {groups.map((group) => (
-            <div key={group} className="mb-1 first:mt-1.5">
+            <div key={group} className="mb-2 first:mt-1.5">
+              <p
+                className={cn(
+                  "mb-1.5 px-2.5 text-[10px] font-bold uppercase tracking-[0.16em] text-white/35",
+                  collapsed && "lg:hidden",
+                )}
+              >
+                {group}
+              </p>
               <div className="space-y-1">
                 {nav
                   .filter((item) => item.group === group)
-                  .map((item) => (
-                    <Link
-                      key={item.to}
-                      {...({ to: item.to } as LinkProps)}
-                      onClick={() => setOpen(false)}
-                      activeOptions={{ exact: item.label === "Dashboard" }}
-                      activeProps={{ className: "sidebar-link-active" }}
-                      inactiveProps={{ className: "sidebar-link-hover" }}
-                      className="sidebar-link group"
-                    >
-                      <span className="grid size-[30px] shrink-0 place-items-center rounded-lg">
-                        {getIcon(item.label)}
-                      </span>
-                      <span className="flex-1 truncate">{item.label}</span>
-                      {item.label === "Notifications" && notificationsCount > 0 ? (
-                        <span
-                          className="grid min-w-[20px] h-5 px-1.5 place-items-center rounded-full text-[10.5px] font-bold text-white"
-                          style={{
-                            background: "linear-gradient(135deg, #EF4444 0%, #F43F5E 100%)",
-                            boxShadow: "0 2px 8px -2px rgba(239, 68, 68, 0.6)",
-                          }}
-                        >
-                          {notificationBadge}
+                  .map((item) => {
+                    if (item.children?.length) {
+                      const isOpen = Boolean(expandedNav[item.label]) && !collapsed;
+                      const childActive = item.children.some((child) => {
+                        const base = child.to.replace(/\/$/, "");
+                        return (
+                          pathname === child.to ||
+                          pathname === base ||
+                          pathname.startsWith(`${base}/`)
+                        );
+                      });
+                      return (
+                        <div key={`nav-${item.label}`} className="space-y-0.5">
+                          <button
+                            type="button"
+                            title={item.label}
+                            aria-expanded={isOpen}
+                            onClick={() => {
+                              if (collapsed) {
+                                setCollapsed(false);
+                                setExpandedNav((current) => ({
+                                  ...current,
+                                  [item.label]: true,
+                                }));
+                                return;
+                              }
+                              setExpandedNav((current) => ({
+                                ...current,
+                                [item.label]: !current[item.label],
+                              }));
+                            }}
+                            className={cn(
+                              "sidebar-link group w-full text-left",
+                              collapsed && "lg:justify-center lg:!px-0 lg:!gap-0",
+                              childActive || isOpen
+                                ? "sidebar-link-active"
+                                : "sidebar-link-hover",
+                            )}
+                          >
+                            <span className="grid size-[30px] shrink-0 place-items-center rounded-lg">
+                              {getIcon(item.label)}
+                            </span>
+                            <span className={cn("flex-1 truncate", collapsed && "lg:hidden")}>
+                              {item.label}
+                            </span>
+                            <span className={cn(collapsed && "lg:hidden")}>
+                              {isOpen ? (
+                                <ChevronDown
+                                  className="size-[16px] shrink-0 text-white/75"
+                                  strokeWidth={2}
+                                  aria-hidden
+                                />
+                              ) : (
+                                <ChevronRight
+                                  className="size-[16px] shrink-0 text-white/75"
+                                  strokeWidth={2}
+                                  aria-hidden
+                                />
+                              )}
+                            </span>
+                          </button>
+                          {isOpen ? (
+                            <div className="ml-4 space-y-0.5 border-l border-white/10 pl-2.5">
+                              {item.children.map((child) => (
+                                <Link
+                                  key={child.to}
+                                  {...({ to: child.to } as LinkProps)}
+                                  onClick={() => setOpen(false)}
+                                  activeOptions={{ exact: true }}
+                                  activeProps={{ className: "sidebar-link-active" }}
+                                  inactiveProps={{ className: "sidebar-link-hover" }}
+                                  className="sidebar-link group !min-h-[36px] !gap-2.5 !py-1.5 !text-[12.5px] !font-medium text-white/80"
+                                >
+                                  <span className="grid size-[26px] shrink-0 place-items-center rounded-md opacity-90">
+                                    {getSubnavIcon(child.label)}
+                                  </span>
+                                  <span className="flex-1 truncate">{child.label}</span>
+                                </Link>
+                              ))}
+                            </div>
+                          ) : null}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <Link
+                        key={item.to}
+                        {...({ to: item.to } as LinkProps)}
+                        title={item.label}
+                        onClick={() => setOpen(false)}
+                        activeOptions={{ exact: item.label === "Dashboard" }}
+                        activeProps={{ className: "sidebar-link-active" }}
+                        inactiveProps={{ className: "sidebar-link-hover" }}
+                        className={cn(
+                          "sidebar-link group",
+                          collapsed && "lg:justify-center lg:!px-0 lg:!gap-0",
+                        )}
+                      >
+                        <span className="relative grid size-[30px] shrink-0 place-items-center rounded-lg">
+                          {getIcon(item.label)}
+                          {collapsed &&
+                          item.label === "Notifications" &&
+                          notificationsCount > 0 ? (
+                            <span
+                              className="absolute -right-0.5 -top-0.5 size-2 rounded-full ring-2 ring-[#0B1E4B] lg:block"
+                              style={{
+                                background: "linear-gradient(135deg, #EF4444 0%, #F43F5E 100%)",
+                              }}
+                              aria-hidden
+                            />
+                          ) : null}
                         </span>
-                      ) : null}
-                    </Link>
-                  ))}
+                        <span className={cn("flex-1 truncate", collapsed && "lg:hidden")}>
+                          {item.label}
+                        </span>
+                        {item.label === "Notifications" && notificationsCount > 0 ? (
+                          <span
+                            className={cn(
+                              "grid min-w-[20px] h-5 px-1.5 place-items-center rounded-full text-[10.5px] font-bold text-white",
+                              collapsed && "lg:hidden",
+                            )}
+                            style={{
+                              background: "linear-gradient(135deg, #EF4444 0%, #F43F5E 100%)",
+                              boxShadow: "0 2px 8px -2px rgba(239, 68, 68, 0.6)",
+                            }}
+                          >
+                            {notificationBadge}
+                          </span>
+                        ) : null}
+                      </Link>
+                    );
+                  })}
               </div>
             </div>
           ))}
@@ -301,7 +548,7 @@ export function AppShell({
                 <Bell className="size-[19px]" strokeWidth={2} />
                 {notificationsCount > 0 ? (
                   <span
-                    className="absolute top-2 right-2 grid min-w-[18px] h-4.5 px-1 place-items-center rounded-full text-[10px] font-bold text-white"
+                    className="absolute -right-0.5 -top-0.5 z-10 grid h-[16px] min-w-[16px] place-items-center rounded-full px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background"
                     style={{
                       background: "linear-gradient(135deg, #EF4444 0%, #F43F5E 100%)",
                       boxShadow: "0 2px 6px -1px rgba(239, 68, 68, 0.55)",
@@ -412,9 +659,9 @@ export function AppShell({
                   <span className="block truncate text-[13px] font-semibold text-foreground">
                     {session.name}
                   </span>
-                  {session.role !== "admin" ? (
+                  {roleLabel ? (
                     <span className="block truncate text-[11px] text-muted-foreground">
-                      {session.role === "doctor" ? "General Physician" : "Patient"}
+                      {roleLabel}
                     </span>
                   ) : null}
                 </span>
@@ -430,12 +677,12 @@ export function AppShell({
               {accountOpen ? (
                 <div
                   role="menu"
-                  className="absolute right-0 z-50 mt-2 w-72 overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+                  className="absolute right-0 z-50 mt-1.5 w-56 overflow-hidden rounded-xl border border-border bg-card shadow-lg"
                 >
-                  <div className="border-b border-border p-5 bg-muted/20">
-                    <div className="flex items-center gap-3.5">
+                  <div className="border-b border-border bg-muted/20 px-3 py-2.5">
+                    <div className="flex items-center gap-2.5">
                       <span
-                        className="grid size-12 shrink-0 place-items-center rounded-2xl font-bold text-white"
+                        className="grid size-8 shrink-0 place-items-center rounded-lg text-[11px] font-bold text-white"
                         style={{
                           background: "linear-gradient(135deg, #6366F1 0%, #4F46E5 100%)",
                         }}
@@ -449,26 +696,26 @@ export function AppShell({
                           .toUpperCase()}
                       </span>
                       <div className="min-w-0 flex-1 leading-tight">
-                        <p className="truncate text-[14px] font-bold text-foreground">
+                        <p className="truncate text-[12.5px] font-bold text-foreground">
                           {session.name}
                         </p>
-                        <p className="truncate text-[12px] text-muted-foreground mt-0.5">
+                        <p className="truncate text-[11px] text-muted-foreground">
                           {session.email}
                         </p>
                       </div>
                     </div>
                   </div>
                   {accountLinks.length > 0 ? (
-                  <div className="border-b border-border py-1.5">
+                  <div className="border-b border-border py-1">
                     {accountLinks.map((item) => (
                       <Link
                         key={item.to}
                         {...({ to: item.to } as LinkProps)}
                         role="menuitem"
                         onClick={() => setAccountOpen(false)}
-                        className="flex items-center gap-3 mx-1.5 my-0.5 px-3.5 py-2.5 rounded-xl text-[13px] font-medium text-foreground transition-colors hover:bg-secondary"
+                        className="flex items-center gap-2 mx-1 my-0.5 px-2.5 py-1.5 rounded-lg text-[12.5px] font-medium text-foreground transition-colors hover:bg-secondary"
                       >
-                        <span className="grid size-8 place-items-center rounded-lg bg-muted text-muted-foreground">
+                        <span className="grid size-6 place-items-center rounded-md bg-muted text-muted-foreground [&>svg]:size-3.5">
                           {getIcon(item.label)}
                         </span>
                         {item.label}
@@ -480,10 +727,10 @@ export function AppShell({
                     type="button"
                     role="menuitem"
                     onClick={signOut}
-                    className="flex items-center gap-3 mx-1.5 my-1.5 w-[calc(100%-12px)] px-3.5 py-3 rounded-xl text-left text-[13px] font-semibold text-destructive transition-colors hover:bg-destructive/8"
+                    className="flex items-center gap-2 mx-1 my-1 w-[calc(100%-8px)] px-2.5 py-1.5 rounded-lg text-left text-[12.5px] font-semibold text-destructive transition-colors hover:bg-destructive/8"
                   >
-                    <span className="grid size-8 place-items-center rounded-lg bg-destructive/10 text-destructive">
-                      <LogOut className="size-4.5" strokeWidth={2} />
+                    <span className="grid size-6 place-items-center rounded-md bg-destructive/10 text-destructive">
+                      <LogOut className="size-3.5" strokeWidth={2} />
                     </span>
                     Sign out
                   </button>

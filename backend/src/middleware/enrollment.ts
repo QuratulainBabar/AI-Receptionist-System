@@ -2,8 +2,12 @@ import type { NextFunction, Request, Response } from "express";
 import { AppError } from "../utils/AppError.js";
 import { isDoctorEnrolled, isDoctorReady } from "../services/subscription.service.js";
 
+function scopeDoctorUserId(req: Request) {
+  return req.clinicContext?.ownerDoctorUserId || req.user?.sub;
+}
+
 export function requireDoctorEnrollment(req: Request, _res: Response, next: NextFunction) {
-  const userId = req.user?.sub;
+  const userId = scopeDoctorUserId(req);
   if (!userId) {
     next(new AppError(401, "Authentication required"));
     return;
@@ -20,7 +24,7 @@ export function requireDoctorEnrollment(req: Request, _res: Response, next: Next
 }
 
 export function requireDoctorReady(req: Request, _res: Response, next: NextFunction) {
-  const userId = req.user?.sub;
+  const userId = scopeDoctorUserId(req);
   if (!userId) {
     next(new AppError(401, "Authentication required"));
     return;

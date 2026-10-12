@@ -274,7 +274,7 @@ export async function getCurrentSubscriptionForUser(userId: string) {
 type DoctorModule = { id: string; label: string; to: string; group: string };
 
 const CLINICAL_MODULES: DoctorModule[] = [
-  { id: "schedule", label: "Appointments", to: "/doctor/schedule", group: "Today" },
+  { id: "schedule", label: "Appointments", to: "/doctor/appointments", group: "Today" },
   { id: "notifications", label: "Notifications", to: "/doctor/notifications", group: "Today" },
   { id: "patients", label: "Patient List", to: "/doctor/patients", group: "Clinical" },
   { id: "records", label: "Reports", to: "/doctor/records", group: "Clinical" },
@@ -284,12 +284,14 @@ const CLINICAL_MODULES: DoctorModule[] = [
 function modulesForPlan(ready: boolean): DoctorModule[] {
   const practice: DoctorModule[] = [
     { id: "dashboard", label: "Dashboard", to: "/doctor", group: "Today" },
-    { id: "synthflow", label: "Synthflow", to: "/doctor/synthflow", group: "Phone AI" },
+    { id: "synthflow", label: "My Clinic", to: "/doctor/clinic", group: "Phone AI" },
     { id: "profile", label: "My profile", to: "/doctor/profile", group: "Practice" },
     { id: "availability", label: "Availability", to: "/doctor/availability", group: "Practice" },
-    { id: "subscription", label: "Subscription", to: "/doctor/subscription", group: "Practice" },
+    { id: "team", label: "Users", to: "/doctor/team", group: "Practice" },
+    { id: "subscription", label: "Plans", to: "/doctor/subscription", group: "Practice" },
+    { id: "settings", label: "Settings", to: "/doctor/settings", group: "Practice" },
   ];
-  if (!ready) return practice;
+  if (!ready) return practice.filter((mod) => mod.id !== "team");
   return [
     practice[0]!,
     ...CLINICAL_MODULES.filter((mod) => mod.group === "Today"),
@@ -472,7 +474,9 @@ export async function createCheckoutSession(userId: string, planId: string, retu
     customer: customerId,
     client_reference_id: user.id,
     line_items: [{ price: plan.stripePriceId, quantity: 1 }],
-    success_url: `${origin}/doctor?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+    success_url: alreadyEnrolled
+      ? `${origin}/doctor?checkout=success&session_id={CHECKOUT_SESSION_ID}`
+      : `${origin}/doctor/profile?setup=1&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: alreadyEnrolled
       ? `${origin}/doctor/subscription?checkout=cancelled`
       : `${origin}/doctor/onboarding?checkout=cancelled`,
@@ -539,6 +543,10 @@ export async function handleStripeEvent(event: Stripe.Event) {
         subscription?: string | { id?: string };
         parent?: { subscription_details?: { subscription?: string | { id?: string } } };
       };
+      if (event.type === "invoice.paid") {
+        const { recordSubscriptionPaymentFromInvoice } = await import("./admin-earnings.service.js");
+        await recordSubscriptionPaymentFromInvoice(invoice);
+      }
       const raw =
         invoice.subscription || invoice.parent?.subscription_details?.subscription;
       const id = typeof raw === "string" ? raw : raw?.id;

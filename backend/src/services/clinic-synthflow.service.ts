@@ -104,13 +104,14 @@ CRITICAL RULES:
 - Keep every response to 1-2 short sentences. Ask only one question per turn, then wait.
 - Never give medical advice or diagnoses.
 - Never invent another doctor, specialty list, or time.
-- Never read experience, qualifications, bio, languages, hospital, or other profile details.
-- Appointments are 30 minutes, in clinic.
+- Use only the latest Clinic doctor profile block for specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, and consultation type.
+- Never invent or reuse outdated profile details that are not in the Clinic doctor block.
+- Availability and bookable times come only from open slots / check_doctor_availability — never invent times.
 - One active appointment per mobile: if active_appointment_found is true, tell the caller using active_appointment_block_message and do not book again.
-- If asked about the doctor, say only the name and the consultation fee when a fee is set.
+- If asked about the doctor, answer from the Clinic doctor profile (specialty, experience, qualifications, clinic, fee, languages, and other listed details).
 - Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.
 
-Use the Clinic doctor name and open slots injected on sync and on each call.`;
+Use the Clinic doctor profile and open slots injected on sync and on each call.`;
 }
 
 const CLINIC_DOCTOR_HEADING = "## Clinic doctor";
@@ -146,6 +147,9 @@ export async function buildDoctorsDirectoryKnowledge() {
   if (!doctor) {
     return {
       doctorsCount: 0,
+      clinicDoctorName: null as string | null,
+      clinicDoctorId: null as string | null,
+      openSlotsSummary: "none",
       knowledge: [
         `${CLINIC_DOCTOR_HEADING} (source of truth)`,
         "No active doctor profile is configured in the Doctor Dashboard yet.",
@@ -162,31 +166,48 @@ export async function buildDoctorsDirectoryKnowledge() {
 
   const profile = clinicDoctorProfileBlock(doctor);
   const fee = consultationFeeToSpeak(profile.fee);
+  const feeSpoken = fee
+    ? `${fee}${profile.feeCurrency ? ` ${profile.feeCurrency}` : ""}`.trim()
+    : "";
   const openingLabels = formatOpenSlotLabels(doctor.availability, {
     withIds: true,
     limit: 8,
   });
+  const openSlotsSummary = openingLabels.length ? openingLabels.join("; ") : "none";
+  const list = (items: string[]) =>
+    items.map((item) => item.trim()).filter(Boolean).join(", ") || "none";
 
   return {
     doctorsCount: 1,
     clinicDoctorName: profile.doctorName,
     clinicDoctorId: profile.doctorId,
+    openSlotsSummary,
     knowledge: [
-      `${CLINIC_DOCTOR_HEADING} (internal — do not read this block aloud)`,
+      `${CLINIC_DOCTOR_HEADING} (source of truth — use only these details)`,
       "This clinic has exactly ONE doctor. Never mention any other doctor.",
-      "IGNORE any older doctor names elsewhere in this prompt if they conflict with this Clinic doctor block.",
-      "The greeting already says the doctor name and the consultation fee when a fee is set. Do not add specialty, experience, qualifications, bio, languages, hospital, or other profile details.",
+      "IGNORE any older doctor names or profile details elsewhere in this prompt if they conflict with this Clinic doctor block.",
+      "This block is refreshed whenever the doctor saves My Profile or Availability. Never invent missing fields.",
       `Doctor name: ${profile.doctorName}`,
       `doctor_id (for actions only — never speak this id): ${profile.doctorId}`,
-      `Consultation fee (say only in the greeting, and only when set): ${fee || "none"}`,
-      `Bookable open slots (do not recite until the caller wants to book; then call check_doctor_availability and say only those times): ${
-        openingLabels.length ? openingLabels.join("; ") : "none"
-      }`,
+      `Specialty: ${profile.specialty || "none"}`,
+      `Years of experience: ${profile.experienceYears}`,
+      `Hospital / clinic: ${profile.hospital}`,
+      `Clinic location: ${profile.location || "none"}`,
+      `Consultation fee: ${feeSpoken || "none"}`,
+      `Consultation type: ${profile.consultationType}`,
+      `Consultation services: ${list(profile.consultationServices)}`,
+      `Qualifications: ${list(profile.qualifications)}`,
+      `Certifications: ${list(profile.certifications)}`,
+      `Areas of expertise: ${list(profile.areasOfExpertise)}`,
+      `Languages: ${list(profile.languages)}`,
+      `About: ${profile.bio}`,
+      `Usual weekly hours (for context only — bookable times come from open slots): ${profile.weeklyHoursSummary}`,
+      `Bookable open slots (do not recite until the caller wants to book; then call check_doctor_availability and say only those times): ${openSlotsSummary}`,
       "",
       "## How to use this profile",
-      "- On the opening, say only the doctor name and the consultation fee when one is set.",
-      "- When the caller wants an appointment, say ONLY the open times from check_doctor_availability. Do not add profile details.",
-      "- If the caller asks about the doctor, repeat only the name and the fee when a fee is set.",
+      "- On the opening, say the doctor name and the consultation fee when one is set.",
+      "- If the caller asks about the doctor, answer from this block (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about).",
+      "- When the caller wants an appointment, say ONLY the open times from check_doctor_availability. Do not invent times.",
       "- Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
     ].join("\n"),
   };
@@ -476,23 +497,17 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
   const greeting = greetingWithOpeningLine(
     input?.firstMessage?.trim() || settings.agentFirstMessage.trim() || defaultGreeting(clinicName),
   );
-  // Always prefer the one-to-one prompt from agent-prompt.md so Sync refreshes
-  // multi-doctor language left in older stored prompts.
+  // Always rebuild from the template + live clinic doctor/slots.
+  // Never reuse a stored system prompt — it can keep yesterday's open times.
   const filePrompt = loadDefaultPromptFromFile();
-  const storedPrompt =
-    input?.systemPrompt?.trim() ||
-    settings.agentSystemPrompt.trim() ||
-    "";
-  const basePrompt =
-    filePrompt ||
-    stripOutdatedDoctorLists(storedPrompt) ||
-    fallbackPrompt(clinicName);
+  const basePrompt = filePrompt || fallbackPrompt(clinicName);
 
-  const { knowledge, doctorsCount, clinicDoctorName, clinicDoctorId } =
+  const { knowledge, doctorsCount, clinicDoctorName, clinicDoctorId, openSlotsSummary } =
     await buildDoctorsDirectoryKnowledge();
   console.log(
     `[synthflow] Syncing clinic doctor → ${clinicDoctorName || "none"} (${clinicDoctorId || "n/a"})`,
   );
+  console.log(`[synthflow] Open slots pushed to prompt → ${openSlotsSummary}`);
   const bodyPrompt = mergeDirectoryIntoPrompt(
     stripOutdatedDoctorLists(basePrompt) || filePrompt || fallbackPrompt(clinicName),
     knowledge,
@@ -615,6 +630,7 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     doctorsCount,
     clinicDoctorName: clinicDoctorName ?? null,
     clinicDoctorId: clinicDoctorId ?? null,
+    openSlotsSummary,
     webhookUrls: urls,
     warning: warnings.length ? warnings.join(" ") : null,
     settings: await getClinicVoiceSettings(),
@@ -628,6 +644,7 @@ export async function syncClinicDirectoryToSynthflow() {
   }
   // Do not pass the previous full prompt (it may still name an old doctor).
   // createOrUpdateClinicSynthflowAgent reloads agent-prompt.md + live Clinic doctor.
+  // Never reuse a stored systemPrompt — it can keep yesterday's open slots.
   return createOrUpdateClinicSynthflowAgent({
     firstMessage: settings.agentFirstMessage,
     phoneNumber: settings.phoneNumber,
@@ -637,14 +654,37 @@ export async function syncClinicDirectoryToSynthflow() {
   });
 }
 
+/**
+ * Push the live clinic doctor + open slots into the Synthflow system prompt.
+ * Used after Availability / profile changes so the phone agent stays current.
+ */
+export async function syncPromptAfterAvailabilityChange(reason: string): Promise<{
+  synced: boolean;
+  openSlotsSummary: string | null;
+  warning: string | null;
+}> {
+  const settings = await getOrCreateSettings();
+  if (!settings.synthflowAgentId) {
+    console.warn(`[synthflow] Skip prompt sync (${reason}) — no Synthflow agent yet.`);
+    return { synced: false, openSlotsSummary: null, warning: "Create a Synthflow agent first." };
+  }
+  try {
+    const result = await syncClinicDirectoryToSynthflow();
+    console.log(`[synthflow] Prompt synced after ${reason}`);
+    return {
+      synced: true,
+      openSlotsSummary: result.openSlotsSummary ?? null,
+      warning: result.warning,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[synthflow] auto prompt sync failed (${reason}):`, message);
+    return { synced: false, openSlotsSummary: null, warning: message };
+  }
+}
+
 export function queueDirectorySync(reason: string) {
-  void syncClinicDirectoryToSynthflow().catch((error) => {
-    console.warn(
-      "[synthflow] auto directory sync failed:",
-      reason,
-      error instanceof Error ? error.message : error,
-    );
-  });
+  void syncPromptAfterAvailabilityChange(reason);
 }
 
 export async function resolveBootAgentId() {

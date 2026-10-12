@@ -189,9 +189,25 @@ const voiceCallInclude = {
   },
 } as const;
 
-export async function listVoiceCallsForAdmin(input: { q?: string; limit?: number }) {
+/** Test / Synthflow stub numbers that look like static demo data in the UI. */
+function isPlaceholderFromNumber(value: string) {
+  const digits = value.replace(/\D/g, "");
+  if (!digits) return true;
+  if (digits.includes("1234567890")) return true;
+  if (digits.includes("555555")) return true;
+  return false;
+}
+
+export async function listVoiceCallsForAdmin(input: {
+  q?: string;
+  limit?: number;
+  /** When true (default), hide placeholder/test caller numbers from admin lists. */
+  excludePlaceholders?: boolean;
+}) {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
   const q = input.q?.trim();
+  const excludePlaceholders = input.excludePlaceholders !== false;
+  const fetchLimit = excludePlaceholders ? Math.min(limit * 8, 200) : limit;
 
   const rows = await prisma.voiceCall.findMany({
     where: q
@@ -210,10 +226,12 @@ export async function listVoiceCallsForAdmin(input: { q?: string; limit?: number
       : undefined,
     include: voiceCallInclude,
     orderBy: { createdAt: "desc" },
-    take: limit,
+    take: fetchLimit,
   });
 
-  return rows.map(mapVoiceCall);
+  const mapped = rows.map(mapVoiceCall);
+  if (!excludePlaceholders) return mapped.slice(0, limit);
+  return mapped.filter((row) => !isPlaceholderFromNumber(row.fromNumber)).slice(0, limit);
 }
 
 export async function getVoiceCallForAdmin(id: string): Promise<AdminVoiceCallDetail> {
@@ -356,6 +374,7 @@ function mapPublicAppointment(row: {
   fee: string;
   followUpOfId: string | null;
   followUpOf?: { reference: string } | null;
+  createdAt?: Date;
 }): PublicAppointment {
   return {
     id: row.id,
@@ -374,6 +393,7 @@ function mapPublicAppointment(row: {
     clinic: row.clinic,
     fee: row.fee,
     startsAt: row.startsAt.toISOString(),
+    createdAt: (row.createdAt || row.startsAt).toISOString(),
     followUpOfId: row.followUpOfId ?? null,
     followUpOfReference: row.followUpOf?.reference ?? null,
     isFollowUp: Boolean(row.followUpOfId),

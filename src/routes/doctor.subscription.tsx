@@ -10,7 +10,7 @@ export const Route = createFileRoute("/doctor/subscription")({
     checkout: typeof search.checkout === "string" ? search.checkout : undefined,
   }),
   head: () => ({
-    meta: [{ title: "Subscription — Doctor portal" }],
+    meta: [{ title: "Plans — Doctor portal" }],
   }),
   component: DoctorSubscriptionPage,
 });
@@ -43,7 +43,7 @@ function DoctorSubscriptionPage() {
         setError("Billing is not configured yet. Ask Super Admin to add Stripe test keys.");
       }
     } catch (err) {
-      setError(formatApiError(err, "Unable to load subscription plans."));
+      setError(formatApiError(err, "Unable to load plans."));
     } finally {
       setLoading(false);
     }
@@ -55,12 +55,15 @@ function DoctorSubscriptionPage() {
 
   useEffect(() => {
     if (search.checkout === "success") {
-      setNotice("Checkout complete. Stripe will sync your subscription status shortly.");
+      setNotice("Checkout complete. Your plan status will update shortly.");
     }
     if (search.checkout === "cancelled") {
       setError("Checkout was cancelled. You can choose a plan again when you are ready.");
     }
   }, [search.checkout]);
+
+  const planActive =
+    subscription != null && ["ACTIVE", "TRIALING"].includes(subscription.status);
 
   async function startCheckout(planId: string) {
     setBusyId(planId);
@@ -78,15 +81,19 @@ function DoctorSubscriptionPage() {
   return (
     <>
       <PageHeader
-        title="Your subscription"
-        description="Your plan is active. Stripe remains the source of truth for payment and renewal dates."
+        title="Your plans"
+        description={
+          planActive
+            ? "Your plan is active. Billing and renewal dates stay in sync with Stripe."
+            : "Compare plans below and choose the one that fits your clinic."
+        }
       />
 
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
       {notice ? <p className="mb-4 text-sm text-primary">{notice}</p> : null}
 
       {loading ? (
-        <EmptyNote>Loading your subscription…</EmptyNote>
+        <EmptyNote>Loading plans…</EmptyNote>
       ) : (
         <>
           <Panel className="mb-6 p-4">
@@ -115,12 +122,14 @@ function DoctorSubscriptionPage() {
                 </div>
               </div>
             ) : (
-              <p className="mt-3 text-sm text-muted-foreground">You do not have a subscription yet. Select a plan below to continue.</p>
+              <p className="mt-3 text-sm text-muted-foreground">
+                You do not have a plan yet. Select one below to continue.
+              </p>
             )}
           </Panel>
 
           {!plans.length ? (
-            <EmptyNote>No subscription plans are available. Super Admin can create them in Subscriptions.</EmptyNote>
+            <EmptyNote>No plans are available yet. Super Admin can publish them from Billing.</EmptyNote>
           ) : (
             <div className="grid gap-4 md:grid-cols-3">
               {plans.map((plan) => {
@@ -136,7 +145,7 @@ function DoctorSubscriptionPage() {
                     <p className="text-sm font-semibold">{plan.name}</p>
                     <p className="mt-1 text-2xl font-semibold">{plan.amountLabel}</p>
                     <p className="text-xs text-muted-foreground">per {plan.billingCycleLabel.toLowerCase().replace("ly", "")}</p>
-                    <p className="mt-3 text-sm text-muted-foreground">{plan.description || "Clinic subscription plan"}</p>
+                    <p className="mt-3 text-sm text-muted-foreground">{plan.description || "Clinic plan"}</p>
                     <ul className="mt-4 flex-1 space-y-2.5 text-sm">
                       {plan.features.map((feature) => (
                         <li key={feature} className="flex items-start gap-2.5">
@@ -155,7 +164,7 @@ function DoctorSubscriptionPage() {
                       disabled={Boolean(busyId) || current}
                       onClick={() => void startCheckout(plan.id)}
                     >
-                      {current ? "Current plan" : busyId === plan.id ? "Redirecting…" : "Subscribe with Stripe"}
+                      {current ? "Current plan" : busyId === plan.id ? "Redirecting…" : "Choose plan"}
                     </Button>
                   </Panel>
                 );

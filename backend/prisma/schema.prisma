@@ -11,6 +11,22 @@ enum Role {
   PATIENT
   DOCTOR
   SUPER_ADMIN
+  CLINIC_STAFF
+}
+
+enum ClinicStaffRole {
+  RECEPTIONIST
+  CLINIC_ADMINISTRATOR
+  OFFICE_MANAGER
+  APPOINTMENT_COORDINATOR
+  NURSE
+  BILLING
+  ADDITIONAL_DOCTOR
+}
+
+enum ClinicMemberStatus {
+  ACTIVE
+  INACTIVE
 }
 
 enum AppointmentStatus {
@@ -57,6 +73,12 @@ enum AppointmentInvoiceStatus {
   FAILED
 }
 
+enum SubscriptionPaymentStatus {
+  PAID
+  REFUNDED
+  FAILED
+}
+
 enum VoiceCallDirection {
   INBOUND
   OUTBOUND
@@ -88,6 +110,10 @@ model User {
   email        String   @unique
   passwordHash String
   fullName     String
+  /** Optional contact phone for the account holder (admin / patient / staff). Doctors also keep clinic contact on DoctorProfile. */
+  phone             String   @default("")
+  /** Public path under /uploads/user-photos (Super Admin and other account avatars). */
+  photoUrl          String   @default("")
   role         Role
   reference    String   @unique
   isActive          Boolean  @default(true)
@@ -113,6 +139,8 @@ model User {
   doctorClinicalNotes   ClinicalNote[] @relation("DoctorClinicalNotes")
   patientPrescriptions  DoctorPrescription[] @relation("PatientPrescriptions")
   doctorPrescriptions   DoctorPrescription[] @relation("DoctorPrescriptions")
+  ownedClinicMembers    ClinicTeamMember[] @relation("ClinicTeamOwner")
+  clinicMemberships     ClinicTeamMember[] @relation("ClinicTeamMemberUser")
 
   @@index([role])
   @@index([isActive])
@@ -157,8 +185,18 @@ model DoctorProfile {
   /** Hospital / clinic name shown to patients and Synthflow. */
   clinic            String
   fee               String
+  /** ISO currency code for consultation fee (e.g. USD, PKR). */
+  feeCurrency       String   @default("USD")
   consultationType  String   @default("In clinic")
+  /** Services offered (e.g. General consult, Follow-up). */
+  consultationServices String[] @default([])
   languages         String[]
+  /** Optional contact phone for the doctor (not the clinic AI number). */
+  phone             String   @default("")
+  /** Which patient SMS messages this clinic sends. Missing keys stay enabled. */
+  smsPreferences    Json?
+  /** Public path to profile photo under /uploads/doctor-photos. */
+  photoUrl          String   @default("")
   /** Professional bio shown when a patient asks about the doctor. */
   about             String
   areasOfExpertise  String[] @default([])
@@ -576,9 +614,57 @@ model Subscription {
   trialEnd               DateTime?
   createdAt              DateTime           @default(now())
   updatedAt              DateTime           @updatedAt
+  payments               SubscriptionPayment[]
 
   @@index([userId, status])
   @@index([planId, status])
   @@index([stripeCustomerId])
   @@map("subscriptions")
+}
+
+/** Successful (and adjusted) Stripe invoice payments for doctor subscriptions. */
+model SubscriptionPayment {
+  id                     String                    @id @default(cuid())
+  subscriptionId         String?
+  subscription           Subscription?             @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  userId                 String?
+  planId                 String?
+  stripeInvoiceId        String                    @unique
+  stripePaymentIntentId  String                    @default("")
+  stripeSubscriptionId   String                    @default("")
+  invoiceNumber          String                    @default("")
+  amountCents            Int
+  currency               String                    @default("usd")
+  status                 SubscriptionPaymentStatus @default(PAID)
+  billingReason          String                    @default("")
+  paidAt                 DateTime
+  createdAt              DateTime                  @default(now())
+  updatedAt              DateTime                  @updatedAt
+
+  @@index([paidAt])
+  @@index([userId, paidAt])
+  @@index([planId, paidAt])
+  @@index([status, paidAt])
+  @@map("subscription_payments")
+}
+
+/** Staff accounts belonging to a doctor's clinic (managed from Users / Team Members). */
+model ClinicTeamMember {
+  id               String             @id @default(cuid())
+  ownerDoctorUserId String
+  ownerDoctor      User               @relation("ClinicTeamOwner", fields: [ownerDoctorUserId], references: [id], onDelete: Cascade)
+  memberUserId     String
+  memberUser       User               @relation("ClinicTeamMemberUser", fields: [memberUserId], references: [id], onDelete: Cascade)
+  staffRole        ClinicStaffRole
+  status           ClinicMemberStatus @default(ACTIVE)
+  /** Permission flags: appointments, patients, medicalReports, callTranscriptions, followUps, invoices, availability, clinicSettings, teamMembers */
+  permissions      Json
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@unique([ownerDoctorUserId, memberUserId])
+  @@unique([memberUserId])
+  @@index([ownerDoctorUserId, status])
+  @@index([staffRole])
+  @@map("clinic_team_members")
 }

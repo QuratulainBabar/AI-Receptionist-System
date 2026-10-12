@@ -14,11 +14,17 @@ function withApiHeaders(init?: HeadersInit) {
 
 export type AuthRole = "patient" | "doctor" | "admin";
 
+export type ApiSystemRole = "PATIENT" | "DOCTOR" | "SUPER_ADMIN" | "CLINIC_STAFF";
+
 export type ApiUser = {
   id: string;
   email: string;
   fullName: string;
+  phone?: string;
+  photoUrl?: string;
   role: AuthRole;
+  systemRole?: ApiSystemRole;
+  systemRoleLabel?: string;
   reference: string;
   isActive: boolean;
   createdAt?: string;
@@ -148,11 +154,33 @@ export type ApiDoctor = {
   nextAvailable: string;
 };
 
+export type ApiWeeklyHourSession = {
+  startTime: string;
+  endTime: string;
+};
+
 export type ApiWeeklyHourSlot = {
   day: string;
   enabled: boolean;
   startTime: string;
   endTime: string;
+  sessions?: ApiWeeklyHourSession[];
+};
+
+export type ApiDateOverride = {
+  date: string;
+  type: "unavailable" | "custom";
+  sessions?: ApiWeeklyHourSession[];
+  breaks?: ApiWeeklyHourSession[];
+};
+
+export type ApiAvailabilityConfig = {
+  version?: 2;
+  slotDurationMinutes: 15 | 30 | 45 | 60;
+  scheduleFrom?: string | null;
+  scheduleTo?: string | null;
+  days: ApiWeeklyHourSlot[];
+  dateOverrides?: ApiDateOverride[];
 };
 
 export type ApiDoctorProfile = {
@@ -161,6 +189,9 @@ export type ApiDoctorProfile = {
   fullName: string;
   email: string;
   reference: string;
+  isActive?: boolean;
+  phone?: string;
+  photoUrl?: string;
   specialtyId: string;
   specialty: string;
   subSpecialty: string;
@@ -171,27 +202,40 @@ export type ApiDoctorProfile = {
   areasOfExpertise: string[];
   clinic: string;
   fee: string;
+  feeCurrency?: string;
   consultationType: string;
+  consultationServices?: string[];
   languages: string[];
   location: string;
   weeklyHours: ApiWeeklyHourSlot[];
   weeklyHoursSummary: string;
+  availabilityConfig?: ApiAvailabilityConfig;
   timezone?: string;
   rating: number;
   reviews: number;
   isVerified?: boolean;
   verifiedAt?: string | null;
   verificationNote?: string;
+  updatedAt?: string;
 };
 
 export type ApiAdminDoctor = ApiUser & {
   specialty: string | null;
   clinic: string | null;
   fee: string | null;
+  phone: string | null;
   isVerified: boolean;
   verifiedAt: string | null;
   subscriptionStatus: string | null;
   subscriptionPlanName: string | null;
+  totalAppointments: number;
+  upcomingAppointments: number;
+};
+
+export type ApiAdminDoctorSummary = {
+  total: number;
+  active: number;
+  inactive: number;
 };
 
 export type ApiBillingCycle = "MONTHLY" | "YEARLY";
@@ -276,6 +320,84 @@ export type ApiSubscriptionOverview = {
   currentSubscribers: number;
 };
 
+export type ApiEarningsRangeKey = "this_month" | "last_month" | "last_3_months" | "custom";
+
+export type ApiAdminEarnings = {
+  stripeConfigured: boolean;
+  sync: { synced: number; stripeConfigured: boolean } | null;
+  currency: string;
+  range: {
+    key: string;
+    label: string;
+    start: string;
+    end: string;
+  };
+  summary: {
+    totalRevenueCents: number;
+    totalRevenueLabel: string;
+    totalRevenueChangePct: number | null;
+    subscriptionPaymentsCents: number;
+    subscriptionPaymentsLabel: string;
+    subscriptionPaymentsChangePct: number | null;
+    outstandingCents: number;
+    outstandingLabel: string;
+    outstandingSupported: boolean;
+    outstandingNote: string;
+    activeSubscriptions: number;
+    paidPaymentCount: number;
+    previousPaidPaymentCount: number;
+  };
+  chart: {
+    mode: "day" | "month";
+    points: Array<{ period: string; amountCents: number; amountLabel: string }>;
+  };
+  planBreakdown: Array<{
+    planId: string;
+    planName: string;
+    billingCycle: ApiBillingCycle;
+    billingCycleLabel: string;
+    priceCents: number;
+    priceLabel: string;
+    subscriberCount: number;
+    collectedCents: number;
+    collectedLabel: string;
+    isActive: boolean;
+  }>;
+  billingIntervalTotals: {
+    monthlyCollectedCents: number;
+    yearlyCollectedCents: number;
+    monthlySubscribers: number;
+    yearlySubscribers: number;
+  };
+  payments: {
+    rows: Array<{
+      id: string;
+      doctorName: string;
+      clinic: string;
+      doctorEmail: string | null;
+      doctorReference: string | null;
+      planName: string;
+      billingCycle: ApiBillingCycle | null;
+      billingCycleLabel: string;
+      paymentDate: string;
+      amountCents: number;
+      amountLabel: string;
+      currency: string;
+      status: string;
+      statusLabel: string;
+      invoiceReference: string;
+      stripeInvoiceId: string;
+      stripeSubscriptionId: string;
+      subscriptionId: string | null;
+    }>;
+    page: number;
+    pageSize: number;
+    total: number;
+    totalPages: number;
+  };
+  empty: boolean;
+};
+
 export type ApiAdminDoctorSlot = {
   id: string;
   startsAt: string;
@@ -342,6 +464,7 @@ export type ApiAppointment = {
   clinic: string;
   fee: string;
   startsAt: string;
+  createdAt?: string;
   followUpOfId?: string | null;
   followUpOfReference?: string | null;
   isFollowUp?: boolean;
@@ -586,6 +709,13 @@ export const authApi = {
       body: JSON.stringify(payload),
     });
   },
+  changePassword(payload: { currentPassword: string; newPassword: string }) {
+    return request<{ success: boolean; message: string }>(
+      "/api/auth/change-password",
+      { method: "POST", body: JSON.stringify(payload) },
+      authHeader(),
+    );
+  },
   me(token: string) {
     return request<{ success: boolean; user: ApiUser }>("/api/auth/me", { method: "GET" }, token);
   },
@@ -702,11 +832,69 @@ export const adminApi = {
     if (params?.status) search.set("status", params.status);
     if (params?.verification) search.set("verification", params.verification);
     const qs = search.toString();
-    return request<{ success: boolean; users: ApiAdminDoctor[] }>(
-      `/api/admin/doctors${qs ? `?${qs}` : ""}`,
-      { method: "GET" },
-      authHeader(),
+    return request<{
+      success: boolean;
+      users: ApiAdminDoctor[];
+      summary: ApiAdminDoctorSummary;
+    }>(`/api/admin/doctors${qs ? `?${qs}` : ""}`, { method: "GET" }, authHeader());
+  },
+  createDoctor(body: {
+    fullName: string;
+    email: string;
+    password: string;
+    isActive?: boolean;
+    phone?: string;
+    specialtyId?: string;
+    specialty?: string;
+    subSpecialty?: string;
+    qualifications?: string[] | string;
+    certifications?: string[] | string;
+    experienceYears?: number;
+    about?: string;
+    areasOfExpertise?: string[] | string;
+    clinic?: string;
+    fee?: string;
+    consultationType?: "In clinic" | "Video call" | "Both";
+    languages?: string[] | string;
+    location?: string;
+    weeklyHours?: ApiWeeklyHourSlot[];
+    isVerified?: boolean;
+    verificationNote?: string;
+  }) {
+    return request<{
+      success: boolean;
+      user: ApiUser;
+      profile: ApiDoctorProfile | null;
+      message?: string;
+    }>("/api/admin/doctors", { method: "POST", body: JSON.stringify(body) }, authHeader());
+  },
+  deleteDoctor(userId: string) {
+    return request<{
+      success: boolean;
+      deleted: { id: string; fullName: string; email: string };
+      message?: string;
+    }>(`/api/admin/doctors/${encodeURIComponent(userId)}`, { method: "DELETE" }, authHeader());
+  },
+  async uploadDoctorPhoto(userId: string, file: File) {
+    const form = new FormData();
+    form.append("photo", file);
+    const token = authHeader();
+    const headers = withApiHeaders();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    const response = await fetch(
+      `${getApiBaseUrl()}/api/admin/doctors/${encodeURIComponent(userId)}/photo`,
+      { method: "POST", headers, body: form },
     );
+    const body = (await response.json().catch(() => ({}))) as {
+      success?: boolean;
+      profile?: ApiDoctorProfile;
+      message?: string;
+      errors?: unknown;
+    };
+    if (!response.ok) {
+      throw new ApiError(response.status, body.message || "Unable to upload photo", body.errors);
+    }
+    return body as { success: boolean; profile: ApiDoctorProfile; message?: string };
   },
   getDoctorCrm(userId: string) {
     return request<{
@@ -714,6 +902,8 @@ export const adminApi = {
       user: ApiUser;
       profile: ApiDoctorProfile | null;
       subscription: ApiSubscription | null;
+      totalAppointments: number;
+      upcomingAppointments: number;
     }>(
       `/api/admin/doctors/${userId}/crm`,
       { method: "GET" },
@@ -785,9 +975,123 @@ export const adminApi = {
       authHeader(),
     );
   },
+  getSettingsProfile() {
+    return request<{ success: boolean; user: ApiUser }>(
+      "/api/admin/settings/profile",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  updateSettingsProfile(body: { fullName?: string; phone?: string }) {
+    return request<{ success: boolean; user: ApiUser; message?: string }>(
+      "/api/admin/settings/profile",
+      { method: "PATCH", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  async uploadSettingsPhoto(file: File) {
+    const form = new FormData();
+    form.append("photo", file);
+    const token = authHeader();
+    const headers = withApiHeaders();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+
+    let response: Response;
+    try {
+      response = await fetch(`${getApiBaseUrl()}/api/admin/settings/profile/photo`, {
+        method: "POST",
+        headers,
+        body: form,
+      });
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new ApiError(
+          0,
+          "Cannot reach the API. Make sure the backend is running on http://localhost:4000.",
+        );
+      }
+      throw error;
+    }
+
+    const body = (await response.json()) as {
+      success?: boolean;
+      message?: string;
+      user?: ApiUser;
+      errors?: Record<string, string[] | undefined>;
+    };
+
+    if (!response.ok || !body.user) {
+      throw new ApiError(response.status, body.message || "Unable to upload photo", body.errors);
+    }
+
+    return body as { success: boolean; user: ApiUser; message?: string };
+  },
+  removeSettingsPhoto() {
+    return request<{ success: boolean; user: ApiUser; message?: string }>(
+      "/api/admin/settings/profile/photo",
+      { method: "DELETE" },
+      authHeader(),
+    );
+  },
+  listSystemUsers(params?: {
+    q?: string;
+    status?: "active" | "inactive" | "all";
+    role?: "all" | "doctor" | "patient" | "clinic_staff" | "admin";
+  }) {
+    const search = new URLSearchParams();
+    if (params?.q) search.set("q", params.q);
+    if (params?.status) search.set("status", params.status);
+    if (params?.role) search.set("role", params.role);
+    const qs = search.toString();
+    return request<{ success: boolean; users: ApiUser[] }>(
+      `/api/admin/system-users${qs ? `?${qs}` : ""}`,
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  createSystemUser(body: {
+    fullName: string;
+    email: string;
+    password: string;
+    role: "patient" | "doctor";
+  }) {
+    return request<{ success: boolean; user: ApiUser; message?: string }>(
+      "/api/admin/system-users",
+      { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
   subscriptionOverview() {
     return request<{ success: boolean; overview: ApiSubscriptionOverview }>(
       "/api/admin/subscriptions/overview",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  getEarnings(params?: {
+    range?: ApiEarningsRangeKey;
+    from?: string;
+    to?: string;
+    q?: string;
+    planId?: string;
+    status?: string;
+    page?: number;
+    pageSize?: number;
+    sync?: boolean;
+  }) {
+    const search = new URLSearchParams();
+    if (params?.range) search.set("range", params.range);
+    if (params?.from) search.set("from", params.from);
+    if (params?.to) search.set("to", params.to);
+    if (params?.q) search.set("q", params.q);
+    if (params?.planId) search.set("planId", params.planId);
+    if (params?.status) search.set("status", params.status);
+    if (params?.page) search.set("page", String(params.page));
+    if (params?.pageSize) search.set("pageSize", String(params.pageSize));
+    if (params?.sync) search.set("sync", "true");
+    const qs = search.toString();
+    return request<{ success: boolean; earnings: ApiAdminEarnings }>(
+      `/api/admin/subscriptions/earnings${qs ? `?${qs}` : ""}`,
       { method: "GET" },
       authHeader(),
     );
@@ -892,6 +1196,7 @@ export const adminApi = {
       doctorsCount: number;
       clinicDoctorName: string | null;
       clinicDoctorId: string | null;
+      openSlotsSummary?: string | null;
       warning: string | null;
       settings: ClinicSynthflowSettings;
     }>("/api/admin/synthflow/agent", { method: "POST", body: JSON.stringify(body ?? {}) }, authHeader());
@@ -904,6 +1209,7 @@ export const adminApi = {
       doctorsCount: number;
       clinicDoctorName: string | null;
       clinicDoctorId: string | null;
+      openSlotsSummary?: string | null;
       warning: string | null;
       settings: ClinicSynthflowSettings;
     }>("/api/admin/synthflow/sync", { method: "POST", body: JSON.stringify({}) }, authHeader());
@@ -978,6 +1284,7 @@ export const doctorSynthflowApi = {
       doctorsCount: number;
       clinicDoctorName: string | null;
       clinicDoctorId: string | null;
+      openSlotsSummary?: string | null;
       warning: string | null;
       settings: ClinicSynthflowSettings;
     }>("/api/doctor/synthflow/agent", { method: "POST", body: JSON.stringify(body ?? {}) }, authHeader());
@@ -990,6 +1297,7 @@ export const doctorSynthflowApi = {
       doctorsCount: number;
       clinicDoctorName: string | null;
       clinicDoctorId: string | null;
+      openSlotsSummary?: string | null;
       warning: string | null;
       settings: ClinicSynthflowSettings;
     }>("/api/doctor/synthflow/sync", { method: "POST", body: JSON.stringify({}) }, authHeader());
@@ -1092,36 +1400,81 @@ export const doctorAvailabilityApi = {
     );
   },
   create(startsAt: string) {
-    return request<{ success: boolean; slot: ApiDoctorSlot; message?: string }>(
+    return request<{
+      success: boolean;
+      slot: ApiDoctorSlot;
+      message?: string;
+      synthflowSynced?: boolean;
+      openSlotsSummary?: string | null;
+      warning?: string | null;
+    }>(
       "/api/doctor/availability",
       { method: "POST", body: JSON.stringify({ startsAt }) },
       authHeader(),
     );
   },
+  createRange(body: {
+    date: string;
+    startTime: string;
+    endTime: string;
+    durationMinutes?: 15 | 30 | 45 | 60;
+  }) {
+    return request<{
+      success: boolean;
+      created: number;
+      considered: number;
+      durationMinutes: number;
+      message?: string;
+      synthflowSynced?: boolean;
+      openSlotsSummary?: string | null;
+      warning?: string | null;
+    }>(
+      "/api/doctor/availability/range",
+      { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
   update(slotId: string, startsAt: string) {
-    return request<{ success: boolean; slot: ApiDoctorSlot; message?: string }>(
+    return request<{
+      success: boolean;
+      slot: ApiDoctorSlot;
+      message?: string;
+      synthflowSynced?: boolean;
+      openSlotsSummary?: string | null;
+      warning?: string | null;
+    }>(
       `/api/doctor/availability/${slotId}`,
       { method: "PUT", body: JSON.stringify({ startsAt }) },
       authHeader(),
     );
   },
   remove(slotId: string) {
-    return request<{ success: boolean; id: string; message?: string }>(
+    return request<{
+      success: boolean;
+      id: string;
+      message?: string;
+      synthflowSynced?: boolean;
+      openSlotsSummary?: string | null;
+      warning?: string | null;
+    }>(
       `/api/doctor/availability/${slotId}`,
       { method: "DELETE" },
       authHeader(),
     );
   },
-  generate(weeks = 2) {
+  generate(weeks = 2, replaceOpen = true) {
     return request<{
       success: boolean;
       created: number;
       considered: number;
       weeks: number;
       message?: string;
+      synthflowSynced?: boolean;
+      openSlotsSummary?: string | null;
+      warning?: string | null;
     }>(
       "/api/doctor/availability/generate",
-      { method: "POST", body: JSON.stringify({ weeks }) },
+      { method: "POST", body: JSON.stringify({ weeks, replaceOpen }) },
       authHeader(),
     );
   },
@@ -1212,6 +1565,131 @@ export const doctorDashboardApi = {
   },
 };
 
+export type ApiClinicPermissionKey =
+  | "appointments"
+  | "patients"
+  | "medicalReports"
+  | "callTranscriptions"
+  | "followUps"
+  | "invoices"
+  | "availability"
+  | "clinicSettings"
+  | "teamMembers";
+
+export type ApiClinicPermissions = Record<ApiClinicPermissionKey, boolean>;
+
+export type ApiClinicStaffRole =
+  | "RECEPTIONIST"
+  | "CLINIC_ADMINISTRATOR"
+  | "OFFICE_MANAGER"
+  | "APPOINTMENT_COORDINATOR"
+  | "NURSE"
+  | "BILLING"
+  | "ADDITIONAL_DOCTOR";
+
+export type ApiTeamMember = {
+  id: string;
+  userId: string;
+  fullName: string;
+  email: string;
+  reference: string;
+  staffRole: ApiClinicStaffRole;
+  staffRoleLabel: string;
+  status: "active" | "inactive";
+  permissions: ApiClinicPermissions;
+  dateAdded: string;
+  createdAt: string;
+};
+
+export type ApiTeamRoleOption = {
+  id: ApiClinicStaffRole;
+  label: string;
+  description: string;
+  defaultPermissions: ApiClinicPermissions;
+  permissionLabels: Record<ApiClinicPermissionKey, string>;
+};
+
+export const doctorTeamApi = {
+  listRoles() {
+    return request<{ success: boolean; roles: ApiTeamRoleOption[] }>(
+      "/api/doctor/team/roles",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  list(params?: { q?: string; role?: string; status?: string }) {
+    const search = new URLSearchParams();
+    if (params?.q) search.set("q", params.q);
+    if (params?.role) search.set("role", params.role);
+    if (params?.status) search.set("status", params.status);
+    const qs = search.toString();
+    return request<{ success: boolean; members: ApiTeamMember[] }>(
+      `/api/doctor/team${qs ? `?${qs}` : ""}`,
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  create(body: {
+    fullName: string;
+    email: string;
+    password: string;
+    staffRole: ApiClinicStaffRole;
+    permissions?: Partial<ApiClinicPermissions>;
+    status?: "active" | "inactive";
+  }) {
+    return request<{ success: boolean; member: ApiTeamMember; message?: string }>(
+      "/api/doctor/team",
+      { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  update(
+    memberId: string,
+    body: {
+      fullName?: string;
+      password?: string;
+      staffRole?: ApiClinicStaffRole;
+      permissions?: Partial<ApiClinicPermissions>;
+      status?: "active" | "inactive";
+    },
+  ) {
+    return request<{ success: boolean; member: ApiTeamMember; message?: string }>(
+      `/api/doctor/team/${memberId}`,
+      { method: "PUT", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  remove(memberId: string) {
+    return request<{ success: boolean; id: string; message?: string }>(
+      `/api/doctor/team/${memberId}`,
+      { method: "DELETE" },
+      authHeader(),
+    );
+  },
+};
+
+export type DoctorProfileUpdateBody = {
+  fullName?: string;
+  phone?: string;
+  specialtyId?: string;
+  specialty?: string;
+  subSpecialty?: string;
+  qualifications?: string[];
+  certifications?: string[];
+  experienceYears?: number;
+  about?: string;
+  areasOfExpertise?: string[];
+  clinic?: string;
+  fee?: string;
+  feeCurrency?: string;
+  consultationType?: string;
+  consultationServices?: string[];
+  languages?: string[];
+  location?: string;
+  weeklyHours?: ApiWeeklyHourSlot[];
+  availabilityConfig?: ApiAvailabilityConfig;
+};
+
 export const doctorProfileApi = {
   get() {
     return request<{ success: boolean; profile: ApiDoctorProfile }>(
@@ -1220,25 +1698,93 @@ export const doctorProfileApi = {
       authHeader(),
     );
   },
-  update(body: {
-    specialtyId?: string;
-    specialty?: string;
-    subSpecialty?: string;
-    qualifications?: string[];
-    certifications?: string[];
-    experienceYears?: number;
-    about?: string;
-    areasOfExpertise?: string[];
-    clinic?: string;
-    fee?: string;
-    consultationType?: string;
-    languages?: string[];
-    location?: string;
-    weeklyHours?: ApiWeeklyHourSlot[];
-  }) {
-    return request<{ success: boolean; profile: ApiDoctorProfile; message?: string }>(
+  update(body: DoctorProfileUpdateBody) {
+    return request<{
+      success: boolean;
+      profile: ApiDoctorProfile;
+      message?: string;
+      synthflowSynced?: boolean;
+      openSlotsSummary?: string | null;
+      warning?: string | null;
+    }>(
       "/api/doctor/profile",
       { method: "PUT", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  async uploadPhoto(file: File) {
+    const form = new FormData();
+    form.append("photo", file);
+    const token = authHeader();
+    const headers = withApiHeaders();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+
+    let response: Response;
+    try {
+      response = await fetch(`${getApiBaseUrl()}/api/doctor/profile/photo`, {
+        method: "POST",
+        headers,
+        body: form,
+      });
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new ApiError(
+          0,
+          "Cannot reach the API. Make sure the backend is running on http://localhost:4000.",
+        );
+      }
+      throw error;
+    }
+
+    const body = (await response.json()) as {
+      success?: boolean;
+      message?: string;
+      profile?: ApiDoctorProfile;
+      synthflowSynced?: boolean;
+      warning?: string | null;
+      errors?: Record<string, string[] | undefined>;
+    };
+
+    if (!response.ok || !body.profile) {
+      throw new ApiError(response.status, body.message || "Unable to upload photo", body.errors);
+    }
+
+    return body as {
+      success: boolean;
+      profile: ApiDoctorProfile;
+      message?: string;
+      synthflowSynced?: boolean;
+      warning?: string | null;
+    };
+  },
+  removePhoto() {
+    return request<{
+      success: boolean;
+      profile: ApiDoctorProfile;
+      message?: string;
+    }>("/api/doctor/profile/photo", { method: "DELETE" }, authHeader());
+  },
+};
+
+export type SmsPreferences = {
+  appointmentReminders: boolean;
+  appointmentConfirmations: boolean;
+  invoiceLinks: boolean;
+  recordUploads: boolean;
+};
+
+export const doctorSettingsApi = {
+  getSmsPreferences() {
+    return request<{ success: boolean; preferences: SmsPreferences }>(
+      "/api/doctor/settings/sms-preferences",
+      { method: "GET" },
+      authHeader(),
+    );
+  },
+  updateSmsPreferences(preferences: SmsPreferences) {
+    return request<{ success: boolean; preferences: SmsPreferences; message?: string }>(
+      "/api/doctor/settings/sms-preferences",
+      { method: "PUT", body: JSON.stringify(preferences) },
       authHeader(),
     );
   },
@@ -1253,6 +1799,7 @@ export type ApiDoctorPatient = {
   lastVisit: string;
   condition: string;
   phone: string;
+  email?: string;
   isActive: boolean;
 };
 
@@ -1287,6 +1834,53 @@ export const doctorPatientsApi = {
     return request<{ success: boolean; patients: ApiDoctorPatient[] }>(
       `/api/doctor/patients${qs ? `?${qs}` : ""}`,
       { method: "GET" },
+      authHeader(),
+    );
+  },
+  create(body: {
+    fullName: string;
+    phone: string;
+    email?: string;
+    age?: number | null;
+    gender?: string;
+    condition?: string;
+  }) {
+    return request<{
+      success: boolean;
+      patient: ApiDoctorPatient;
+      created: boolean;
+      message?: string;
+    }>("/api/doctor/patients", { method: "POST", body: JSON.stringify(body) }, authHeader());
+  },
+  update(
+    patientId: string,
+    body: {
+      fullName: string;
+      phone: string;
+      email?: string;
+      age?: number | null;
+      gender?: string;
+      condition?: string;
+    },
+  ) {
+    return request<{
+      success: boolean;
+      patient: ApiDoctorPatient;
+      message?: string;
+    }>(
+      `/api/doctor/patients/${encodeURIComponent(patientId)}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  delete(patientId: string) {
+    return request<{
+      success: boolean;
+      deleted: { id: string; fullName: string };
+      message?: string;
+    }>(
+      `/api/doctor/patients/${encodeURIComponent(patientId)}`,
+      { method: "DELETE" },
       authHeader(),
     );
   },

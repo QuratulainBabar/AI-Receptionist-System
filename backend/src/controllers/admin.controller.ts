@@ -1,10 +1,14 @@
 import type { NextFunction, Request, Response } from "express";
+import fs from "node:fs";
+import path from "node:path";
+import multer from "multer";
 import { z } from "zod";
 import * as authService from "../services/auth.service.js";
 import * as adminClinicService from "../services/admin-clinic.service.js";
 import * as adminDoctorService from "../services/admin-doctor.service.js";
 import * as appointmentsService from "../services/appointments.service.js";
 import * as doctorAvailabilityService from "../services/doctor-availability.service.js";
+import * as doctorProfileService from "../services/doctor-profile.service.js";
 import { WEEKDAYS } from "../utils/doctor-profile.js";
 import { AppError } from "../utils/AppError.js";
 
@@ -39,10 +43,22 @@ const weeklyHourSchema = z.object({
   enabled: z.boolean(),
   startTime: z.string().trim().min(1).max(16),
   endTime: z.string().trim().min(1).max(16),
+  sessions: z
+    .array(
+      z.object({
+        startTime: z.string().trim().min(1).max(16),
+        endTime: z.string().trim().min(1).max(16),
+      }),
+    )
+    .max(8)
+    .optional(),
 });
 
 const doctorCrmBodySchema = z.object({
+  fullName: z.string().trim().min(2).max(100).optional(),
+  phone: z.string().trim().max(40).optional(),
   specialtyId: z.string().trim().min(1).optional(),
+  specialty: z.string().trim().min(1).max(120).optional(),
   subSpecialty: z.string().trim().max(120).optional(),
   qualifications: z.union([z.array(z.string()), z.string()]).optional(),
   certifications: z.union([z.array(z.string()), z.string()]).optional(),
@@ -57,10 +73,67 @@ const doctorCrmBodySchema = z.object({
   weeklyHours: z.array(weeklyHourSchema).optional(),
 });
 
+const createDoctorBodySchema = doctorCrmBodySchema.extend({
+  fullName: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().transform((v) => v.toLowerCase()),
+  password: z.string().min(8).max(128),
+  isActive: z.boolean().optional().default(true),
+  isVerified: z.boolean().optional().default(false),
+  verificationNote: z.string().trim().max(1000).optional(),
+});
+
 const verificationBodySchema = z.object({
   isVerified: z.boolean(),
   verificationNote: z.string().trim().max(1000).optional(),
 });
+
+const PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/jpg", "image/webp"]);
+
+const photoStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, doctorProfileService.getDoctorPhotoUploadRoot());
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    const safeExt = [".jpg", ".jpeg", ".png", ".webp"].includes(ext) ? ext : ".jpg";
+    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`);
+  },
+});
+
+export const doctorPhotoUploadMiddleware = multer({
+  storage: photoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!PHOTO_MIME.has(file.mimetype)) {
+      cb(new AppError(400, "Only JPG, PNG, or WebP images are allowed"));
+      return;
+    }
+    cb(null, true);
+  },
+}).single("photo");
+
+const adminPhotoStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, authService.getUserPhotoUploadRoot());
+  },
+  filename: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+    const safeExt = [".jpg", ".jpeg", ".png", ".webp"].includes(ext) ? ext : ".jpg";
+    cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${safeExt}`);
+  },
+});
+
+export const adminPhotoUploadMiddleware = multer({
+  storage: adminPhotoStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (!PHOTO_MIME.has(file.mimetype)) {
+      cb(new AppError(400, "Only JPG, PNG, or WebP images are allowed"));
+      return;
+    }
+    cb(null, true);
+  },
+}).single("photo");
 
 export async function stats(_req: Request, res: Response, next: NextFunction) {
   try {
@@ -74,13 +147,74 @@ export async function stats(_req: Request, res: Response, next: NextFunction) {
 export async function listDoctors(req: Request, res: Response, next: NextFunction) {
   try {
     const query = doctorListQuerySchema.parse(req.query);
-    const users = await adminDoctorService.listDoctorsForAdmin({
+    const result = await adminDoctorService.listDoctorsForAdmin({
       q: query.q,
       status: query.status,
       verification: query.verification,
     });
-    res.json({ success: true, users });
+    res.json({ success: true, users: result.users, summary: result.summary });
   } catch (error) {
+    next(error);
+  }
+}
+
+export async function createDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) throw new AppError(401, "Authentication required");
+    const body = createDoctorBodySchema.parse(req.body ?? {});
+    const {
+      fullName,
+      email,
+      password,
+      isActive,
+      isVerified,
+      verificationNote,
+      phone,
+      ...profile
+    } = body;
+    const data = await adminDoctorService.createDoctorForAdmin({
+      fullName,
+      email,
+      password,
+      isActive,
+      phone,
+      isVerified,
+      verificationNote,
+      adminUserId: req.user.sub,
+      profile: { ...profile, phone },
+    });
+    res.status(201).json({
+      success: true,
+      ...data,
+      message: `Doctor account created for ${data.user.fullName}.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = String(req.params.userId);
+    const deleted = await adminDoctorService.deleteDoctorForAdmin(userId);
+    res.json({
+      success: true,
+      deleted,
+      message: `${deleted.fullName} has been deleted.`,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function uploadDoctorPhoto(req: Request, res: Response, next: NextFunction) {
+  try {
+    const userId = String(req.params.userId);
+    if (!req.file) throw new AppError(400, "Choose a profile photo to upload");
+    const profile = await adminDoctorService.uploadDoctorPhotoForAdmin(userId, req.file);
+    res.json({ success: true, profile, message: "Doctor profile photo updated." });
+  } catch (error) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
     next(error);
   }
 }
@@ -157,6 +291,91 @@ export async function setStatus(req: Request, res: Response, next: NextFunction)
     const userId = String(req.params.userId);
     const user = await authService.setUserActiveStatus(userId, body.isActive);
     res.json({ success: true, user });
+  } catch (error) {
+    next(error);
+  }
+}
+
+const profileBodySchema = z.object({
+  fullName: z.string().trim().min(2).max(100).optional(),
+  phone: z.string().trim().max(40).optional(),
+});
+
+const systemUsersQuerySchema = z.object({
+  q: z.string().optional(),
+  status: z.enum(["active", "inactive", "all"]).optional().default("all"),
+  role: z.enum(["all", "doctor", "patient", "clinic_staff", "admin"]).optional().default("all"),
+});
+
+const createUserBodySchema = z.object({
+  fullName: z.string().trim().min(2).max(100),
+  email: z.string().trim().email().transform((v) => v.toLowerCase()),
+  password: z.string().min(8).max(128),
+  role: z.enum(["patient", "doctor"]),
+});
+
+export async function getSettingsProfile(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) throw new AppError(401, "Authentication required");
+    const user = await authService.getCurrentUser(req.user.sub);
+    res.json({ success: true, user });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateSettingsProfile(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) throw new AppError(401, "Authentication required");
+    const body = profileBodySchema.parse(req.body ?? {});
+    const user = await authService.updateOwnProfile(req.user.sub, body);
+    res.json({ success: true, user, message: "Profile settings saved." });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function uploadSettingsPhoto(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) throw new AppError(401, "Authentication required");
+    if (!req.file) throw new AppError(400, "Choose a profile photo to upload");
+    const user = await authService.updateOwnPhoto(req.user.sub, req.file);
+    res.json({ success: true, user, message: "Profile photo updated." });
+  } catch (error) {
+    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    next(error);
+  }
+}
+
+export async function removeSettingsPhoto(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) throw new AppError(401, "Authentication required");
+    const user = await authService.removeOwnPhoto(req.user.sub);
+    res.json({ success: true, user, message: "Profile photo removed." });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function listSystemUsers(req: Request, res: Response, next: NextFunction) {
+  try {
+    const query = systemUsersQuerySchema.parse(req.query);
+    const users = await authService.listSystemUsers(query);
+    res.json({ success: true, users });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function createSystemUser(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = createUserBodySchema.parse(req.body ?? {});
+    const user = await authService.createManagedUser(body);
+    res.status(201).json({
+      success: true,
+      user,
+      message: `${user.systemRoleLabel} account created for ${user.fullName}.`,
+    });
   } catch (error) {
     next(error);
   }
