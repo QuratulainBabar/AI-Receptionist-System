@@ -6,7 +6,12 @@ import { AppError } from "../utils/AppError.js";
 import * as recordRequestsService from "../services/record-requests.service.js";
 import * as recordsService from "../services/records.service.js";
 
-const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png", "image/jpg"]);
+const ALLOWED_MIME = new Set([
+  "application/pdf",
+  "image/jpeg",
+  "image/png",
+  "image/jpg",
+]);
 
 const storage = multer.diskStorage({
   destination: (_req, _file, cb) => {
@@ -20,7 +25,7 @@ const storage = multer.diskStorage({
 
 export const publicUploadMiddleware = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 6 },
   fileFilter: (_req, file, cb) => {
     if (!ALLOWED_MIME.has(file.mimetype)) {
       cb(new AppError(400, "Only PDF, JPG or PNG files are allowed"));
@@ -28,7 +33,22 @@ export const publicUploadMiddleware = multer({
     }
     cb(null, true);
   },
-}).single("file");
+}).fields([
+  { name: "files", maxCount: 3 },
+  { name: "images", maxCount: 3 },
+  // Legacy single-file field from older upload page
+  { name: "file", maxCount: 1 },
+]);
+
+function relativeUploadPath(absolutePath: string) {
+  return path.relative(recordsService.getUploadRoot(), absolutePath).replace(/\\/g, "/");
+}
+
+function cleanupFiles(files: Express.Multer.File[]) {
+  for (const file of files) {
+    if (file.path) fs.unlink(file.path, () => undefined);
+  }
+}
 
 export async function requestForAppointment(req: Request, res: Response, next: NextFunction) {
   try {
@@ -70,26 +90,62 @@ export async function showUploadPage(req: Request, res: Response) {
 }
 
 export async function uploadViaToken(req: Request, res: Response, next: NextFunction) {
+  const fieldFiles = req.files as
+    | { [fieldname: string]: Express.Multer.File[] }
+    | Express.Multer.File[]
+    | undefined;
+  const grouped =
+    fieldFiles && !Array.isArray(fieldFiles)
+      ? fieldFiles
+      : { files: Array.isArray(fieldFiles) ? fieldFiles : [] };
+  const allDiskFiles = [
+    ...(grouped.files || []),
+    ...(grouped.images || []),
+    ...(grouped.file || []),
+  ];
+
   try {
     const token = String(req.params.token || "");
-    if (!req.file) throw new AppError(400, "Choose a PDF, JPG or PNG file to upload");
+    const notes = typeof req.body.notes === "string" ? req.body.notes : "";
+    const category = typeof req.body.category === "string" ? req.body.category : undefined;
 
-    const relativePath = path
-      .relative(recordsService.getUploadRoot(), req.file.path)
-      .replace(/\\/g, "/");
+    const legacy = grouped.file || [];
+    const docs = [...(grouped.files || []), ...legacy.filter((f) => !f.mimetype.startsWith("image/"))];
+    const images = [
+      ...(grouped.images || []),
+      ...legacy.filter((f) => f.mimetype.startsWith("image/")),
+    ];
 
-    const record = await recordRequestsService.uploadRecordViaToken({
+    if (!docs.length && !images.length && !notes.trim()) {
+      throw new AppError(400, "Add at least one file, image, or note before submitting.");
+    }
+
+    const records = await recordRequestsService.uploadBatchViaToken({
       rawToken: token,
-      fileName: req.file.originalname,
-      mimeType: req.file.mimetype,
-      sizeBytes: req.file.size,
-      storagePath: relativePath,
-      category: typeof req.body.category === "string" ? req.body.category : undefined,
+      files: docs.map((file) => ({
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        storagePath: relativeUploadPath(file.path),
+      })),
+      images: images.map((file) => ({
+        fileName: file.originalname,
+        mimeType: file.mimetype,
+        sizeBytes: file.size,
+        storagePath: relativeUploadPath(file.path),
+      })),
+      notes,
+      category,
     });
 
-    res.status(201).json({ success: true, record, message: "Record uploaded" });
+    res.status(201).json({
+      success: true,
+      records,
+      record: records[0] || null,
+      message: "Records uploaded",
+    });
   } catch (error) {
-    if (req.file?.path) fs.unlink(req.file.path, () => undefined);
+    cleanupFiles(allDiskFiles);
     next(error);
   }
 }

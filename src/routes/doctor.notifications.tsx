@@ -1,7 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, EmptyNote, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
-import { doctorNotificationsApi, formatApiError, type ApiDoctorNotification } from "@/lib/api";
+import {
+  doctorNotificationsApi,
+  formatApiError,
+  notifyDoctorNotificationsUpdated,
+  type ApiDoctorNotification,
+} from "@/lib/api";
 
 export const Route = createFileRoute("/doctor/notifications")({
   head: () => ({
@@ -34,17 +39,28 @@ function DoctorNotifications() {
 
   useEffect(() => {
     let cancelled = false;
-    void doctorNotificationsApi
-      .list()
-      .then((result) => {
-        if (!cancelled) setNotifications(result.notifications.slice(0, 2));
-      })
-      .catch((err) => {
+
+    async function loadAndMarkRead() {
+      try {
+        const result = await doctorNotificationsApi.list();
+        if (cancelled) return;
+        setNotifications(result.notifications);
+
+        const hadUnread = result.notifications.some((note) => note.unread);
+        if (hadUnread) {
+          await doctorNotificationsApi.markAllRead();
+          if (cancelled) return;
+          setNotifications((prev) => prev.map((note) => ({ ...note, unread: false })));
+          notifyDoctorNotificationsUpdated();
+        }
+      } catch (err) {
         if (!cancelled) setError(formatApiError(err, "Unable to load notifications."));
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    }
+
+    void loadAndMarkRead();
     return () => {
       cancelled = true;
     };

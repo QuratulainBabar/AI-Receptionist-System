@@ -24,6 +24,15 @@ const generateBodySchema = z.object({
   replaceOpen: z.boolean().optional(),
 });
 
+const clearDatesBodySchema = z.object({
+  dates: z.array(z.string().trim().regex(/^\d{4}-\d{2}-\d{2}$/)).min(1).max(31),
+  skipSynthflowSync: z.boolean().optional(),
+});
+
+const createRangeBodyWithSyncSchema = createRangeBodySchema.extend({
+  skipSynthflowSync: z.boolean().optional(),
+});
+
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.user?.sub) throw new AppError(401, "Authentication required");
@@ -68,15 +77,41 @@ export async function create(req: Request, res: Response, next: NextFunction) {
 export async function createRange(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.user?.sub) throw new AppError(401, "Authentication required");
-    const body = createRangeBodySchema.parse(req.body ?? {});
-    const result = await doctorAvailabilityService.createSlotsFromRangeForDoctor(req.user.sub, body);
-    const sync = await syncPromptAfterAvailabilityChange("doctor-create-slot-range");
+    const body = createRangeBodyWithSyncSchema.parse(req.body ?? {});
+    const { skipSynthflowSync, ...range } = body;
+    const result = await doctorAvailabilityService.createSlotsFromRangeForDoctor(req.user.sub, range);
+    const sync = skipSynthflowSync
+      ? { synced: false, openSlotsSummary: null, warning: null }
+      : await syncPromptAfterAvailabilityChange("doctor-create-slot-range");
     res.status(201).json({
       success: true,
       ...result,
       message: sync.synced
         ? `Created ${result.created} slot${result.created === 1 ? "" : "s"} and updated the system prompt.`
         : `Created ${result.created} slot${result.created === 1 ? "" : "s"}.`,
+      synthflowSynced: sync.synced,
+      openSlotsSummary: sync.openSlotsSummary,
+      warning: sync.warning,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function clearDates(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) throw new AppError(401, "Authentication required");
+    const body = clearDatesBodySchema.parse(req.body ?? {});
+    const result = await doctorAvailabilityService.clearOpenSlotsOnDates(req.user.sub, body.dates);
+    const sync = body.skipSynthflowSync
+      ? { synced: false, openSlotsSummary: null, warning: null }
+      : await syncPromptAfterAvailabilityChange("doctor-clear-slot-dates");
+    res.json({
+      success: true,
+      ...result,
+      message: sync.synced
+        ? `Removed ${result.removed} open slot${result.removed === 1 ? "" : "s"} and updated the system prompt.`
+        : `Removed ${result.removed} open slot${result.removed === 1 ? "" : "s"}.`,
       synthflowSynced: sync.synced,
       openSlotsSummary: sync.openSlotsSummary,
       warning: sync.warning,

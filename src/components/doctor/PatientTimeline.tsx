@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Badge, Button, Panel, SectionLabel } from "@/components/ui/primitives";
-import type { ApiAppointment, ApiPatientTimelineEvent } from "@/lib/api";
+import type { ApiAppointment, ApiMedicalRecord, ApiPatientTimelineEvent } from "@/lib/api";
 import { statusTone } from "@/lib/mock-data";
 
 const kindLabel: Record<ApiPatientTimelineEvent["kind"], string> = {
@@ -48,15 +48,23 @@ function groupByDate(events: ApiPatientTimelineEvent[]) {
   return groups;
 }
 
+function isImageRecord(record: ApiMedicalRecord) {
+  return record.mimeType.startsWith("image/");
+}
+
 export function PatientTimeline({
   events,
   appointments,
-  onViewRecord,
+  records,
+  onPreviewRecord,
+  onDownloadRecord,
   renderVisitActions,
 }: {
   events: ApiPatientTimelineEvent[];
   appointments: ApiAppointment[];
-  onViewRecord: (recordId: string) => void;
+  records: ApiMedicalRecord[];
+  onPreviewRecord: (recordId: string) => void;
+  onDownloadRecord: (record: ApiMedicalRecord) => void;
   renderVisitActions: (appointment: ApiAppointment) => ReactNode;
 }) {
   const groups = groupByDate(events);
@@ -78,6 +86,9 @@ export function PatientTimeline({
               ? appointments.find((row) => row.id === event.appointmentId)
               : undefined;
             const showActions = (event.kind === "visit" || event.kind === "follow_up") && appointment;
+            const appointmentRecords = appointment
+              ? records.filter((row) => row.appointmentId === appointment.id)
+              : [];
             return (
               <Panel key={event.id} className="p-4">
                 <div className="flex items-start justify-between gap-3">
@@ -99,9 +110,34 @@ export function PatientTimeline({
                 )}
                 {event.recordId ? (
                   <div className="mt-3">
-                    <Button variant="outline" size="sm" onClick={() => onViewRecord(event.recordId!)}>
+                    <Button variant="outline" size="sm" onClick={() => onPreviewRecord(event.recordId!)}>
                       View file
                     </Button>
+                  </div>
+                ) : null}
+                {appointmentRecords.length ? (
+                  <div className="mt-3 space-y-2 rounded-xl border border-border bg-muted/30 p-3">
+                    <p className="text-xs font-semibold text-foreground">Patient uploads for this visit</p>
+                    {appointmentRecords.map((record) => (
+                      <div
+                        key={record.id}
+                        className="flex flex-wrap items-center gap-2 rounded-lg bg-background px-3 py-2"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium">{record.name}</p>
+                          <p className="font-mono text-[10px] text-muted-foreground">
+                            {record.type} · {record.size} · {record.date}
+                            {isImageRecord(record) ? " · Image" : ""}
+                          </p>
+                        </div>
+                        <Button variant="outline" size="sm" onClick={() => onPreviewRecord(record.id)}>
+                          Preview
+                        </Button>
+                        <Button variant="soft" size="sm" onClick={() => onDownloadRecord(record)}>
+                          Download
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 ) : null}
                 {showActions ? <div className="mt-3 border-t border-border pt-3">{renderVisitActions(appointment)}</div> : null}

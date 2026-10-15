@@ -21,6 +21,7 @@ doctorAvailabilityRouter.use(
 doctorAvailabilityRouter.get("/", doctorAvailabilityController.list);
 doctorAvailabilityRouter.post("/", doctorAvailabilityController.create);
 doctorAvailabilityRouter.post("/range", doctorAvailabilityController.createRange);
+doctorAvailabilityRouter.post("/clear-dates", doctorAvailabilityController.clearDates);
 doctorAvailabilityRouter.post("/generate", doctorAvailabilityController.generate);
 doctorAvailabilityRouter.put("/:slotId", doctorAvailabilityController.update);
 doctorAvailabilityRouter.delete("/:slotId", doctorAvailabilityController.remove);

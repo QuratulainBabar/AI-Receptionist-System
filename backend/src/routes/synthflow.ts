@@ -17,6 +17,7 @@ synthflowRouter.post("/actions/book", synthflowController.bookAction);
 synthflowRouter.post("/actions/availability", synthflowController.availabilityAction);
 synthflowRouter.post("/actions/check-appointment", synthflowController.checkAppointmentAction);
 synthflowRouter.post("/actions/verify-otp", synthflowController.verifyOtpAction);
+synthflowRouter.post("/actions/records-sms", synthflowController.recordsSmsAction);
 
 /** Helper for operators — returns the complete webhook URLs for this environment */
 synthflowRouter.get("/urls", synthflowController.urls);

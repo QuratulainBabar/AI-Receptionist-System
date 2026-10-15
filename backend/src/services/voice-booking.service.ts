@@ -155,6 +155,7 @@ export async function processVoiceBooking(
   const active = await findActiveAppointmentForMobile({
     patientId: patient.id,
     phone,
+    ignoreOpenOtpHolds: true,
   });
   if (active) {
     throw new AppError(409, active.blockMessage);

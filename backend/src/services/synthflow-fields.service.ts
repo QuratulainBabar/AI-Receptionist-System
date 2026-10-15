@@ -72,7 +72,10 @@ export function parseSpokenAppointmentTime(text: string, now = new Date()): Date
 export function emptyish(value: string | null | undefined) {
   if (value == null) return true;
   const s = value.trim().toLowerCase();
-  return !s || s === "none" || s === "null" || s === "n/a" || s === "na" || s === "unknown";
+  if (!s || s === "none" || s === "null" || s === "n/a" || s === "na" || s === "unknown") return true;
+  // Synthflow often posts unresolved action placeholders like "<date>".
+  if (/^<[^>]+>$/.test(s)) return true;
+  return false;
 }
 
 function pickFirst(fields: Record<string, string>, keys: string[]) {

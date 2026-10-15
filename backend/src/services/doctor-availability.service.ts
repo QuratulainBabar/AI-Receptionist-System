@@ -36,6 +36,7 @@ export function clinicClock() {
   return {
     clinicTimeZone: clinicTimeZone(),
     clinicTimeZoneLabel: clinicTimeZoneLabel(),
+    clinicToday: civilDateKey(new Date()),
   };
 }
 
@@ -336,15 +337,64 @@ export async function deleteSlotForDoctor(doctorUserId: string, slotId: string) 
     where: { id: slotId },
     include: { appointment: true },
   });
+  // Idempotent: profile regenerate / prior clear may have already removed this id.
   if (!slot || slot.doctorId !== profile.id) {
-    throw new AppError(404, "Slot not found");
+    return { id: slotId, alreadyGone: true as const };
   }
   if (slot.isBooked || slot.appointment) {
     throw new AppError(400, "Booked slots cannot be deleted. Cancel the appointment first.");
   }
 
   await prisma.availabilitySlot.delete({ where: { id: slot.id } });
-  return { id: slot.id };
+  return { id: slot.id, alreadyGone: false as const };
+}
+
+/** Delete open (unbooked) slots for one or more clinic-zone civil dates. */
+export async function clearOpenSlotsOnDates(doctorUserId: string, dates: string[]) {
+  const profile = await requireDoctorProfile(doctorUserId);
+  const unique = [
+    ...new Set(
+      dates
+        .map((value) => String(value || "").trim())
+        .filter((value) => /^\d{4}-\d{2}-\d{2}$/.test(value)),
+    ),
+  ];
+  if (!unique.length) {
+    throw new AppError(400, "Choose at least one valid date to clear.");
+  }
+
+  let removed = 0;
+  for (const date of unique) {
+    const [year, month, day] = date.split("-").map(Number);
+    const dayStart = wallTimeToUtc({
+      year: year!,
+      month: month!,
+      day: day!,
+      hour: 0,
+      minute: 0,
+    });
+    const nextKey = addCivilDays(date, 1);
+    const [ny, nm, nd] = nextKey.split("-").map(Number);
+    const nextStart = wallTimeToUtc({
+      year: ny!,
+      month: nm!,
+      day: nd!,
+      hour: 0,
+      minute: 0,
+    });
+
+    const result = await prisma.availabilitySlot.deleteMany({
+      where: {
+        doctorId: profile.id,
+        isBooked: false,
+        appointment: null,
+        startsAt: { gte: dayStart, lt: nextStart },
+      },
+    });
+    removed += result.count;
+  }
+
+  return { removed, dates: unique };
 }
 
 export async function generateSlotsFromWeeklyHours(
@@ -358,7 +408,8 @@ export async function generateSlotsFromWeeklyHours(
 ) {
   const profile = await requireDoctorProfile(doctorUserId, { requireActive: options?.requireActive });
   const config = parseAvailabilityConfig(profile.weeklyHours);
-  const weeks = Math.max(1, Math.min(8, Math.floor(options?.weeks ?? 2)));
+  // Default 1 week so Sync / auto-generate does not silently create next week's days.
+  const weeks = Math.max(1, Math.min(8, Math.floor(options?.weeks ?? 1)));
   const slotMinutes = config.slotDurationMinutes;
   const byDay = new Map(config.days.map((row) => [row.day, row]));
   const overrides = new Map(config.dateOverrides.map((row) => [row.date, row]));

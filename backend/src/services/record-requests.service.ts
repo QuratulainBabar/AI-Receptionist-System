@@ -1,11 +1,15 @@
+import fs from "node:fs";
+import path from "node:path";
 import { prisma } from "../lib/prisma.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 import { normalizePhone } from "../utils/phone.js";
 import { createRawToken, hashToken } from "./auth.helpers.js";
 import {
+  absoluteStoragePath,
   createRecordForPatient,
   formatRecordDate,
+  getUploadRoot,
   listRecordsForPatient,
 } from "./records.service.js";
 import { sendClinicSms } from "./synthflow.client.js";
@@ -122,7 +126,12 @@ export async function requestRecordsForAppointment(input: {
     throw new AppError(400, "Cannot request records for a cancelled appointment");
   }
 
-  const phone = normalizePhone(appointment.patient.medicalHistory?.phone || "");
+  const phone = normalizePhone(
+    appointment.bookingPhone ||
+      appointment.patient.medicalHistory?.phone ||
+      appointment.patient.phone ||
+      "",
+  );
   if (!phone) {
     throw new AppError(
       400,
@@ -162,21 +171,34 @@ export async function requestRecordsForAppointment(input: {
 
   let smsSent = false;
   let smsError = "";
+  let dialWarning = "";
   const recordSmsOn = await isDoctorSmsEnabled(input.doctorUserId, "recordUploads");
   if (!recordSmsOn) {
     smsError = "Medical record upload texts are turned off in Settings.";
   } else {
     try {
-      await sendClinicSms({
+      const dialed = await sendClinicSms({
         toPhone: phone,
         patientName: appointment.patient.fullName,
         doctorName: doctor.fullName,
         appointmentReference: appointment.reference,
         uploadUrl: link,
       });
-      smsSent = true;
+      if (dialed.status === "calling") {
+        smsSent = true;
+        console.log(
+          `[records] Outbound call started call_id=${dialed.callId} → ${dialed.toPhone} for ${appointment.reference}`,
+        );
+      } else {
+        smsError = dialed.warning || `Call status: ${dialed.status}`;
+        dialWarning = smsError;
+        console.warn(
+          `[records] Outbound call ${dialed.callId} → ${dialed.toPhone} status=${dialed.status}`,
+        );
+      }
     } catch (error) {
       smsError = error instanceof Error ? error.message : "SMS could not be sent";
+      console.warn(`[records] Outbound call failed for ${appointment.reference}:`, smsError);
     }
   }
 
@@ -187,14 +209,17 @@ export async function requestRecordsForAppointment(input: {
 
   const full = await loadRequestById(updated.id);
   const publicRequest = toPublic(full, rawToken);
+  const fromNumber = env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053";
 
   return {
     ...publicRequest,
     message: smsSent
-      ? `Upload link SMS sent to ${phone} from ${env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053"}.`
+      ? `Calling ${phone} from ${fromNumber}. The agent will ask for the mobile number, confirm it, then text the upload link.`
       : smsError.includes("turned off in Settings")
         ? `Upload link created. Record-upload texts are turned off in Settings. Link: ${link}`
-        : `Upload link created, but SMS failed: ${smsError}. Link: ${link}`,
+        : dialWarning || smsError
+          ? `${dialWarning || smsError}`
+          : `Call did not connect. Share this upload link manually: ${link}`,
   };
 }
 
@@ -260,6 +285,17 @@ export async function resolveRecordRequestByToken(rawToken: string) {
   };
 }
 
+const MAX_DOC_FILES = 3;
+const MAX_IMAGE_FILES = 3;
+
+function isImageMime(mimeType: string) {
+  return mimeType.startsWith("image/");
+}
+
+function isNotesCategory(category: string) {
+  return category.trim().toLowerCase() === "patient notes";
+}
+
 export async function uploadRecordViaToken(input: {
   rawToken: string;
   fileName: string;
@@ -270,13 +306,36 @@ export async function uploadRecordViaToken(input: {
 }) {
   const resolved = await resolveRecordRequestByToken(input.rawToken);
   const category = (input.category || "").trim();
-  if (category && !RECORD_UPLOAD_CATEGORIES.includes(category as RecordUploadCategory)) {
+  if (
+    category &&
+    !isNotesCategory(category) &&
+    !RECORD_UPLOAD_CATEGORIES.includes(category as RecordUploadCategory)
+  ) {
     throw new AppError(400, "Choose a valid document category");
   }
 
   const patient = await prisma.user.findUnique({ where: { id: resolved.patientId } });
   if (!patient || patient.role !== "PATIENT" || !patient.isActive) {
     throw new AppError(403, "Patient account is not available for uploads");
+  }
+
+  const existing = await prisma.patientMedicalRecord.findMany({
+    where: { recordRequestId: resolved.recordRequestId },
+    select: { mimeType: true, category: true },
+  });
+  const existingDocs = existing.filter(
+    (row) => !isImageMime(row.mimeType) && !isNotesCategory(row.category),
+  ).length;
+  const existingImages = existing.filter((row) => isImageMime(row.mimeType)).length;
+
+  if (isNotesCategory(category || "")) {
+    // Notes replace prior notes for this request.
+  } else if (isImageMime(input.mimeType)) {
+    if (existingImages >= MAX_IMAGE_FILES) {
+      throw new AppError(400, `You can upload at most ${MAX_IMAGE_FILES} images for this request.`);
+    }
+  } else if (existingDocs >= MAX_DOC_FILES) {
+    throw new AppError(400, `You can upload at most ${MAX_DOC_FILES} files for this request.`);
   }
 
   const record = await createRecordForPatient({
@@ -297,6 +356,106 @@ export async function uploadRecordViaToken(input: {
   });
 
   return record;
+}
+
+export async function savePatientNotesViaToken(input: { rawToken: string; notes: string }) {
+  const notes = input.notes.trim();
+  if (!notes) return null;
+  if (notes.length > 4000) {
+    throw new AppError(400, "Notes must be 4000 characters or fewer.");
+  }
+
+  const resolved = await resolveRecordRequestByToken(input.rawToken);
+  const patient = await prisma.user.findUnique({ where: { id: resolved.patientId } });
+  if (!patient || patient.role !== "PATIENT" || !patient.isActive) {
+    throw new AppError(403, "Patient account is not available for uploads");
+  }
+
+  const prior = await prisma.patientMedicalRecord.findMany({
+    where: { recordRequestId: resolved.recordRequestId, category: "Patient notes" },
+  });
+  for (const row of prior) {
+    const diskPath = absoluteStoragePath(row.storagePath);
+    if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
+    await prisma.patientMedicalRecord.delete({ where: { id: row.id } }).catch(() => undefined);
+  }
+
+  const root = getUploadRoot();
+  const storageName = `patient-notes-${Date.now()}.txt`;
+  fs.writeFileSync(path.join(root, storageName), notes, "utf8");
+
+  return uploadRecordViaToken({
+    rawToken: input.rawToken,
+    fileName: "Patient notes.txt",
+    mimeType: "text/plain",
+    sizeBytes: Buffer.byteLength(notes, "utf8"),
+    storagePath: storageName,
+    category: "Patient notes",
+  });
+}
+
+export async function uploadBatchViaToken(input: {
+  rawToken: string;
+  files: Array<{
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    storagePath: string;
+  }>;
+  images: Array<{
+    fileName: string;
+    mimeType: string;
+    sizeBytes: number;
+    storagePath: string;
+  }>;
+  notes?: string;
+  category?: string;
+}) {
+  const docs = input.files.slice(0, MAX_DOC_FILES);
+  const images = input.images.slice(0, MAX_IMAGE_FILES);
+  if (!docs.length && !images.length && !(input.notes || "").trim()) {
+    throw new AppError(400, "Add at least one file, image, or note before submitting.");
+  }
+
+  const uploaded = [];
+  for (const file of docs) {
+    if (isImageMime(file.mimeType)) {
+      throw new AppError(400, "Put images in the images section (max 3).");
+    }
+    uploaded.push(
+      await uploadRecordViaToken({
+        rawToken: input.rawToken,
+        fileName: file.fileName,
+        mimeType: file.mimeType,
+        sizeBytes: file.sizeBytes,
+        storagePath: file.storagePath,
+        category: input.category,
+      }),
+    );
+  }
+  for (const image of images) {
+    if (!isImageMime(image.mimeType)) {
+      throw new AppError(400, "Images must be JPG or PNG.");
+    }
+    uploaded.push(
+      await uploadRecordViaToken({
+        rawToken: input.rawToken,
+        fileName: image.fileName,
+        mimeType: image.mimeType,
+        sizeBytes: image.sizeBytes,
+        storagePath: image.storagePath,
+        category: input.category || "Imaging",
+      }),
+    );
+  }
+
+  const notesRecord = await savePatientNotesViaToken({
+    rawToken: input.rawToken,
+    notes: input.notes || "",
+  });
+  if (notesRecord) uploaded.push(notesRecord);
+
+  return uploaded;
 }
 
 export async function listGroupedRecordsForDoctor(doctorUserId: string, patientId: string) {
@@ -386,20 +545,22 @@ export function renderUploadPageHtml(input: {
     :root { color-scheme: light; --brand: #3047A0; --bg: #F3F5FB; --card: #fff; --line: #D5DCF0; --muted: #4E5E8C; }
     * { box-sizing: border-box; }
     body { margin: 0; font-family: "Plus Jakarta Sans", "Segoe UI", system-ui, sans-serif; background: linear-gradient(180deg, #F7F8FC, var(--bg)); color: #1a2448; }
-    main { max-width: 480px; margin: 0 auto; padding: 28px 18px 48px; }
+    main { max-width: 520px; margin: 0 auto; padding: 28px 18px 48px; }
     .brand { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; color: var(--brand); text-transform: uppercase; }
     h1 { margin: 10px 0 6px; font-size: 1.55rem; line-height: 1.2; }
     p { margin: 0 0 12px; color: var(--muted); font-size: 0.95rem; line-height: 1.45; }
     .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px; margin-top: 18px; box-shadow: 0 12px 32px -18px #3047A038; }
-    label { display: block; font-size: 0.82rem; font-weight: 600; margin: 0 0 6px; }
-    select, input[type="file"] { width: 100%; margin-bottom: 14px; }
-    select { appearance: none; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: #F3F5FB; font: inherit; }
-    button { width: 100%; border: 0; border-radius: 999px; padding: 13px 16px; background: var(--brand); color: #fff; font: inherit; font-weight: 650; cursor: pointer; }
+    label { display: block; font-size: 0.82rem; font-weight: 600; margin: 14px 0 6px; }
+    label:first-of-type { margin-top: 0; }
+    select, input[type="file"], textarea { width: 100%; margin-bottom: 4px; }
+    select, textarea { appearance: none; border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: #F3F5FB; font: inherit; }
+    textarea { min-height: 96px; resize: vertical; }
+    button { width: 100%; border: 0; border-radius: 999px; padding: 13px 16px; margin-top: 16px; background: var(--brand); color: #fff; font: inherit; font-weight: 650; cursor: pointer; }
     button:disabled { opacity: 0.6; cursor: wait; }
     .meta { font-size: 0.8rem; color: var(--muted); }
     .error { color: #b42318; background: #fee4e2; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.9rem; }
     .ok { color: #067647; background: #dcfae6; border-radius: 10px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.9rem; display: none; }
-    .hint { font-size: 0.78rem; color: var(--muted); margin-top: 10px; }
+    .hint { font-size: 0.78rem; color: var(--muted); margin-top: 6px; }
   </style>
 </head>
 <body>
@@ -413,15 +574,21 @@ export function renderUploadPageHtml(input: {
       <div id="ok" class="ok"></div>
       <form id="upload-form">
         <label for="category">Document type</label>
-        <select id="category" name="category" required>
-          <option value="">Select a type</option>
+        <select id="category" name="category">
+          <option value="">Select a type (optional for images/notes)</option>
           ${categoryOptions}
         </select>
-        <label for="file">File (PDF, JPG or PNG · max 10 MB)</label>
-        <input id="file" name="file" type="file" accept=".pdf,image/jpeg,image/png,application/pdf" required />
-        <button type="submit" id="submit">Upload document</button>
+        <label for="files">Files — PDF (max 3 · 10 MB each)</label>
+        <input id="files" name="files" type="file" accept=".pdf,application/pdf" multiple />
+        <p class="hint" id="files-hint">0 of 3 files selected</p>
+        <label for="images">Images — JPG or PNG (max 3 · 10 MB each)</label>
+        <input id="images" name="images" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple />
+        <p class="hint" id="images-hint">0 of 3 images selected</p>
+        <label for="notes">Notes for the doctor (optional)</label>
+        <textarea id="notes" name="notes" maxlength="4000" placeholder="Anything else your doctor should know…"></textarea>
+        <button type="submit" id="submit">Submit records</button>
       </form>
-      <p class="hint">You can upload multiple documents. Each file is saved against this appointment.</p>
+      <p class="hint">Up to 3 files and 3 images, plus optional notes. Everything is saved on this appointment for your doctor.</p>
     </div>
   </main>
   <script>
@@ -429,19 +596,55 @@ export function renderUploadPageHtml(input: {
     const errorEl = document.getElementById("error");
     const okEl = document.getElementById("ok");
     const submit = document.getElementById("submit");
+    const filesInput = document.getElementById("files");
+    const imagesInput = document.getElementById("images");
+    const filesHint = document.getElementById("files-hint");
+    const imagesHint = document.getElementById("images-hint");
     const token = ${JSON.stringify(input.token)};
+
+    function syncHints() {
+      const fileCount = Math.min(filesInput.files.length, 3);
+      const imageCount = Math.min(imagesInput.files.length, 3);
+      filesHint.textContent = fileCount + " of 3 files selected";
+      imagesHint.textContent = imageCount + " of 3 images selected";
+      if (filesInput.files.length > 3) {
+        errorEl.textContent = "You can attach at most 3 files.";
+        errorEl.style.display = "block";
+      } else if (imagesInput.files.length > 3) {
+        errorEl.textContent = "You can attach at most 3 images.";
+        errorEl.style.display = "block";
+      } else {
+        errorEl.style.display = "none";
+      }
+    }
+    filesInput.addEventListener("change", syncHints);
+    imagesInput.addEventListener("change", syncHints);
+
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       errorEl.style.display = "none";
       okEl.style.display = "none";
-      const file = document.getElementById("file").files[0];
+      const fileList = Array.from(filesInput.files || []).slice(0, 3);
+      const imageList = Array.from(imagesInput.files || []).slice(0, 3);
+      const notes = document.getElementById("notes").value.trim();
       const category = document.getElementById("category").value;
-      if (!file) return;
+      if (!fileList.length && !imageList.length && !notes) {
+        errorEl.textContent = "Add at least one file, image, or note.";
+        errorEl.style.display = "block";
+        return;
+      }
+      if ((filesInput.files || []).length > 3 || (imagesInput.files || []).length > 3) {
+        errorEl.textContent = "Maximum is 3 files and 3 images.";
+        errorEl.style.display = "block";
+        return;
+      }
       const body = new FormData();
-      body.append("file", file);
-      body.append("category", category);
+      fileList.forEach((file) => body.append("files", file));
+      imageList.forEach((file) => body.append("images", file));
+      if (category) body.append("category", category);
+      if (notes) body.append("notes", notes);
       submit.disabled = true;
-      submit.textContent = "Uploading…";
+      submit.textContent = "Submitting…";
       try {
         const response = await fetch("/api/record-uploads/" + encodeURIComponent(token), {
           method: "POST",
@@ -449,15 +652,19 @@ export function renderUploadPageHtml(input: {
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.message || "Upload failed");
-        okEl.textContent = (data.record?.name || file.name) + " uploaded. You can add another file if needed.";
+        const count = Array.isArray(data.records) ? data.records.length : 0;
+        okEl.textContent = count
+          ? count + " item(s) sent to your doctor. You can close this page."
+          : "Submitted. Your doctor can now see your upload.";
         okEl.style.display = "block";
         form.reset();
+        syncHints();
       } catch (err) {
         errorEl.textContent = err instanceof Error ? err.message : "Upload failed";
         errorEl.style.display = "block";
       } finally {
         submit.disabled = false;
-        submit.textContent = "Upload document";
+        submit.textContent = "Submit records";
       }
     });
   </script>

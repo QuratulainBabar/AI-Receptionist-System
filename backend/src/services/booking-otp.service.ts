@@ -8,9 +8,12 @@ import {
   confirmHeldAppointment,
   createAppointment,
   getPublicAppointmentById,
+  detachCancelledFromSlot,
   releaseExpiredOtpHolds,
+  releaseOtpHoldOnSlot,
   type PublicAppointment,
 } from "./appointments.service.js";
+
 const SPOKEN_DIGITS: Record<string, string> = {
   zero: "0",
   oh: "0",
@@ -38,8 +41,14 @@ function hashesMatch(stored: string, candidate: string) {
 }
 
 export function parseSpokenOtp(raw: string) {
-  const words = raw
-    .toLowerCase()
+  const text = (raw || "").toLowerCase().trim();
+  if (!text) return "";
+
+  // Prefer an exact 6-digit run (e.g. "the code is 123456").
+  const sixRun = text.match(/(?<!\d)\d{6}(?!\d)/);
+  if (sixRun?.[0]) return sixRun[0];
+
+  const words = text
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
     .filter(Boolean);
@@ -48,16 +57,17 @@ export function parseSpokenOtp(raw: string) {
     if (/^\d+$/.test(word)) fromWords += word;
     else if (SPOKEN_DIGITS[word]) fromWords += SPOKEN_DIGITS[word];
   }
-  if (fromWords.length === 6) return fromWords;
-  const digits = raw.replace(/\D/g, "");
-  return digits.length === 6 ? digits : "";
+  if (fromWords.length >= 6) return fromWords.slice(0, 6);
+  const digits = text.replace(/\D/g, "");
+  if (digits.length >= 6) return digits.slice(0, 6);
+  return "";
 }
 
 /**
  * Temporary testing OTP. The visit is not confirmed unless the caller says this code.
  * Replace with a random one-time code when SMS OTP testing is finished.
  */
-export const TEMP_TEST_BOOKING_OTP = "000000";
+export const TEMP_TEST_BOOKING_OTP = "123456";
 
 function generateCode() {
   return TEMP_TEST_BOOKING_OTP;
@@ -91,6 +101,19 @@ export async function issueBookingOtp(input: {
 
   await releaseExpiredOtpHolds();
 
+  // Drop this patient's other PENDING holds so a prior failed OTP attempt cannot block a new slot.
+  const otherHolds = await prisma.appointment.findMany({
+    where: {
+      patientId: input.patientId,
+      status: "PENDING",
+      slotId: { not: input.slotId },
+    },
+    select: { id: true },
+  });
+  for (const hold of otherHolds) {
+    await cancelOtpHold(hold.id);
+  }
+
   const open = await prisma.appointmentOtp.findFirst({
     where: {
       phone,
@@ -123,17 +146,61 @@ export async function issueBookingOtp(input: {
     await cancelOtpHold(open.appointmentId);
   }
 
-  const appointment = await createAppointment({
-    patientId: input.patientId,
-    doctorId: input.doctorId,
-    slotId: input.slotId,
-    reason: input.reason,
-    phone,
-    holdForOtp: true,
+  // Reuse or clear any PENDING hold already occupying this slot (avoids slotId unique crash).
+  const slotHold = await prisma.appointment.findFirst({
+    where: { slotId: input.slotId, status: "PENDING" },
   });
+  if (slotHold) {
+    if (slotHold.patientId === input.patientId) {
+      await prisma.appointmentOtp.updateMany({
+        where: { appointmentId: slotHold.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      const issued = await storeCode({ phone, appointmentId: slotHold.id });
+      const appointment = await getPublicAppointmentById(slotHold.id);
+      if (!appointment || appointment.status !== "pending") {
+        throw new AppError(409, "The verification code could not be prepared. The appointment is not confirmed.");
+      }
+      return { appointment, otpRequired: true, otp: issued.code, expiresSeconds: issued.expiresSeconds };
+    }
+    await cancelOtpHold(slotHold.id);
+  } else {
+    // Slot may still be marked booked from a deleted hold race — ensure clean claim path.
+    await releaseOtpHoldOnSlot(input.slotId);
+  }
+  await detachCancelledFromSlot(input.slotId);
 
-  const issued = await storeCode({ phone, appointmentId: appointment.id });
-  return { appointment, otpRequired: true, otp: issued.code, expiresSeconds: issued.expiresSeconds };
+  try {
+    const appointment = await createAppointment({
+      patientId: input.patientId,
+      doctorId: input.doctorId,
+      slotId: input.slotId,
+      reason: input.reason,
+      phone,
+      holdForOtp: true,
+    });
+    const issued = await storeCode({ phone, appointmentId: appointment.id });
+    return { appointment, otpRequired: true, otp: issued.code, expiresSeconds: issued.expiresSeconds };
+  } catch (error) {
+    // Last resort: if another hold raced onto the slot, clear and retry once.
+    const code = typeof error === "object" && error && "code" in error ? String((error as { code: unknown }).code) : "";
+    const message = error instanceof Error ? error.message : "";
+    if (code === "P2002" || message.includes("Unique constraint") || message.includes("slotId")) {
+      await releaseOtpHoldOnSlot(input.slotId);
+      await detachCancelledFromSlot(input.slotId);
+      const appointment = await createAppointment({
+        patientId: input.patientId,
+        doctorId: input.doctorId,
+        slotId: input.slotId,
+        reason: input.reason,
+        phone,
+        holdForOtp: true,
+      });
+      const issued = await storeCode({ phone, appointmentId: appointment.id });
+      return { appointment, otpRequired: true, otp: issued.code, expiresSeconds: issued.expiresSeconds };
+    }
+    throw error;
+  }
 }
 
 function uniquePhones(...values: Array<string | undefined>) {
@@ -148,9 +215,51 @@ function uniquePhones(...values: Array<string | undefined>) {
   return phones;
 }
 
+async function findPendingOtpForPhones(phones: string[], opts?: { allowUsed?: boolean }) {
+  return prisma.appointmentOtp.findFirst({
+    where: {
+      phone: { in: phones },
+      ...(opts?.allowUsed ? {} : { usedAt: null }),
+      appointment: { status: "PENDING" },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+}
+
+async function confirmOtpAppointment(appointmentId: string, otpRowId: string) {
+  await prisma.appointmentOtp.update({
+    where: { id: otpRowId },
+    data: { usedAt: new Date() },
+  });
+  try {
+    const appointment = await confirmHeldAppointment(appointmentId);
+    return {
+      success: true,
+      appointment_confirmed: true,
+      reference: appointment.reference,
+      doctor: appointment.doctorName,
+      date: appointment.date,
+      time: appointment.time,
+      appointment_booked: true,
+      message: `The code is correct. Your appointment is confirmed. Reference ${appointment.reference} with ${appointment.doctorName} on ${appointment.date} at ${appointment.time}.`,
+    };
+  } catch (error) {
+    await cancelOtpHold(appointmentId);
+    return {
+      success: false,
+      appointment_confirmed: false,
+      message:
+        error instanceof AppError
+          ? `${error.message} The appointment is not booked and not confirmed.`
+          : "The code could not be verified. The appointment is not booked and not confirmed.",
+    };
+  }
+}
+
 export async function verifyBookingOtp(input: { phone: string; otp: string; callerPhone?: string }) {
   const phones = uniquePhones(input.phone, input.callerPhone);
   const code = parseSpokenOtp(input.otp);
+  const isTestOtp = code === TEMP_TEST_BOOKING_OTP;
 
   if (!phones.length || !code) {
     return {
@@ -161,14 +270,21 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     };
   }
 
-  const row = await prisma.appointmentOtp.findFirst({
-    where: {
-      phone: { in: phones },
-      usedAt: null,
-      appointment: { status: "PENDING" },
-    },
-    orderBy: { createdAt: "desc" },
-  });
+  // Testing OTP 123456 may be reused unlimited times for any pending hold on this phone.
+  if (isTestOtp) {
+    const testRow = await findPendingOtpForPhones(phones, { allowUsed: true });
+    if (!testRow) {
+      return {
+        success: false,
+        appointment_confirmed: false,
+        message:
+          "There is no appointment waiting for verification on this number. The appointment is not booked and not confirmed.",
+      };
+    }
+    return confirmOtpAppointment(testRow.appointmentId, testRow.id);
+  }
+
+  const row = await findPendingOtpForPhones(phones);
 
   if (!row) {
     const latest = await prisma.appointmentOtp.findFirst({
@@ -176,16 +292,14 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
       orderBy: { createdAt: "desc" },
       include: { appointment: true },
     });
-    const held = latest?.appointment.status === "PENDING";
-    if (held && latest) await cancelOtpHold(latest.appointmentId);
     return {
       success: false,
       appointment_confirmed: false,
-      message: latest?.usedAt
-        ? held
-          ? "That code was already used. The appointment is not booked and not confirmed, and that time has been released."
-          : "That code was already used. The appointment is not booked and not confirmed."
-        : "There is no verification code waiting for this number. The appointment is not booked and not confirmed.",
+      message: latest?.appointment.status === "PENDING"
+        ? "Please say the six-digit verification code again. The appointment is not booked yet."
+        : latest?.usedAt
+          ? "That code was already used. The appointment is not booked and not confirmed."
+          : "There is no verification code waiting for this number. The appointment is not booked and not confirmed.",
     };
   }
 
@@ -200,15 +314,16 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
   }
 
   if (!hashesMatch(row.codeHash, hashOtp(code))) {
+    // Keep the hold open so the caller can retry (especially while testing).
     await prisma.appointmentOtp.update({
       where: { id: row.id },
-      data: { attempts: row.attempts + 1, usedAt: new Date() },
+      data: { attempts: row.attempts + 1 },
     });
-    await cancelOtpHold(row.appointmentId);
     return {
       success: false,
       appointment_confirmed: false,
-      message: "That code is incorrect. The appointment is not booked and not confirmed, and that time has been released.",
+      message:
+        "That code is incorrect. The appointment is not booked and not confirmed. Please say the six-digit verification code again.",
     };
   }
 
@@ -217,11 +332,15 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     data: { usedAt: new Date() },
   });
   if (claimed.count !== 1) {
-    await cancelOtpHold(row.appointmentId);
+    // Race: another verify won — if still PENDING, confirm via that row path.
+    const again = await findPendingOtpForPhones(phones, { allowUsed: true });
+    if (again && hashesMatch(again.codeHash, hashOtp(code))) {
+      return confirmOtpAppointment(again.appointmentId, again.id);
+    }
     return {
       success: false,
       appointment_confirmed: false,
-      message: "That code was already used. The appointment is not booked and not confirmed.",
+      message: "Please say the six-digit verification code again. The appointment is not booked yet.",
     };
   }
 

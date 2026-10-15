@@ -62,6 +62,9 @@ const updateBodySchema = z.object({
   location: z.string().trim().max(240).optional(),
   weeklyHours: z.array(weeklyHourSchema).optional(),
   availabilityConfig: availabilityConfigSchema.optional(),
+  /** When false, skip auto-generating open slots (Availability page recreates them itself). */
+  regenerateOpenSlots: z.boolean().optional(),
+  skipSynthflowSync: z.boolean().optional(),
 });
 
 const PHOTO_MIME = new Set(["image/jpeg", "image/png", "image/jpg", "image/webp"]);
@@ -107,16 +110,26 @@ export async function updateProfile(req: Request, res: Response, next: NextFunct
       throw new AppError(401, "Authentication required");
     }
     const body = updateBodySchema.parse(req.body ?? {});
-    const profile = await doctorProfileService.updateDoctorProfileForDoctor(req.user.sub, body);
-    // Availability alone is not bookable — materialize open slots for the phone agent.
-    if (body.availabilityConfig !== undefined || body.weeklyHours !== undefined) {
+    const { regenerateOpenSlots, skipSynthflowSync, ...profileInput } = body;
+    const profile = await doctorProfileService.updateDoctorProfileForDoctor(
+      req.user.sub,
+      profileInput,
+    );
+    // Availability alone is not bookable — materialize open slots for the phone agent
+    // unless the client will recreate this week's slots itself (weekly modal save).
+    if (
+      regenerateOpenSlots !== false &&
+      (body.availabilityConfig !== undefined || body.weeklyHours !== undefined)
+    ) {
       await generateSlotsFromWeeklyHours(req.user.sub, {
-        weeks: 2,
+        weeks: 1,
         allowEmpty: true,
         replaceOpen: true,
       });
     }
-    const sync = await syncPromptAfterAvailabilityChange("doctor-profile-save");
+    const sync = skipSynthflowSync
+      ? { synced: false, openSlotsSummary: null, warning: null }
+      : await syncPromptAfterAvailabilityChange("doctor-profile-save");
     res.json({
       success: true,
       profile,

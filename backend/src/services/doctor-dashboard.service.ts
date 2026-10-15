@@ -86,7 +86,7 @@ export async function getDoctorDashboard(doctorUserId: string): Promise<DoctorDa
     clinic: doctor.doctorProfile?.clinic ?? "",
     todayVisitsCount: todayAppointments.length,
     awaitingConfirmCount,
-    unreadAlerts: notifications.length,
+    unreadAlerts: notifications.filter((note) => note.unread).length,
     patientsCount: patients.length,
     todayAppointments,
     latestNotifications: notifications.slice(0, 2),

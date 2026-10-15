@@ -11,6 +11,7 @@ export type PublicDoctorNotification = {
   detail: string;
   time: string;
   kind: NotificationKind;
+  unread: boolean;
 };
 
 type AppointmentWithPatient = Appointment & { patient: User };
@@ -50,7 +51,16 @@ function toPublic(row: DoctorNotification): PublicDoctorNotification {
     detail: row.detail,
     time: formatRelativeTime(row.occurredAt),
     kind: row.kind as NotificationKind,
+    unread: row.readAt == null,
   };
+}
+
+async function assertActiveDoctor(doctorUserId: string) {
+  const doctor = await prisma.user.findUnique({ where: { id: doctorUserId } });
+  if (!doctor || doctor.role !== "DOCTOR" || !doctor.isActive) {
+    throw new AppError(403, "Only active doctors can view notifications");
+  }
+  return doctor;
 }
 
 function bookingDetail(appointment: AppointmentWithPatient) {
@@ -195,11 +205,7 @@ async function ensureNotificationsForDoctor(doctorUserId: string) {
 }
 
 export async function listNotificationsForDoctor(doctorUserId: string) {
-  const doctor = await prisma.user.findUnique({ where: { id: doctorUserId } });
-  if (!doctor || doctor.role !== "DOCTOR" || !doctor.isActive) {
-    throw new AppError(403, "Only active doctors can view notifications");
-  }
-
+  await assertActiveDoctor(doctorUserId);
   await ensureNotificationsForDoctor(doctorUserId);
 
   const rows = await prisma.doctorNotification.findMany({
@@ -208,4 +214,16 @@ export async function listNotificationsForDoctor(doctorUserId: string) {
   });
 
   return rows.map(toPublic);
+}
+
+/** Marks every unread notification as read when the doctor opens the Notifications page. */
+export async function markAllNotificationsReadForDoctor(doctorUserId: string) {
+  await assertActiveDoctor(doctorUserId);
+
+  const result = await prisma.doctorNotification.updateMany({
+    where: { doctorUserId, readAt: null },
+    data: { readAt: new Date() },
+  });
+
+  return { marked: result.count };
 }

@@ -10,3 +10,4 @@ export const doctorNotificationsRouter = Router();
 doctorNotificationsRouter.use(authenticate, requireRole(Role.DOCTOR, Role.CLINIC_STAFF), attachClinicContext, requireDoctorReady);
 
 doctorNotificationsRouter.get("/", notificationsController.listForDoctor);
+doctorNotificationsRouter.post("/read", notificationsController.markAllReadForDoctor);

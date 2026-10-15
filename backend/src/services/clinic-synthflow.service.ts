@@ -143,7 +143,7 @@ export function mergeDirectoryIntoPrompt(basePrompt: string, knowledge: string) 
 }
 
 export async function buildDoctorsDirectoryKnowledge() {
-  let doctor = await getClinicDoctor({ openSlotsTake: 8 });
+  let doctor = await getClinicDoctor({ openSlotsTake: 16 });
   if (!doctor) {
     return {
       doctorsCount: 0,
@@ -159,9 +159,16 @@ export async function buildDoctorsDirectoryKnowledge() {
   }
 
   // Weekly hours alone are not enough — auto-materialize open slots so the agent has real times.
-  if (doctor.availability.length === 0 && doctor.weeklyHours != null) {
-    await generateSlotsFromWeeklyHours(doctor.userId, { weeks: 2, allowEmpty: true });
-    doctor = (await getClinicDoctor({ openSlotsTake: 8 })) ?? doctor;
+  if (doctor.availability.length === 0) {
+    try {
+      await generateSlotsFromWeeklyHours(doctor.userId, { weeks: 1, allowEmpty: true });
+      doctor = (await getClinicDoctor({ openSlotsTake: 16 })) ?? doctor;
+    } catch (error) {
+      console.warn(
+        "[synthflow] Could not auto-generate open slots for prompt sync:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
 
   const profile = clinicDoctorProfileBlock(doctor);
@@ -171,7 +178,7 @@ export async function buildDoctorsDirectoryKnowledge() {
     : "";
   const openingLabels = formatOpenSlotLabels(doctor.availability, {
     withIds: true,
-    limit: 8,
+    limit: 16,
   });
   const openSlotsSummary = openingLabels.length ? openingLabels.join("; ") : "none";
   const list = (items: string[]) =>
@@ -201,14 +208,15 @@ export async function buildDoctorsDirectoryKnowledge() {
       `Areas of expertise: ${list(profile.areasOfExpertise)}`,
       `Languages: ${list(profile.languages)}`,
       `About: ${profile.bio}`,
-      `Usual weekly hours (for context only — bookable times come from open slots): ${profile.weeklyHoursSummary}`,
-      `Bookable open slots (do not recite until the caller wants to book; then call check_doctor_availability and say only those times): ${openSlotsSummary}`,
+      `Usual weekly hours (for context only — never book from these hours): ${profile.weeklyHoursSummary}`,
+      // Keep slot ids for book_appointment after availability — never speak this list unprompted.
+      `Open slot ids for actions only (NEVER read aloud; NEVER list unless check_doctor_availability returned them): ${openSlotsSummary}`,
       "",
       "## How to use this profile",
       "- On the opening, say the doctor name and the consultation fee when one is set.",
       "- If the caller asks about the doctor, answer from this block (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about).",
-      "- When the caller wants an appointment, say ONLY the open times from check_doctor_availability. Do not invent times.",
-      "- Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
+      "- Availability: if they ask about today, call check_doctor_availability with date today and say the message exactly. If they ask about the weekly schedule / available days, call with date empty and say the message exactly. When booking without a list request: ask which day → WAIT → then call with that date and say times → WAIT. Never invent times.",
+      "- Never say OTP digits aloud. Ask for the six-digit verification code. Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
     ].join("\n"),
   };
 }
@@ -240,44 +248,56 @@ const AVAILABILITY_ACTION_NAME = "check_doctor_availability";
 
 async function ensureAvailabilityCustomAction(existingIds: string[]) {
   const urls = synthflowWebhookUrls();
+  const availabilityBody = {
+    date: "<date>",
+  };
+  const availabilityPrompt =
+    "REQUIRED: Say the response message field exactly (same as spoken_summary), then WAIT. If mode is dates, list those open dates for the next seven days and ask which date. If mode is slots, list those open times and ask which time. Call immediately for today's availability (date=today) or weekly schedule (date empty). Never invent a date or time.";
   let actionId = await findActionIdByName(AVAILABILITY_ACTION_NAME);
   if (actionId) {
-    const current = await getCustomActionUrl(actionId).catch(() => null);
-    if (current !== urls.availabilityAction) {
-      await updateCustomActionUrl(actionId, urls.availabilityAction).catch((error) => {
-        console.warn(
-          "[synthflow] availability action URL refresh failed:",
-          error instanceof Error ? error.message : error,
-        );
-      });
-    }
+    await synthflowRequest("PUT", `/actions/${encodeURIComponent(actionId)}`, {
+      CUSTOM_ACTION: {
+        url: urls.availabilityAction,
+        description:
+          "Live Doctor Dashboard availability. Call immediately when the caller asks about today's times (date=today), the weekly schedule (date empty), or after they name a day.",
+        json_body_stringified: JSON.stringify(availabilityBody),
+        variables_during_the_call: [
+          {
+            name: "date",
+            type: "string",
+            description:
+              "Empty for weekly open dates. today for today's open times. Or a chosen day (tomorrow, Wednesday, October 15).",
+            example: "today",
+          },
+        ],
+        prompt: availabilityPrompt,
+        message_error: "Let me check the clinic schedule for open dates this week.",
+      },
+    }).catch((error) => {
+      console.warn(
+        "[synthflow] availability action refresh failed:",
+        error instanceof Error ? error.message : error,
+      );
+    });
   }
   if (!actionId) {
     try {
       const created = await createCustomAction({
         name: AVAILABILITY_ACTION_NAME,
         description:
-          "Check the clinic doctor's open appointment slots. Call this whenever the caller asks for availability or wants times.",
+          "Live Doctor Dashboard availability. Call immediately for today's times (date=today), weekly schedule (date empty), or a named day.",
         url: urls.availabilityAction,
-        jsonBody: {
-          doctor_name: "<doctor_name>",
-          doctor_id: "<doctor_id>",
-        },
+        jsonBody: availabilityBody,
         variables: [
           {
-            name: "doctor_name",
-            description: "Clinic doctor name if spoken, otherwise empty",
-            example: "Dr. Ahmed Khan",
-          },
-          {
-            name: "doctor_id",
-            description: "doctor_id from the Clinic doctor profile if known, otherwise empty",
-            example: "cmutnug6e0000t91wz8sug0jy",
+            name: "date",
+            description:
+              "Empty for weekly open dates. today for today's open times. Or a chosen day (tomorrow, Wednesday, October 15).",
+            example: "today",
           },
         ],
-        prompt:
-          "Say spoken_summary exactly. It lists only open appointment times. Do not mention specialty, experience, qualifications, bio, languages, hospital, fee, or any other profile detail. Never invent a time.",
-        messageError: "Let me check the clinic doctor's open times.",
+        prompt: availabilityPrompt,
+        messageError: "Let me check the clinic schedule for open dates this week.",
       });
       actionId = created.action_id;
     } catch (error) {
@@ -375,7 +395,7 @@ async function ensureBookCustomAction(existingIds: string[]) {
           },
         ],
         prompt:
-          "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Do not read otp aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. Confirm only when appointment_confirmed is true. If success is false, speak the response message and do not say the appointment is booked.",
+          "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Never say OTP digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. If you did not catch the digits, ask them to repeat slowly. Confirm only when appointment_confirmed is true. If success is false, speak the response message and do not say the appointment is booked.",
         messageError:
           "Booking could not be completed. If you already have an active appointment, please complete or cancel it first.",
       });
@@ -529,6 +549,10 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     greeting_message_mode: "agent_static",
     llm: "gpt-4.1-Mini",
     language: lang,
+    // Synthflow allows 0.7–1.2 (1.0 = natural). 0.85 = calm, not dragged.
+    voice_speed: 0.85,
+    voice_prompt:
+      "Speak clearly at a calm, natural pace. Short pause after questions. Never rush dates, times, or phone numbers.",
     ...(voiceId ? { voice_id: voiceId } : {}),
   };
 
@@ -548,6 +572,32 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
   if (!urls.inbound.includes("https://") && !urls.data.includes("https://")) {
     warnings.push(
       "PUBLIC_API_URL is not HTTPS. Synthflow may not reach localhost — use a tunnel (Cloudflare/ngrok) for live calls.",
+    );
+  }
+  // Live phone actions always hit PUBLIC_API_URL. Local dashboard slots are useless
+  // for calls if PUBLIC_API_URL still points at a different host (e.g. production).
+  const publicHost = (() => {
+    try {
+      return new URL(env.PUBLIC_API_URL).hostname;
+    } catch {
+      return "";
+    }
+  })();
+  if (
+    env.NODE_ENV === "development" &&
+    publicHost &&
+    publicHost !== "localhost" &&
+    publicHost !== "127.0.0.1" &&
+    !publicHost.endsWith(".trycloudflare.com") &&
+    !publicHost.includes("ngrok")
+  ) {
+    warnings.push(
+      `Live phone availability reads ${publicHost}, not this local database. Set PUBLIC_API_URL to a tunnel of localhost:4000 (or add the same open slots on that host) so check_doctor_availability can list your calendar times.`,
+    );
+  }
+  if (!openSlotsSummary || openSlotsSummary === "none") {
+    warnings.push(
+      "No open appointment slots in this database. Add slots in Availability (or save weekly hours) before callers can book by phone.",
     );
   }
 

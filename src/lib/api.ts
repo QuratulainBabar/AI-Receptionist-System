@@ -1393,6 +1393,7 @@ export const doctorAvailabilityApi = {
       slots: ApiDoctorSlot[];
       clinicTimeZone?: string;
       clinicTimeZoneLabel?: string;
+      clinicToday?: string;
     }>(
       `/api/doctor/availability${qs ? `?${qs}` : ""}`,
       { method: "GET" },
@@ -1418,6 +1419,7 @@ export const doctorAvailabilityApi = {
     startTime: string;
     endTime: string;
     durationMinutes?: 15 | 30 | 45 | 60;
+    skipSynthflowSync?: boolean;
   }) {
     return request<{
       success: boolean;
@@ -1431,6 +1433,21 @@ export const doctorAvailabilityApi = {
     }>(
       "/api/doctor/availability/range",
       { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  clearDates(dates: string[], skipSynthflowSync = true) {
+    return request<{
+      success: boolean;
+      removed: number;
+      dates: string[];
+      message?: string;
+      synthflowSynced?: boolean;
+      openSlotsSummary?: string | null;
+      warning?: string | null;
+    }>(
+      "/api/doctor/availability/clear-dates",
+      { method: "POST", body: JSON.stringify({ dates, skipSynthflowSync }) },
       authHeader(),
     );
   },
@@ -1452,6 +1469,7 @@ export const doctorAvailabilityApi = {
     return request<{
       success: boolean;
       id: string;
+      alreadyGone?: boolean;
       message?: string;
       synthflowSynced?: boolean;
       openSlotsSummary?: string | null;
@@ -1486,13 +1504,29 @@ export type ApiDoctorNotification = {
   detail: string;
   time: string;
   kind: "new" | "changed" | "cancelled";
+  unread: boolean;
 };
+
+/** Fired after the doctor views/marks notifications so AppShell can clear badges. */
+export const DOCTOR_NOTIFICATIONS_UPDATED_EVENT = "doctor-notifications-updated";
+
+export function notifyDoctorNotificationsUpdated() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(DOCTOR_NOTIFICATIONS_UPDATED_EVENT));
+}
 
 export const doctorNotificationsApi = {
   list() {
     return request<{ success: boolean; notifications: ApiDoctorNotification[] }>(
       "/api/doctor/notifications",
       { method: "GET" },
+      authHeader(),
+    );
+  },
+  markAllRead() {
+    return request<{ success: boolean; marked: number }>(
+      "/api/doctor/notifications/read",
+      { method: "POST", body: "{}" },
       authHeader(),
     );
   },
@@ -1688,6 +1722,8 @@ export type DoctorProfileUpdateBody = {
   location?: string;
   weeklyHours?: ApiWeeklyHourSlot[];
   availabilityConfig?: ApiAvailabilityConfig;
+  regenerateOpenSlots?: boolean;
+  skipSynthflowSync?: boolean;
 };
 
 export const doctorProfileApi = {
@@ -1915,7 +1951,7 @@ export const doctorPatientsApi = {
       authHeader(),
     );
   },
-  async openRecordFile(patientId: string, recordId: string) {
+  async fetchRecordBlob(patientId: string, recordId: string) {
     const token = authHeader();
     const headers = withApiHeaders();
     if (token) headers.set("Authorization", `Bearer ${token}`);
@@ -1939,9 +1975,23 @@ export const doctorPatientsApi = {
       throw new ApiError(response.status, message);
     }
 
-    const blob = await response.blob();
+    return response.blob();
+  },
+  async openRecordFile(patientId: string, recordId: string) {
+    const blob = await this.fetchRecordBlob(patientId, recordId);
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank", "noopener,noreferrer");
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  },
+  async downloadRecordFile(patientId: string, record: ApiMedicalRecord) {
+    const blob = await this.fetchRecordBlob(patientId, record.id);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = record.name || "medical-record";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
     window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
   },
 };

@@ -8,6 +8,7 @@ import {
   handleCheckAppointmentAction,
   handleDataWebhook,
   handleInboundWebhook,
+  handleRecordsSmsAction,
   handleVerifyOtpAction,
 } from "../services/synthflow.webhooks.service.js";
 import { synthflowWebhookUrls } from "../config/env.js";
@@ -138,6 +139,22 @@ export async function availabilityAction(req: Request, res: Response, next: Next
     const result = await handleAvailabilityAction(req.body);
     return res.status(200).json(result);
   } catch (error) {
+    return next(error);
+  }
+}
+
+export async function recordsSmsAction(req: Request, res: Response, next: NextFunction) {
+  try {
+    assertSignature(req, req.body);
+    const result = await handleRecordsSmsAction(req.body);
+    return res.status(200).json(result);
+  } catch (error) {
+    if (error instanceof AppError) {
+      return res.status(200).json({
+        success: false,
+        message: error.message,
+      });
+    }
     return next(error);
   }
 }

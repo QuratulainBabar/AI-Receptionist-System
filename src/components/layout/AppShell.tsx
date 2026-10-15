@@ -33,7 +33,12 @@ import {
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/primitives";
-import { doctorNotificationsApi, doctorProfileApi, type ApiDoctorNotification } from "@/lib/api";
+import {
+  DOCTOR_NOTIFICATIONS_UPDATED_EVENT,
+  doctorNotificationsApi,
+  doctorProfileApi,
+  type ApiDoctorNotification,
+} from "@/lib/api";
 import { clearSession, type Session } from "@/lib/session";
 
 const SIDEBAR_COLLAPSED_KEY = "ai-receptionist-sidebar-collapsed";
@@ -271,14 +276,17 @@ export function AppShell({
       void loadNotifications();
     }, 30_000);
     window.addEventListener("focus", loadNotifications);
+    window.addEventListener(DOCTOR_NOTIFICATIONS_UPDATED_EVENT, loadNotifications);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
       window.removeEventListener("focus", loadNotifications);
+      window.removeEventListener(DOCTOR_NOTIFICATIONS_UPDATED_EVENT, loadNotifications);
     };
   }, [session.role]);
 
-  const notificationsCount = session.role === "doctor" ? notifications.length : 0;
+  const notificationsCount =
+    session.role === "doctor" ? notifications.filter((note) => note.unread).length : 0;
   const notificationBadge = notificationsCount > 99 ? "99+" : String(notificationsCount);
 
   function toggleCollapsed() {

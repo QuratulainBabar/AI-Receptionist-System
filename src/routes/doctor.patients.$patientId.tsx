@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { FollowUpDialog } from "@/components/doctor/FollowUpDialog";
 import { AppointmentInvoiceAction } from "@/components/doctor/AppointmentInvoiceAction";
 import { PatientTimeline } from "@/components/doctor/PatientTimeline";
@@ -39,10 +39,12 @@ function PatientDetails() {
   const { patientId } = Route.useParams();
   const [file, setFile] = useState<ApiDoctorPatientFile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [requestingId, setRequestingId] = useState<string | null>(null);
+  const requestingLock = useRef<string | null>(null);
   const [followUpFor, setFollowUpFor] = useState<ApiAppointment | null>(null);
   const [noteBody, setNoteBody] = useState("");
   const [noteAppointmentId, setNoteAppointmentId] = useState("");
@@ -55,6 +57,7 @@ function PatientDetails() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setLoadError("");
     setError("");
     void doctorPatientsApi
       .get(patientId)
@@ -71,7 +74,7 @@ function PatientDetails() {
         }
       })
       .catch((err) => {
-        if (!cancelled) setError(formatApiError(err, "Unable to load patient file."));
+        if (!cancelled) setLoadError(formatApiError(err, "Unable to load patient file."));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -85,11 +88,11 @@ function PatientDetails() {
     return <EmptyNote>Loading patient file…</EmptyNote>;
   }
 
-  if (error || !file) {
+  if (loadError || !file) {
     return (
       <>
         <PageHeader eyebrow="Patient file" title="Patient not found" />
-        <p className="mb-4 text-sm text-destructive">{error || "Patient not found in your list."}</p>
+        <p className="mb-4 text-sm text-destructive">{loadError || "Patient not found in your list."}</p>
         <Link to="/doctor/patients">
           <Button variant="outline">Back to list</Button>
         </Link>
@@ -126,6 +129,8 @@ function PatientDetails() {
   }
 
   async function requestRecords(appointment: ApiAppointment) {
+    if (requestingLock.current) return;
+    requestingLock.current = appointment.id;
     setRequestingId(appointment.id);
     setError("");
     setMessage("");
@@ -153,15 +158,19 @@ function PatientDetails() {
             }
           : current,
       );
-      const base = result.message || result.request.message || "Upload link sent to the patient.";
-      setMessage(
-        result.request.smsSent || !result.request.uploadUrl
-          ? base
-          : `${base} Link: ${result.request.uploadUrl}`,
-      );
+      const base =
+        result.message ||
+        result.request.message ||
+        "Calling the patient to confirm their number and text the upload link.";
+      if (result.request.smsSent) {
+        setMessage(base);
+      } else {
+        setError(base);
+      }
     } catch (err) {
       setError(formatApiError(err, "Unable to request medical records."));
     } finally {
+      requestingLock.current = null;
       setRequestingId(null);
     }
   }
@@ -330,7 +339,9 @@ function PatientDetails() {
             <PatientTimeline
               events={file.timeline ?? []}
               appointments={appointments}
-              onViewRecord={(recordId) => void doctorPatientsApi.openRecordFile(patient.id, recordId)}
+              records={file.records ?? []}
+              onPreviewRecord={(recordId) => void doctorPatientsApi.openRecordFile(patient.id, recordId)}
+              onDownloadRecord={(record) => void doctorPatientsApi.downloadRecordFile(patient.id, record)}
               renderVisitActions={(appointment) => (
                 <div className="flex flex-wrap gap-1.5">
                   {appointment.status !== "completed" && appointment.status !== "cancelled" ? (
@@ -351,7 +362,7 @@ function PatientDetails() {
                   {appointment.status !== "cancelled" ? (
                     <>
                       <Button size="sm" variant="soft" disabled={requestingId === appointment.id} onClick={() => void requestRecords(appointment)}>
-                        {requestingId === appointment.id ? "Sending…" : appointment.recordRequest ? "Resend records request" : "Request medical records"}
+                        {requestingId === appointment.id ? "Calling…" : appointment.recordRequest ? "Resend records request" : "Request medical records"}
                       </Button>
                       <Button size="sm" variant="soft" onClick={() => setFollowUpFor(appointment)}>
                         Schedule next visit

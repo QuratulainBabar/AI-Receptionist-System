@@ -4,13 +4,21 @@ import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
 import { logPatientActivity, ActivityType } from "./activity.service.js";
 import { digitsOnly, normalizePhone } from "../utils/phone.js";
-import { formatClinicDateTime } from "../utils/clinic-time.js";
+import {
+  addCivilDays,
+  civilDateKey,
+  clinicTimeZone,
+  formatClinicDateTime,
+  formatClinicTime,
+  wallTimeToUtc,
+  weekdayNameForCivilDate,
+} from "../utils/clinic-time.js";
 import { findPatientByPhone } from "./patient-phone.service.js";
 import { emptyish, extractSynthflowFields, extractVoiceBookingFields } from "./synthflow-fields.service.js";
 import { findActiveAppointmentForMobile, type PublicAppointment } from "./appointments.service.js";
 import { processVoiceBooking } from "./voice-booking.service.js";
 import { verifyBookingOtp } from "./booking-otp.service.js";
-import { fetchCallRecordingUrl } from "./synthflow.client.js";
+import { fetchCallRecordingUrl, sendPatientReminderSms } from "./synthflow.client.js";
 import {
   clinicDoctorProfileBlock,
   consultationFeeToSpeak,
@@ -70,15 +78,24 @@ export { findPatientByPhone } from "./patient-phone.service.js";
 async function ensureClinicDoctorWithSlots(openSlotsTake: number) {
   let doctor = await getClinicDoctor({ openSlotsTake });
   if (!doctor) return null;
-  if (doctor.availability.length === 0 && doctor.weeklyHours != null) {
-    await generateSlotsFromWeeklyHours(doctor.userId, { weeks: 2, allowEmpty: true });
-    doctor = (await getClinicDoctor({ openSlotsTake })) ?? doctor;
+  // Always try to materialize open slots from weekly hours when the calendar is empty
+  // so check_doctor_availability can speak real times (not "no open times").
+  if (doctor.availability.length === 0) {
+    try {
+      await generateSlotsFromWeeklyHours(doctor.userId, { weeks: 1, allowEmpty: true });
+      doctor = (await getClinicDoctor({ openSlotsTake })) ?? doctor;
+    } catch (error) {
+      console.warn(
+        "[synthflow] Could not auto-generate open slots:",
+        error instanceof Error ? error.message : error,
+      );
+    }
   }
   return doctor;
 }
 
 async function buildClinicContext() {
-  const doctor = await ensureClinicDoctorWithSlots(8);
+  const doctor = await ensureClinicDoctorWithSlots(16);
   if (!doctor) {
     return {
       clinic_name: "Qubetech AI Receptionist Clinic",
@@ -88,7 +105,7 @@ async function buildClinicContext() {
       opening_doctor_line: "",
       availability_summary: "No open slots. Do not invent a time.",
       booking_instructions:
-        "This clinic has one doctor. Use the latest Clinic doctor profile for specialty, experience, qualifications, clinic, fee, languages, and other listed details when the caller asks. When the caller wants to book, call check_doctor_availability and say only those open times. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment for a real slot_id. Do not read the otp aloud. Ask for the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
+        "This clinic has one doctor. When the caller wants to book, ask only which day they want, then WAIT — do not list dates yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say only open dates for the next seven days (speak slowly). After they pick a date, call again with that date and say only that day's times. Then collect booking details. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment for a real slot_id. Never say OTP digits aloud. Ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
     };
   }
 
@@ -99,7 +116,7 @@ async function buildClinicContext() {
     : "";
   const openLabels = formatOpenSlotLabels(doctor.availability, {
     withIds: false,
-    limit: 8,
+    limit: 16,
   });
 
   return {
@@ -109,10 +126,10 @@ async function buildClinicContext() {
     clinic_doctor_fee: feeSpoken,
     opening_doctor_line: openingDoctorLine(profile.doctorName, feeSpoken || fee),
     availability_summary: openLabels.length
-      ? "When the caller wants to book, call check_doctor_availability and say only those open times. Do not read this variable aloud."
+      ? "Do not read this aloud. Use check_doctor_availability: date today for today's times; date empty for weekly open dates; or the chosen day for that day's times. Always speak the action message exactly."
       : `${profile.doctorName} has no open slots right now.`,
     booking_instructions:
-      "On opening, say the doctor name and consultation fee when set. If asked about the doctor, answer from the Clinic doctor profile (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services). Never invent missing details. When the caller wants to book, call check_doctor_availability and say only spoken_summary. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment with that doctor and a real slot_id. Do not read the otp aloud. Ask the caller to say the six-digit verification code and call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
+      "If the caller asks about today's availability, call check_doctor_availability with date today and say the message. If they ask about the weekly schedule, call with date empty and say the message. When booking: ask which day, WAIT, then call with that date and say times. After phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise book_appointment with a real slot_id, then verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true.",
   };
 }
 
@@ -428,12 +445,20 @@ export async function handleDataWebhook(payload: unknown) {
   };
 }
 
-function speakOpenSlots(labels: string[]) {
-  if (labels.length === 0) return "There are no open appointment times right now.";
-  if (labels.length === 1) return `The open appointment time is ${labels[0]}. Would you like that time?`;
+function speakList(labels: string[], singular: string, plural: string, ask: string) {
+  if (labels.length === 0) return `There are no ${plural} right now.`;
+  if (labels.length === 1) return `The ${singular} is ${labels[0]}. ${ask}`;
   const head = labels.slice(0, -1).join(", ");
   const last = labels[labels.length - 1];
-  return `The open appointment times are ${head}, and ${last}. Which time would you like?`;
+  return `The ${plural} are ${head}, and ${last}. ${ask}`;
+}
+
+function speakOpenDates(labels: string[]) {
+  return speakList(labels, "open date", "open dates this week", "Which date would you like?");
+}
+
+function speakOpenSlots(labels: string[]) {
+  return speakList(labels, "open time", "open times that day", "Which time would you like?");
 }
 
 function pickFirstFromExtracted(fields: Record<string, string>, keys: string[]) {
@@ -444,29 +469,243 @@ function pickFirstFromExtracted(fields: Record<string, string>, keys: string[]) 
   return "";
 }
 
-export async function handleAvailabilityAction(_body: unknown) {
-  const doctor = await ensureClinicDoctorWithSlots(8);
+const WEEKDAY_ALIASES: Record<string, number> = {
+  sunday: 0,
+  sun: 0,
+  monday: 1,
+  mon: 1,
+  tuesday: 2,
+  tue: 2,
+  tues: 2,
+  wednesday: 3,
+  wed: 3,
+  thursday: 4,
+  thu: 4,
+  thur: 4,
+  thurs: 4,
+  friday: 5,
+  fri: 5,
+  saturday: 6,
+  sat: 6,
+};
+
+/** Resolve a spoken/typed date to YYYY-MM-DD in the clinic zone (next 7 days only). */
+function resolveAvailabilityDateKey(raw: string, now = new Date()): string | null {
+  const text = raw.toLowerCase().trim();
+  if (!text || emptyish(text) || text === "none" || text === "null") return null;
+  // Weekly / schedule questions → list open dates (not a single day).
+  if (
+    /\b(week|weekly|schedule|this week|next week|available days|open days|which days)\b/.test(text)
+  ) {
+    return null;
+  }
+
+  const todayKey = civilDateKey(now);
+  const weekEnd = addCivilDays(todayKey, 6);
+
+  if (/\btoday\b/.test(text)) return todayKey;
+  if (/\btomorrow\b/.test(text)) return addCivilDays(todayKey, 1);
+
+  const iso = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
+  if (iso) {
+    const key = `${iso[1]}-${iso[2]}-${iso[3]}`;
+    if (key >= todayKey && key <= weekEnd) return key;
+  }
+
+  // "October 14", "Oct 14", "14 October"
+  const monthNames = [
+    "january",
+    "february",
+    "march",
+    "april",
+    "may",
+    "june",
+    "july",
+    "august",
+    "september",
+    "october",
+    "november",
+    "december",
+  ];
+  const monthShort = monthNames.map((name) => name.slice(0, 3));
+  const monthDay =
+    text.match(
+      /\b(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\s+(\d{1,2})(?:st|nd|rd|th)?\b/,
+    ) ||
+    text.match(
+      /\b(\d{1,2})(?:st|nd|rd|th)?\s+(january|february|march|april|may|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sep|sept|oct|nov|dec)\b/,
+    );
+  if (monthDay) {
+    const a = monthDay[1]!;
+    const b = monthDay[2]!;
+    const monthToken = /^\d+$/.test(a) ? b : a;
+    const dayNum = Number(/^\d+$/.test(a) ? a : b);
+    const monthIdx =
+      monthNames.findIndex((name) => name.startsWith(monthToken.slice(0, 3))) >= 0
+        ? monthNames.findIndex((name) => name.startsWith(monthToken.slice(0, 3)))
+        : monthShort.indexOf(monthToken.slice(0, 3));
+    if (monthIdx >= 0 && dayNum >= 1 && dayNum <= 31) {
+      for (let offset = 0; offset < 7; offset += 1) {
+        const key = addCivilDays(todayKey, offset);
+        const [y, m, d] = key.split("-").map(Number);
+        if (m === monthIdx + 1 && d === dayNum) return key;
+      }
+    }
+  }
+
+  for (const [alias, wantDow] of Object.entries(WEEKDAY_ALIASES)) {
+    if (!new RegExp(`\\b${alias}\\b`).test(text)) continue;
+    for (let offset = 0; offset < 7; offset += 1) {
+      const key = addCivilDays(todayKey, offset);
+      const weekday = weekdayNameForCivilDate(key).toLowerCase();
+      if (WEEKDAY_ALIASES[weekday] === wantDow) return key;
+    }
+  }
+
+  return null;
+}
+
+/** Voice-friendly date: "Monday, October 19" (full names, no year, no Oct shorthand). */
+function speakableDateLabel(dateKey: string) {
+  const [year, month, day] = dateKey.split("-").map(Number);
+  const noon = wallTimeToUtc({
+    year: year!,
+    month: month!,
+    day: day!,
+    hour: 12,
+    minute: 0,
+  });
+  return noon.toLocaleDateString("en-US", {
+    timeZone: clinicTimeZone(),
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function slotsWithinWeek(slots: Array<{ id: string; startsAt: Date }>, now = new Date()) {
+  const todayKey = civilDateKey(now);
+  const weekEnd = addCivilDays(todayKey, 6);
+  return slots.filter((slot) => {
+    const key = civilDateKey(slot.startsAt);
+    return key >= todayKey && key <= weekEnd;
+  });
+}
+
+export async function handleAvailabilityAction(body: unknown) {
+  const root = asRecord(body);
+  const fields = extractVoiceBookingFields(body);
+  const requestedDateRaw =
+    pickString(root, ["date", "requested_date", "appointment_date", "day"]) ||
+    pickFirstFromExtracted(fields as Record<string, string>, [
+      "date",
+      "requested_date",
+      "appointment_date",
+      "day",
+    ]);
+
+  // Pull enough open slots to cover one clinic week (many slots/day can fill a small take).
+  const doctor = await ensureClinicDoctorWithSlots(200);
   if (!doctor) {
+    const spoken =
+      "The clinic doctor profile is not set up yet. Ask the caller to try again later.";
     return {
       success: true,
-      spoken_summary:
-        "The clinic doctor profile is not set up yet. Ask the caller to try again later.",
+      mode: "none",
+      spoken_summary: spoken,
+      // Synthflow speaks `message` after custom actions — keep spoken_summary as alias.
+      message: spoken,
       doctors: [],
+      dates: [],
+      slots: [],
     };
   }
 
   const profile = clinicDoctorProfileBlock(doctor);
-  const slots = doctor.availability.map((slot) => ({
+  const weekSlots = slotsWithinWeek(doctor.availability);
+
+  const dateKey = resolveAvailabilityDateKey(requestedDateRaw);
+  if (!dateKey) {
+    const byDate = new Map<string, number>();
+    for (const slot of weekSlots) {
+      const key = civilDateKey(slot.startsAt);
+      byDate.set(key, (byDate.get(key) || 0) + 1);
+    }
+    const dates = [...byDate.keys()].sort().map((key) => ({
+      date: key,
+      label: speakableDateLabel(key),
+      open_count: byDate.get(key) || 0,
+    }));
+    const dateLabels = dates.map((row) => row.label);
+    let spoken_summary: string;
+    if (dateLabels.length === 0) {
+      spoken_summary = "There are no open dates in the next seven days.";
+    } else if (dateLabels.length === 1) {
+      spoken_summary = `Over the next seven days, the open date is ${dateLabels[0]}. Which date would you like?`;
+    } else {
+      const head = dateLabels.slice(0, -1).join(", ");
+      const last = dateLabels[dateLabels.length - 1];
+      spoken_summary = `Over the next seven days, the open dates are ${head}, and ${last}. Which date would you like?`;
+    }
+
+    return {
+      success: true,
+      mode: "dates",
+      week_only: true,
+      spoken_summary,
+      message: spoken_summary,
+      doctor_id: profile.doctorId,
+      doctor_name: profile.doctorName,
+      dates,
+      slots: [],
+    };
+  }
+
+  const daySlots = weekSlots.filter((slot) => civilDateKey(slot.startsAt) === dateKey);
+  const slots = daySlots.map((slot) => ({
     slot_id: slot.id,
-    label: formatClinicDateTime(slot.startsAt),
+    label: formatClinicTime(slot.startsAt),
+    datetime_label: formatClinicDateTime(slot.startsAt),
+    date: dateKey,
   }));
-  const spoken_summary = speakOpenSlots(slots.map((slot) => slot.label));
+  const dayLabel = speakableDateLabel(dateKey);
+  const timeLabels = slots.map((slot) => slot.label);
+  const todayKey = civilDateKey(new Date());
+  let spoken_summary: string;
+  if (timeLabels.length === 0) {
+    const nextSlot = weekSlots.find((slot) => civilDateKey(slot.startsAt) > dateKey);
+    if (dateKey === todayKey && nextSlot) {
+      const nextKey = civilDateKey(nextSlot.startsAt);
+      const nextTimes = weekSlots
+        .filter((slot) => civilDateKey(slot.startsAt) === nextKey)
+        .map((slot) => formatClinicTime(slot.startsAt));
+      const nextLabel = speakableDateLabel(nextKey);
+      const timesSpoken =
+        nextTimes.length === 1
+          ? nextTimes[0]
+          : `${nextTimes.slice(0, -1).join(", ")}, and ${nextTimes[nextTimes.length - 1]}`;
+      spoken_summary = `There are no remaining open times today. The next open day is ${nextLabel}, with times ${timesSpoken}. Which time would you like, or would you prefer another day this week?`;
+    } else {
+      spoken_summary = `There are no open times on ${dayLabel}. Please choose another date from the next seven days.`;
+    }
+  } else if (timeLabels.length === 1) {
+    spoken_summary = `On ${dayLabel}, the open time is ${timeLabels[0]}. Which time would you like?`;
+  } else {
+    const head = timeLabels.slice(0, -1).join(", ");
+    const last = timeLabels[timeLabels.length - 1];
+    spoken_summary = `On ${dayLabel}, the open times are ${head}, and ${last}. Which time would you like?`;
+  }
 
   return {
     success: true,
+    mode: "slots",
     spoken_summary,
+    message: spoken_summary,
     doctor_id: profile.doctorId,
     doctor_name: profile.doctorName,
+    date: dateKey,
+    date_label: dayLabel,
+    dates: [],
     slots,
   };
 }
@@ -487,7 +726,7 @@ export async function handleCheckAppointmentAction(body: unknown) {
     };
   }
 
-  const active = await findActiveAppointmentForMobile({ phone });
+  const active = await findActiveAppointmentForMobile({ phone, ignoreOpenOtpHolds: true });
   if (active) {
     return {
       success: true,
@@ -613,11 +852,11 @@ export async function handleBookAction(body: unknown) {
     otp_required: true,
     appointment_booked: false,
     appointment_confirmed: false,
-    otp: booked.otp,
+    // Never return the OTP digits to the voice agent — it will speak them.
     expires_seconds: booked.expiresSeconds,
     to_phone_number: smsTo,
     message:
-      "The appointment is not booked yet. Do not read the otp aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. Confirm only when appointment_confirmed is true. If the code is wrong, say the appointment is not booked and that time was released.",
+      "The appointment is not booked yet. Do not say any code digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp with the digits they speak. If you did not catch the digits, ask them to say the six digits slowly again. Confirm only when appointment_confirmed is true. If the code is wrong, say the appointment is not booked and that time was released.",
     patient_id: patient.id,
     patient_reference: patient.reference,
   };
@@ -646,6 +885,178 @@ export async function handleVerifyOtpAction(body: unknown) {
     }
     throw error;
   }
+}
+
+const SPOKEN_DIGIT: Record<string, string> = {
+  zero: "0",
+  oh: "0",
+  o: "0",
+  one: "1",
+  two: "2",
+  three: "3",
+  four: "4",
+  five: "5",
+  six: "6",
+  seven: "7",
+  eight: "8",
+  nine: "9",
+};
+
+/** Turn "nine two three…" or mixed text into digit characters. */
+function spokenWordsToDigits(value: string) {
+  const raw = value.trim().toLowerCase();
+  if (!raw) return "";
+  if (/\d/.test(raw)) return digitsOnly(raw);
+  const parts = raw.split(/[^a-z]+/).filter(Boolean);
+  let out = "";
+  for (const part of parts) {
+    if (SPOKEN_DIGIT[part] != null) out += SPOKEN_DIGIT[part];
+  }
+  return out;
+}
+
+function coercePhoneCandidate(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const direct = normalizePhone(trimmed);
+  if (direct && digitsOnly(direct).length >= 10) return direct;
+  const fromSpoken = normalizePhone(spokenWordsToDigits(trimmed));
+  if (fromSpoken && digitsOnly(fromSpoken).length >= 10) return fromSpoken;
+  const loose = digitsOnly(trimmed);
+  if (loose.length >= 10) return normalizePhone(loose);
+  return "";
+}
+
+function collectPhoneCandidates(body: unknown): string[] {
+  const root = asRecord(body);
+  const fields = extractVoiceBookingFields(body);
+  const custom = asRecord(root.custom_variables || root.customVariables);
+  const keys = [
+    "phone",
+    "to_phone",
+    "to_phone_number",
+    "mobile",
+    "contact_phone",
+    "phone_number",
+    "caller_phone",
+    "user_phone_number",
+    "fallback_phone",
+    "from_number",
+    "to",
+  ];
+  const out: string[] = [];
+  for (const key of keys) {
+    const fromRoot = pickString(root, [key]);
+    if (fromRoot) out.push(fromRoot);
+    const fromCustom = asString(custom[key]).trim();
+    if (fromCustom) out.push(fromCustom);
+  }
+  if (fields.phone) out.push(fields.phone);
+  // Synthflow sometimes nests values under parameters / variables.
+  for (const nestKey of ["parameters", "variables", "args", "input"]) {
+    const nest = asRecord(root[nestKey]);
+    for (const key of keys) {
+      const value = pickString(nest, [key]);
+      if (value) out.push(value);
+    }
+  }
+  // Last resort: any 10+ digit run in the raw payload.
+  try {
+    const blob = JSON.stringify(body);
+    const matches = blob.match(/\+?\d[\d\s().-]{8,}\d/g) || [];
+    out.push(...matches);
+  } catch {
+    // ignore
+  }
+  return out;
+}
+
+/**
+ * Voice agent confirmed a mobile number for the medical-records upload link.
+ * Queue SMS delivery shortly after so the live call can hang up first.
+ */
+export async function handleRecordsSmsAction(body: unknown) {
+  const root = asRecord(body);
+  const fields = extractVoiceBookingFields(body);
+  const custom = asRecord(root.custom_variables || root.customVariables);
+
+  let phone = "";
+  for (const candidate of collectPhoneCandidates(body)) {
+    phone = coercePhoneCandidate(candidate);
+    if (phone) break;
+  }
+
+  const doctorName =
+    pickString(root, ["doctor_name", "doctor"]) ||
+    asString(custom.doctor_name).trim() ||
+    pickFirstFromExtracted(fields as Record<string, string>, ["doctor_name"]) ||
+    "your doctor";
+  const appointmentReference =
+    pickString(root, ["appointment_reference", "reference", "appointment"]) ||
+    asString(custom.appointment_reference).trim() ||
+    pickFirstFromExtracted(fields as Record<string, string>, ["appointment_reference"]) ||
+    "your visit";
+  const uploadUrl =
+    pickString(root, ["upload_url", "uploadUrl", "link", "url"]) ||
+    asString(custom.upload_url).trim() ||
+    pickFirstFromExtracted(fields as Record<string, string>, ["upload_url"]);
+
+  if (!phone) {
+    console.warn(
+      "[synthflow] records-sms: no phone in payload keys=",
+      Object.keys(root).join(","),
+    );
+    return {
+      success: false,
+      message:
+        "Please say the mobile number as digits where I should text the upload link so you can share your documents.",
+    };
+  }
+  if (!uploadUrl || !/^https?:\/\//i.test(uploadUrl)) {
+    console.warn("[synthflow] records-sms: missing upload_url for phone", phone);
+    return {
+      success: false,
+      message: "The upload link is missing. Please ask your doctor to resend the records request.",
+    };
+  }
+
+  const clinicNumber = normalizePhone(env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053");
+  if (clinicNumber && phone === clinicNumber) {
+    return {
+      success: false,
+      message: "That number is the clinic line. Please give your personal mobile number.",
+    };
+  }
+
+  const cleanDoctor = doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
+  const smsBody = `Qubetech clinic: Dr. ${cleanDoctor} requested your medical records for appointment ${appointmentReference}. Upload securely here (expires in 7 days): ${uploadUrl}`;
+
+  console.log(`[synthflow] records-sms accepted phone=${phone} ref=${appointmentReference}`);
+
+  // Deliver after a short delay so this call can end before the SMS delivery call starts.
+  void (async () => {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    try {
+      await sendPatientReminderSms({
+        toPhone: phone,
+        body: smsBody,
+        purpose: "confirmation",
+      });
+      console.log(`[synthflow] Records upload SMS queued/delivered to ${phone}`);
+    } catch (error) {
+      console.warn(
+        `[synthflow] Records upload SMS failed for ${phone}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  })();
+
+  return {
+    success: true,
+    phone,
+    message:
+      "I have texted your secure upload link. Please open it to attach your files. Goodbye.",
+  };
 }
 
 export function getWebhookCallId(payload: unknown) {

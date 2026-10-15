@@ -13,3 +13,15 @@ export async function listForDoctor(req: Request, res: Response, next: NextFunct
     next(error);
   }
 }
+
+export async function markAllReadForDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+    const result = await notificationsService.markAllNotificationsReadForDoctor(req.user.sub);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+}

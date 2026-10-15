@@ -244,7 +244,7 @@ export async function createDoctorForAdmin(input: {
 
   if (input.profile?.weeklyHours !== undefined) {
     await generateSlotsFromWeeklyHours(user.id, {
-      weeks: 2,
+      weeks: 1,
       requireActive: false,
       allowEmpty: true,
     });
@@ -296,7 +296,7 @@ export async function updateDoctorCrmForAdmin(
   await updateDoctorProfileForDoctor(userId, input, { requireActive: false });
   if (input.weeklyHours !== undefined) {
     await generateSlotsFromWeeklyHours(userId, {
-      weeks: 2,
+      weeks: 1,
       requireActive: false,
       allowEmpty: true,
     });

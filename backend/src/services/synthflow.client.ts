@@ -254,11 +254,19 @@ The greeting already includes the clinic welcome, the doctor's name, and the con
 If the greeting did not already say the doctor's name, say only opening_doctor_line, then ask how you can help.
 If the caller asks about the doctor, answer from the latest Clinic doctor profile (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about). Never invent missing details.`;
 
-const AVAILABILITY_SPEAK_RULE = `AVAILABILITY SPEAK RULE:
-When the caller wants to book or asks for a time, call check_doctor_availability.
-Say spoken_summary exactly. It lists only currently open appointment times from the Doctor Dashboard availability.
-Do not invent a time. Then wait for the caller to choose one of those times.
-Bookable times come only from availability / open slots — not from weekly-hours text in the profile.`;
+const AVAILABILITY_SPEAK_RULE = `AVAILABILITY SPEAK RULE (FOLLOW EXACTLY — NEVER REFUSE TO CHECK):
+SPEAKING: Speak clearly at a calm natural pace. Short pause after questions.
+EXCEPTION TO BREVITY: When answering availability, say the full message / spoken_summary from check_doctor_availability (word limits do not apply to that list).
+IMMEDIATE AVAILABILITY QUESTIONS (do these first — do not stall):
+- If the caller asks about TODAY's availability / open times today → immediately call check_doctor_availability with date "today". Say the returned message (or spoken_summary) exactly, then WAIT.
+- If the caller asks about the weekly schedule / this week / which days are available → immediately call check_doctor_availability with date empty. Say the returned message (or spoken_summary) exactly, then WAIT.
+BOOKING ORDER (when they want to book but have not asked for a list yet):
+1. Say ONLY: "Which day would you like your appointment?" Then STOP and WAIT. Do not list dates yet.
+2. If they name a day (for example Friday, today, or October 17), call check_doctor_availability with that date. Say message / spoken_summary exactly (open times for that date). Ask which time. Then WAIT.
+3. Only if they say they do not know, call check_doctor_availability with date empty. Say message / spoken_summary exactly (open dates for the next seven days). Ask which date. Then WAIT.
+4. Only after they pick a time, collect booking details (reason, name, phone), then book and verify OTP.
+Never recite open slots from the doctor profile. Never invent a date or time.
+Bookable times come only from check_doctor_availability message / spoken_summary.`;
 
 const PHONE_APPOINTMENT_RULE = `PHONE APPOINTMENT RULE (FOLLOW BEFORE ANY BOOKING):
 Call check_existing_appointment only after the caller says a phone number. Do not call it when they say their name.
@@ -270,10 +278,12 @@ Never say a new appointment is booked or confirmed unless verify_booking_otp ret
 const BOOKING_OTP_RULE = `BOOKING OTP RULE:
 The appointment is not booked and not confirmed until the caller says the correct 6-digit verification code and verify_booking_otp returns appointment_confirmed true.
 After the caller picks a real open time and you have their name, phone, and reason, call book_appointment. That only holds the time. It does not book or confirm.
-Do not read the otp value aloud. Do not pass to_phone_number. Ask the caller to say the six-digit verification code.
+NEVER say, read, or hint any OTP digits (not 123456, not one two three…). Do not speak the otp field if present.
+Ask only: Please say the six-digit verification code. Then WAIT.
 Then call verify_booking_otp with the booking phone and the digits they speak.
+If you did not catch the digits, say: Sorry, I did not catch that. Please say the six digits slowly. Then WAIT and call verify_booking_otp again.
 If appointment_confirmed is false, say the appointment is not booked and not confirmed.
-Never invent a code. Never say the visit is booked before that check succeeds.`;
+Never invent a confirmation. Never say the visit is booked before that check succeeds.`;
 
 /** Prefix rules baked into every Sync so Fine-tuner matches live calls. */
 export function synthflowPromptRulePrefix() {
@@ -287,7 +297,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "book_appointment",
       url: urls.bookAction,
       prompt:
-        "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Do not read otp aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not say the appointment is booked.",
+        "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Never say OTP digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. If you did not catch the digits, ask them to say the six digits slowly again. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not say the appointment is booked.",
       message_error: "Say the response message if one is present. Otherwise say the booking could not be saved.",
       jsonBody: {
         doctor_name: "<doctor_name>",
@@ -303,8 +313,22 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "check_doctor_availability",
       url: urls.availabilityAction,
       prompt:
-        "Say spoken_summary exactly. It lists only open appointment times. Do not mention specialty, experience, qualifications, bio, languages, hospital, fee, or any other profile detail. Do not invent a time. Then ask which of those times they want and wait.",
-      message_error: "Let me read the open times from the clinic schedule.",
+        "REQUIRED: Say the response message field exactly (same text as spoken_summary), then WAIT. If mode is dates, those are open dates for the next seven days — pause between dates, ask which date. If mode is slots, those are open times for the chosen date — pause between times, ask which time. Never invent a date or time. Call this immediately when the caller asks about today's times or the weekly schedule.",
+      message_error: "Let me check the clinic schedule for open dates in the next seven days.",
+      jsonBody: { date: "<date>" },
+      create: {
+        description:
+          "Return live open dates for the next seven days, or open times for one day from the Doctor Dashboard. Call immediately when the caller asks about today's availability (date=today), the weekly schedule (date empty), or after they name a day.",
+        jsonBody: { date: "<date>" },
+        variables: [
+          {
+            name: "date",
+            description:
+              "Use empty for weekly open dates. Use today for today's open times. Or pass a chosen day (tomorrow, Wednesday, October 15).",
+            example: "today",
+          },
+        ],
+      },
     },
     {
       name: "check_existing_appointment",
@@ -329,28 +353,83 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "verify_booking_otp",
       url: urls.verifyOtpAction,
       prompt:
-        "Say the message exactly. If appointment_confirmed is true, tell the caller the appointment is confirmed and read the reference, doctor, date, and time. If appointment_confirmed is false, say the appointment is not booked and not confirmed. Do not invent a confirmation.",
-      message_error: "I could not check that code. The appointment is not confirmed.",
+        "Say the message exactly. If appointment_confirmed is true, tell the caller the appointment is confirmed and read the reference, doctor, date, and time. If appointment_confirmed is false, say the appointment is not booked and not confirmed. Never say OTP digits aloud. If you did not catch the digits, ask them to say the six digits slowly, then call this action again. Do not invent a confirmation.",
+      message_error:
+        "Sorry, I did not catch that. Please say the six digits slowly.",
       jsonBody: { phone: "<phone>", otp: "<otp>", caller_phone: "<user_phone_number>" },
       create: {
         description:
-          "Verify the 6-digit code the caller reads from the SMS. Confirm the appointment only when this returns appointment_confirmed true.",
+          "Verify the 6-digit testing code 123456 the caller speaks. Confirm the appointment only when this returns appointment_confirmed true.",
         jsonBody: { phone: "<phone>", otp: "<otp>", caller_phone: "<user_phone_number>" },
         variables: [
           {
             name: "phone",
-            description: "Mobile number the code was sent to",
+            description: "Mobile number used for the booking",
             example: "+923129312436",
           },
           {
             name: "otp",
-            description: "The six digits the caller reads from the text message",
-            example: "482913",
+            description: "The six digits the caller spoke. Testing code is always 123456.",
+            example: "123456",
           },
           {
             name: "user_phone_number",
             description: "Inbound caller phone; always send this as caller_phone",
             example: "+923129312436",
+          },
+        ],
+      },
+    },
+    {
+      name: "deliver_records_upload_sms",
+      url: urls.recordsSmsAction,
+      prompt:
+        "Say the message exactly. If success is true, say goodbye and end the call. If success is false, ask out loud for the mobile number as digits where you should text the upload link, then call this action again with phone filled.",
+      message_error:
+        "Please tell me the mobile number where I should text the upload link so you can share your documents.",
+      jsonBody: {
+        phone: "<phone>",
+        doctor_name: "<doctor_name>",
+        appointment_reference: "<appointment_reference>",
+        upload_url: "<upload_url>",
+        fallback_phone: "<fallback_phone>",
+      },
+      create: {
+        description:
+          "After the caller confirms a mobile number, text the medical-records upload link to that number.",
+        jsonBody: {
+          phone: "<phone>",
+          doctor_name: "<doctor_name>",
+          appointment_reference: "<appointment_reference>",
+          upload_url: "<upload_url>",
+          fallback_phone: "<fallback_phone>",
+        },
+        variables: [
+          {
+            name: "phone",
+            description:
+              "Confirmed mobile number as digits (with country code if known). Required.",
+            example: "+14245550123",
+          },
+          {
+            name: "doctor_name",
+            description: "Doctor name for the records request",
+            example: "Daniel Osei",
+          },
+          {
+            name: "appointment_reference",
+            description: "Appointment reference such as APT-8302",
+            example: "APT-8302",
+          },
+          {
+            name: "upload_url",
+            description: "Secure upload link URL — do not read aloud",
+            example: "https://example.com/upload/token",
+          },
+          {
+            name: "fallback_phone",
+            description: "Patient phone on file if they say same number",
+            example: "+14245550123",
           },
         ],
       },
@@ -444,6 +523,14 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
     });
   }
   if (modelId) {
+    await attachDeliverRecordsSms(modelId).catch((error) => {
+      console.warn(
+        "[synthflow] Could not map deliver_records_upload_sms variables:",
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }
+  if (modelId) {
     await attachVerifyOtpCallerPhone(modelId).catch((error) => {
       console.warn(
         "[synthflow] Could not map the caller phone on verify_booking_otp:",
@@ -462,7 +549,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
 }
 
 const OTP_SMS_BODY =
-  "Your Qubetech appointment code is <otp>. It expires in <expires_seconds> seconds and can be used once. Do not share it.";
+  "Your Qubetech appointment code is <otp>. Testing code 123456 may be reused. Do not share it.";
 
 /** Text the one-time code to the inbound caller during the live call. */
 async function ensureBookingOtpSmsAction() {
@@ -611,8 +698,14 @@ async function ensurePhoneAppointmentRule(modelId: string) {
   );
   if (greetingMessage !== agent.greeting_message) changed = true;
   if (agent.greeting_message_mode !== "agent_static") changed = true;
+  const voiceSpeed = Number(agent.voice_speed);
+  // Calm pace — not the minimum 0.7 (that sounds too slow / stalled).
+  if (voiceSpeed !== 0.85) changed = true;
+  const calmVoicePrompt =
+    "Speak clearly at a calm, natural pace. Short pause after questions. Do not rush dates, times, or phone numbers.";
+  if (String(agent.voice_prompt || "") !== calmVoicePrompt) changed = true;
   if (!changed) {
-    console.log("[synthflow] System prompt already includes the opening, phone, availability, and OTP rules");
+    console.log("[synthflow] System prompt already includes the opening, phone, availability, OTP rules, and calm voice");
     return;
   }
   await updateAgent(modelId, {
@@ -621,9 +714,12 @@ async function ensurePhoneAppointmentRule(modelId: string) {
       prompt,
       greeting_message: greetingMessage,
       greeting_message_mode: "agent_static",
+      // Synthflow allows 0.7–1.2 (1.0 = natural). 0.85 is calm without dragging.
+      voice_speed: 0.85,
+      voice_prompt: calmVoicePrompt,
     },
   });
-  console.log("[synthflow] Opening, phone, availability, and OTP rules added to the live system prompt");
+  console.log("[synthflow] Opening, phone, availability, OTP rules, and calm voice added to the live system prompt");
 }
 
 export async function attachActions(modelId: string, actionIds: string[]) {
@@ -709,8 +805,8 @@ async function attachVerifyOtpCallerPhone(modelId: string) {
             variable_name: "otp",
             source: "llm",
             llm_config: {
-              description: "The six digits the caller reads from the text message",
-              example: "482913",
+              description: "The six digits the caller spoke. Testing code is always 123456.",
+              example: "123456",
             },
           },
           {
@@ -757,7 +853,7 @@ async function attachBookingOtpSms(modelId: string, actionId: string) {
 }
 
 const RECORDS_UPLOAD_SMS_BODY =
-  "Qubetech clinic: Dr. <doctor_name> requested your medical records for appointment <appointment_reference>. Upload securely here (expires in 7 days): <upload_url>. Sent to <to_phone_number>.";
+  "Qubetech clinic: Dr. <doctor_name> requested your medical records for appointment <appointment_reference>. Upload securely here (expires in 7 days): <upload_url>";
 
 function recordsSmsDeliveryPrompt(input: {
   doctorName: string;
@@ -765,16 +861,22 @@ function recordsSmsDeliveryPrompt(input: {
   uploadUrl: string;
   toPhone: string;
 }) {
-  return `You are delivering one SMS for Qubetech clinic. Do not book appointments and do not ask questions.
-Immediately call send_records_upload_link with these exact values:
+  return `You are on a short outbound clinic call to collect and confirm a mobile number, then text a medical-records upload link. Speak at a calm natural pace. Do not book appointments. Never go silent.
+
+Follow this exact flow (same every time):
+1. Ask: "What mobile number should I text the upload link to, so you can share your documents with Doctor ${input.doctorName}?"
+2. Listen for the number.
+3. Confirm: "Just to confirm, I will text the secure upload link to [repeat their number]. Is that correct?"
+4. If they say no or correct a digit, ask again and re-confirm.
+5. If they say "this number", "same number", or "the number you called", use ${input.toPhone} and confirm that.
+6. Only after they say yes, immediately call deliver_records_upload_sms with ALL fields:
+phone: digits only for the confirmed number (example ${input.toPhone})
 doctor_name: ${input.doctorName}
 appointment_reference: ${input.appointmentReference}
 upload_url: ${input.uploadUrl}
-to_phone_number: ${input.toPhone}
-Pass to_phone_number exactly as ${input.toPhone}. That value is only for the message body. The SMS recipient must stay the patient on this call (${input.toPhone}), never the clinic number.
-Do not say the SMS was sent until after send_records_upload_link finishes successfully.
-If send_records_upload_link fails or errors, say exactly: "The text was not delivered." Do not claim the SMS was sent.
-If it succeeds with no error, say only: "I have texted your secure upload link. Goodbye." Then end the call.`;
+7. Say the action message, then end politely.
+
+Never invent a phone. Never send to the clinic number. Do not read the upload URL aloud.`;
 }
 
 async function findRecordsUploadSmsActionIds(preferredModelId?: string) {
@@ -818,6 +920,8 @@ export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
     name: "send_records_upload_link",
     message_body: RECORDS_UPLOAD_SMS_BODY,
     from_phone_number: fromNumber,
+    message_before_action:
+      "I am texting the secure upload link to the phone you are on. Please check your messages.",
     wait_for_reply: false,
   };
 
@@ -852,6 +956,8 @@ export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
 }
 
 async function attachRecordsUploadSms(modelId: string, actionId: string) {
+  // Same pattern as booking OTP: fill message fields from call variables.
+  // Never map to_phone_number — Synthflow would treat it as the clinic number and SMS fails.
   return synthflowRequest("POST", "/actions/attach", {
     model_id: modelId,
     items: [
@@ -871,9 +977,47 @@ async function attachRecordsUploadSms(modelId: string, actionId: string) {
             variable_name: "upload_url",
             source: "prompt_variables",
           },
+        ],
+      },
+    ],
+  });
+}
+
+/** Map deliver_records_upload_sms: phone from what the caller said; link fields from call vars. */
+async function attachDeliverRecordsSms(modelId: string) {
+  const actionId = await findActionIdByName("deliver_records_upload_sms", modelId);
+  if (!actionId) return null;
+  return synthflowRequest("POST", "/actions/attach", {
+    model_id: modelId,
+    items: [
+      {
+        action_id: actionId,
+        attachment_type: "during",
+        input_variables_mapping: [
           {
-            // Message-body only. Destination uses default user_phone_number (patient).
-            variable_name: "to_phone_number",
+            variable_name: "phone",
+            source: "llm",
+            llm_config: {
+              description:
+                "Mobile number the caller confirmed for the upload-link SMS, as digits with country code when possible",
+              example: "+14245550123",
+              required: true,
+            },
+          },
+          {
+            variable_name: "doctor_name",
+            source: "prompt_variables",
+          },
+          {
+            variable_name: "appointment_reference",
+            source: "prompt_variables",
+          },
+          {
+            variable_name: "upload_url",
+            source: "prompt_variables",
+          },
+          {
+            variable_name: "fallback_phone",
             source: "prompt_variables",
           },
         ],
@@ -938,6 +1082,10 @@ function readRecordsSmsExecution(callPayload: unknown): {
   const match = entries.find(([key, row]) => {
     const name = String(asJsonRecord(row).name || key || "");
     return (
+      name === "deliver_records_upload_sms" ||
+      name.startsWith("deliver_records_upload_sms_") ||
+      key === "deliver_records_upload_sms" ||
+      key.startsWith("deliver_records_upload_sms_") ||
       name === "send_records_upload_link" ||
       name.startsWith("send_records_upload_link_") ||
       key === "send_records_upload_link" ||
@@ -971,13 +1119,34 @@ export type ClinicRecordsSmsPayload = {
   uploadUrl: string;
 };
 
+/** Prevent rapid duplicate outbound dials (carrier marks them as spam). */
+const recordsCallCooldownMs = 90_000;
+const recentRecordsCalls = new Map<string, { at: number; callId: string }>();
+
+function readCallStatus(callPayload: unknown): string {
+  const callRoot = asJsonRecord(callPayload);
+  const response = asJsonRecord(callRoot.response);
+  const fromList = Array.isArray(response.calls) ? asJsonRecord(response.calls[0]) : {};
+  const callRow = asJsonRecord(response.call || fromList || callRoot);
+  return String(callRow.status || fromList.status || callRoot.status || "").toLowerCase();
+}
+
 /**
  * Send the medical-records upload link through the voice agent's INCALL_SMS action
  * from the clinic number (+14244849053). Uses a short outbound call so the same
  * Synthflow voice SMS path as OTP can deliver the text to the patient's registered phone.
  * Does not use /chat/outbound (chat-agent API).
  */
-export async function sendClinicSms(payload: ClinicRecordsSmsPayload) {
+export type ClinicSmsDialResult = {
+  callId: string;
+  toPhone: string;
+  fromNumber: string;
+  actionName: string;
+  status: "calling" | "spam" | "failed";
+  warning?: string;
+};
+
+export async function sendClinicSms(payload: ClinicRecordsSmsPayload): Promise<ClinicSmsDialResult> {
   const fromNumber = env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053";
   const agentId = env.SYNTHFLOW_AGENT_ID.trim();
   if (!isSynthflowConfigured() || !agentId) {
@@ -992,11 +1161,35 @@ export async function sendClinicSms(payload: ClinicRecordsSmsPayload) {
     throw new Error("Patient phone cannot be the clinic number");
   }
 
-  const actionId = await ensureRecordsUploadSmsAction(agentId);
+  const cooldownKey = `${payload.appointmentReference}:${toPhone}`;
+  const recent = recentRecordsCalls.get(cooldownKey);
+  if (recent && Date.now() - recent.at < recordsCallCooldownMs) {
+    throw new Error(
+      `A records call to ${toPhone} was already started less than 90 seconds ago (call ${recent.callId}). Wait a moment before retrying — rapid retries get blocked as spam.`,
+    );
+  }
+
+  // Keep this path fast — no full webhook sync and no mass action PUTs
+  // (those blocked the doctor UI on "Calling…" for a long time).
+  const recordsMatches = await findRecordsUploadSmsActionIds(agentId).catch(() => []);
+  const actionId = recordsMatches[0]?.id || (await ensureRecordsUploadSmsAction(agentId));
   if (!actionId) {
     throw new Error("Could not prepare the clinic records SMS action");
   }
-  await attachRecordsUploadSms(agentId, actionId);
+  await Promise.all([
+    attachRecordsUploadSms(agentId, actionId).catch((error) => {
+      console.warn(
+        "[synthflow] Could not attach records INCALL SMS before outbound call:",
+        error instanceof Error ? error.message : error,
+      );
+    }),
+    attachDeliverRecordsSms(agentId).catch((error) => {
+      console.warn(
+        "[synthflow] Could not attach deliver_records_upload_sms before outbound call:",
+        error instanceof Error ? error.message : error,
+      );
+    }),
+  ]);
 
   const doctorName = payload.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
   const prompt = recordsSmsDeliveryPrompt({
@@ -1006,6 +1199,11 @@ export async function sendClinicSms(payload: ClinicRecordsSmsPayload) {
     toPhone,
   });
 
+  console.log(
+    `[synthflow] Starting records call → ${toPhone} from ${fromNumber} (appt ${payload.appointmentReference})`,
+  );
+
+  // Only documented /calls fields — extra keys can confuse telephony routing.
   const started = await synthflowRequest<SynthflowJson>("POST", "/calls", {
     model_id: agentId,
     phone: toPhone,
@@ -1015,62 +1213,84 @@ export async function sendClinicSms(payload: ClinicRecordsSmsPayload) {
       { key: "doctor_name", value: doctorName },
       { key: "appointment_reference", value: payload.appointmentReference },
       { key: "upload_url", value: payload.uploadUrl },
-      { key: "to_phone_number", value: toPhone },
+      { key: "fallback_phone", value: toPhone },
     ],
-    greeting: "Hello, this is Qubetech clinic calling about a medical records request.",
+    greeting: `Hello, this is Qubetech clinic calling on behalf of Doctor ${doctorName}. What mobile number should I text the upload link to, so you can share your documents with the doctor?`,
     prompt,
   });
 
   const callId = extractCallId(started);
   if (!callId) {
+    console.warn("[synthflow] Records call start response missing call id:", JSON.stringify(started).slice(0, 500));
     throw new Error("Synthflow started a call but did not return a call id");
   }
+  recentRecordsCalls.set(cooldownKey, { at: Date.now(), callId });
+  console.log(`[synthflow] Records call dialing call_id=${callId} → ${toPhone}`);
 
-  // Wait for the INCALL_SMS action result before telling the doctor it was sent.
-  let sawCompletedCall = false;
-  for (let attempt = 0; attempt < 24; attempt += 1) {
-    await sleep(3000);
-    const call = await getPhoneCall(callId);
-    const callRoot = asJsonRecord(call);
-    const response = asJsonRecord(callRoot.response);
-    const callRow = asJsonRecord(
-      response.call ||
-        (Array.isArray(response.calls) ? response.calls[0] : undefined) ||
-        callRoot,
-    );
-    const status = String(callRow.status || "").toLowerCase();
-    if (status && status !== "in-progress" && status !== "ringing" && status !== "queued") {
-      sawCompletedCall = true;
+  // Quick spam check (one peek) — do not hold the doctor UI for many seconds.
+  let dialStatus: ClinicSmsDialResult["status"] = "calling";
+  let warning: string | undefined;
+  await sleep(2500);
+  const early = await getPhoneCall(callId).catch(() => null);
+  if (early) {
+    const status = readCallStatus(early);
+    if (["ringing", "in-progress", "completed"].includes(status)) {
+      console.log(`[synthflow] Records call ${callId} is live (${status})`);
+    } else if (["spam", "failed", "canceled", "user-canceled"].includes(status)) {
+      dialStatus = status === "spam" ? "spam" : "failed";
+      warning =
+        status === "spam"
+          ? `Carrier blocked the call to ${toPhone} as spam (US clinic number → international). Wait 1–2 minutes before retrying, or share this link manually: ${payload.uploadUrl}`
+          : `Call to ${toPhone} ended with status "${status}". Share this link if needed: ${payload.uploadUrl}`;
+      console.warn(`[synthflow] Records call ${callId} blocked/ended early (${status})`);
+      // Allow a manual retry sooner after a hard spam/fail.
+      recentRecordsCalls.delete(cooldownKey);
     }
-
-    const execution = readRecordsSmsExecution(call);
-    if (!execution.ran) {
-      if (sawCompletedCall && attempt >= 2) break;
-      continue;
-    }
-
-    const sentTo = normalizePhone(execution.toPhone);
-    if (execution.error) {
-      throw new Error(
-        `SMS provider failed while sending to ${sentTo || toPhone}: ${execution.error}`,
-      );
-    }
-    if (sentTo && sentTo === normalizePhone(fromNumber)) {
-      throw new Error(
-        `SMS was addressed to the clinic number ${sentTo} instead of the patient number ${toPhone}`,
-      );
-    }
-    if (sentTo && sentTo !== toPhone) {
-      throw new Error(
-        `SMS was addressed to ${sentTo} instead of the patient number ${toPhone}`,
-      );
-    }
-    return { callId, toPhone, fromNumber, actionName: execution.actionName };
   }
 
-  throw new Error(
-    `SMS action did not finish for ${toPhone}. The patient may need to answer the clinic call, or you can share the upload link manually.`,
-  );
+  // Background: watch for live connect / SMS action / final status.
+  void (async () => {
+    try {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        await sleep(4000);
+        const call = await getPhoneCall(callId);
+        const status = readCallStatus(call);
+        if (["spam", "failed", "canceled", "user-canceled"].includes(status)) {
+          console.warn(`[synthflow] Records call ${callId} ended (${status})`);
+          return;
+        }
+        const execution = readRecordsSmsExecution(call);
+        if (execution.ran && !execution.error) {
+          console.log(
+            `[synthflow] Records upload SMS completed on call ${callId} → ${execution.toPhone || toPhone}`,
+          );
+          return;
+        }
+        if (execution.ran && execution.error) {
+          console.warn(`[synthflow] Records SMS failed on call ${callId}:`, execution.error);
+          return;
+        }
+        if (status && !["in-progress", "ringing", "queued", "pending", "registered"].includes(status) && attempt >= 2) {
+          console.warn(`[synthflow] Records call ${callId} ended without confirmed SMS (${status})`);
+          return;
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `[synthflow] Records call monitor failed for ${callId}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  })();
+
+  return {
+    callId,
+    toPhone,
+    fromNumber,
+    actionName: "deliver_records_upload_sms",
+    status: dialStatus,
+    warning,
+  };
 }
 
 const REMINDER_SMS_ACTION = "send_appointment_reminder";

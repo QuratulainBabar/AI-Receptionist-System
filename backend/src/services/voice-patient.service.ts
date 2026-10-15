@@ -91,7 +91,16 @@ export async function findOrCreatePatientForVoice(input: {
   if (!phone) return null;
 
   const existing = await findPatientByPhone(phone);
-  if (existing) return existing;
+  if (existing) {
+    const name = input.fullName?.trim();
+    if (name && name.toLowerCase() !== existing.fullName.trim().toLowerCase()) {
+      return prisma.user.update({
+        where: { id: existing.id },
+        data: { fullName: name },
+      });
+    }
+    return existing;
+  }
 
   if (!input.allowCreate) return null;
 

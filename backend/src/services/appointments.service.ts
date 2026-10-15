@@ -172,13 +172,14 @@ export async function findActiveAppointmentForMobile(input: {
 
   await releaseExpiredOtpHolds();
 
+  // Voice OTP holds (PENDING) are not bookings until verified. When ignoring them,
+  // only a CONFIRMED appointment blocks — including stuck PENDING rows with used OTPs.
   const active = await prisma.appointment.findFirst({
     where: {
       patientId: { in: [...patientIds] },
-      status: { in: ACTIVE_BOOKING_STATUSES },
       ...(input.ignoreOpenOtpHolds === false
-        ? {}
-        : { otps: { none: { usedAt: null } } }),
+        ? { status: { in: ACTIVE_BOOKING_STATUSES } }
+        : { status: "CONFIRMED" }),
     },
     include: { doctorUser: true },
     orderBy: { startsAt: "asc" },
@@ -350,10 +351,25 @@ export async function createAppointment(input: {
       throw new AppError(400, "This time slot has already passed");
     }
 
-    const claimed = await tx.availabilitySlot.updateMany({
+    let claimed = await tx.availabilitySlot.updateMany({
       where: { id: slot.id, isBooked: false },
       data: { isBooked: true },
     });
+    if (claimed.count === 0 && input.holdForOtp) {
+      // Clear a leftover PENDING OTP hold occupying this slot, then claim again.
+      const held = await tx.appointment.findFirst({
+        where: { slotId: slot.id, status: "PENDING" },
+        select: { id: true },
+      });
+      if (held) {
+        await tx.appointment.delete({ where: { id: held.id } });
+        await tx.availabilitySlot.update({ where: { id: slot.id }, data: { isBooked: false } });
+        claimed = await tx.availabilitySlot.updateMany({
+          where: { id: slot.id, isBooked: false },
+          data: { isBooked: true },
+        });
+      }
+    }
     if (claimed.count === 0) {
       throw new AppError(409, "This time slot is no longer available");
     }
@@ -429,12 +445,22 @@ export async function cancelOtpHold(appointmentId: string) {
   if (!existing || existing.status !== "PENDING") return;
 
   await prisma.$transaction(async (tx) => {
-    await tx.availabilitySlot.update({
-      where: { id: existing.slotId },
-      data: { isBooked: false },
-    });
+    if (existing.slotId) {
+      await tx.availabilitySlot.update({
+        where: { id: existing.slotId },
+        data: { isBooked: false },
+      });
+    }
     // Remove the unconfirmed hold so this slot can be booked again.
     await tx.appointment.delete({ where: { id: appointmentId } });
+  });
+}
+
+/** Detach CANCELLED appointments still holding this slotId so a new book can succeed. */
+export async function detachCancelledFromSlot(slotId: string) {
+  await prisma.appointment.updateMany({
+    where: { slotId, status: "CANCELLED" },
+    data: { slotId: null },
   });
 }
 
@@ -455,6 +481,42 @@ export async function releaseExpiredOtpHolds() {
       data: { usedAt: new Date() },
     });
     await cancelOtpHold(row.appointmentId);
+  }
+
+  // Free PENDING holds with no OTP rows or only expired codes (keeps in-flight verifies safe).
+  const stuck = await prisma.appointment.findMany({
+    where: { status: "PENDING" },
+    select: {
+      id: true,
+      otps: { orderBy: { createdAt: "desc" }, take: 1, select: { expiresAt: true } },
+    },
+  });
+  const now = Date.now();
+  for (const row of stuck) {
+    const latest = row.otps[0];
+    if (!latest || latest.expiresAt.getTime() <= now) {
+      await cancelOtpHold(row.id);
+    }
+  }
+}
+
+/** Release a PENDING OTP hold on a specific slot (if any) so it can be rebooked. */
+export async function releaseOtpHoldOnSlot(slotId: string) {
+  const held = await prisma.appointment.findFirst({
+    where: { slotId, status: "PENDING" },
+    select: { id: true },
+  });
+  if (held) {
+    await cancelOtpHold(held.id);
+    return;
+  }
+  // Orphaned row: appointment still owns slotId but slot.isBooked was cleared.
+  const orphan = await prisma.appointment.findFirst({
+    where: { slotId },
+    select: { id: true, status: true },
+  });
+  if (orphan?.status === "PENDING") {
+    await prisma.appointment.delete({ where: { id: orphan.id } }).catch(() => undefined);
   }
 }
 
@@ -559,9 +621,17 @@ async function updateAppointmentStatus(
 
   const updated = await prisma.$transaction(async (tx) => {
     if (nextStatus === "CANCELLED") {
-      await tx.availabilitySlot.update({
-        where: { id: existing.slotId },
-        data: { isBooked: false },
+      if (existing.slotId) {
+        await tx.availabilitySlot.update({
+          where: { id: existing.slotId },
+          data: { isBooked: false },
+        });
+      }
+      // Detach slotId so a new booking can claim this time (unique constraint).
+      return tx.appointment.update({
+        where: { id: existing.id },
+        data: { status: nextStatus, slotId: null },
+        include: appointmentInclude,
       });
     }
 
@@ -649,10 +719,12 @@ export async function rescheduleAppointmentForAdmin(appointmentId: string, slotI
       throw new AppError(409, "This time slot is no longer available");
     }
 
-    await tx.availabilitySlot.update({
-      where: { id: existing.slotId },
-      data: { isBooked: false },
-    });
+    if (existing.slotId) {
+      await tx.availabilitySlot.update({
+        where: { id: existing.slotId },
+        data: { isBooked: false },
+      });
+    }
 
     return tx.appointment.update({
       where: { id: existing.id },

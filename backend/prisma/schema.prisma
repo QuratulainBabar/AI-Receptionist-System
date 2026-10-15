@@ -243,8 +243,9 @@ model Appointment {
   patient         User              @relation("PatientAppointments", fields: [patientId], references: [id], onDelete: Cascade)
   doctorUserId    String
   doctorUser      User              @relation("DoctorAppointments", fields: [doctorUserId], references: [id], onDelete: Cascade)
-  slotId          String            @unique
-  slot            AvailabilitySlot  @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  /** Null after cancel so the calendar slot can be booked again (slotId is unique when set). */
+  slotId          String?           @unique
+  slot            AvailabilitySlot? @relation(fields: [slotId], references: [id], onDelete: Restrict)
   startsAt        DateTime
   durationMinutes Int               @default(30)
   mode            AppointmentMode   @default(IN_CLINIC)
@@ -501,19 +502,21 @@ model PatientActivity {
 }
 
 model DoctorNotification {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   doctorUserId String
-  doctorUser   User     @relation("DoctorNotifications", fields: [doctorUserId], references: [id], onDelete: Cascade)
+  doctorUser   User      @relation("DoctorNotifications", fields: [doctorUserId], references: [id], onDelete: Cascade)
   kind         String
   eventType    String
   title        String
   detail       String
   relatedId    String?
   occurredAt   DateTime
-  createdAt    DateTime @default(now())
+  readAt       DateTime?
+  createdAt    DateTime  @default(now())
 
   @@unique([doctorUserId, eventType, relatedId])
   @@index([doctorUserId, occurredAt])
+  @@index([doctorUserId, readAt])
   @@map("doctor_notifications")
 }
 
