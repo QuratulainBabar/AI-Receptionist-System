@@ -594,10 +594,10 @@ function slotsWithinWeek(slots: Array<{ id: string; startsAt: Date }>, now = new
 
 export async function handleAvailabilityAction(body: unknown) {
   const root = asRecord(body);
-  const fields = extractVoiceBookingFields(body);
+  const extracted = extractSynthflowFields(body);
   const requestedDateRaw =
     pickString(root, ["date", "requested_date", "appointment_date", "day"]) ||
-    pickFirstFromExtracted(fields as Record<string, string>, [
+    pickFirstFromExtracted(extracted, [
       "date",
       "requested_date",
       "appointment_date",
@@ -977,7 +977,8 @@ function collectPhoneCandidates(body: unknown): string[] {
  */
 export async function handleRecordsSmsAction(body: unknown) {
   const root = asRecord(body);
-  const fields = extractVoiceBookingFields(body);
+  const extracted = extractSynthflowFields(body);
+  const bookingFields = extractVoiceBookingFields(body);
   const custom = asRecord(root.custom_variables || root.customVariables);
 
   let phone = "";
@@ -989,17 +990,18 @@ export async function handleRecordsSmsAction(body: unknown) {
   const doctorName =
     pickString(root, ["doctor_name", "doctor"]) ||
     asString(custom.doctor_name).trim() ||
-    pickFirstFromExtracted(fields as Record<string, string>, ["doctor_name"]) ||
+    bookingFields.doctorName ||
+    pickFirstFromExtracted(extracted, ["doctor_name"]) ||
     "your doctor";
   const appointmentReference =
     pickString(root, ["appointment_reference", "reference", "appointment"]) ||
     asString(custom.appointment_reference).trim() ||
-    pickFirstFromExtracted(fields as Record<string, string>, ["appointment_reference"]) ||
+    pickFirstFromExtracted(extracted, ["appointment_reference"]) ||
     "your visit";
   const uploadUrl =
     pickString(root, ["upload_url", "uploadUrl", "link", "url"]) ||
     asString(custom.upload_url).trim() ||
-    pickFirstFromExtracted(fields as Record<string, string>, ["upload_url"]);
+    pickFirstFromExtracted(extracted, ["upload_url"]);
 
   if (!phone) {
     console.warn(
