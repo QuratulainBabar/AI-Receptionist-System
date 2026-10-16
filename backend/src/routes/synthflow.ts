@@ -22,3 +22,6 @@ synthflowRouter.post("/actions/offer-records-upload", synthflowController.offerR
 
 /** Helper for operators — returns the complete webhook URLs for this environment */
 synthflowRouter.get("/urls", synthflowController.urls);
+
+/** Local npm run dev polls this on production to print the SMS upload link */
+synthflowRouter.get("/last-records-upload", synthflowController.lastRecordsUpload);

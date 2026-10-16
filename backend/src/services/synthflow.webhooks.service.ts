@@ -27,6 +27,7 @@ import {
   createUploadLinkForVoiceBooking,
   markRecordRequestSmsResult,
 } from "./record-requests.service.js";
+import { rememberRecordsUploadLink } from "./records-link-mirror.service.js";
 import {
   clinicDoctorProfileBlock,
   consultationFeeToSpeak,
@@ -1097,13 +1098,13 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
     const cleanDoctor = link.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
     const smsBody = `Qubetech clinic: Secure upload link for your appointment ${link.appointmentReference} with Dr. ${cleanDoctor}. Share medical records here (expires in 7 days): ${link.uploadUrl}`;
 
-    // Always print the link in the backend terminal so operators can copy it.
-    console.log("========== RECORDS UPLOAD LINK ==========");
-    console.log(`[records] phone=${link.phone}`);
-    console.log(`[records] appointment=${link.appointmentReference}`);
-    console.log(`[records] doctor=${link.doctorName}`);
-    console.log(`[records] upload_url=${link.uploadUrl}`);
-    console.log("=========================================");
+    rememberRecordsUploadLink({
+      phone: link.phone,
+      appointmentReference: link.appointmentReference,
+      doctorName: link.doctorName,
+      uploadUrl: link.uploadUrl,
+      smsBody,
+    });
 
     // Never dial a second outbound call for this (missed call = no SMS).
     // Primary delivery: agent calls send_records_upload_link on THIS live call.
@@ -1224,6 +1225,13 @@ export async function handleRecordsSmsAction(body: unknown) {
   const cleanDoctor = doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
   const smsBody = `Qubetech clinic: Dr. ${cleanDoctor} requested your medical records for appointment ${appointmentReference}. Upload securely here (expires in 7 days): ${uploadUrl}`;
 
+  rememberRecordsUploadLink({
+    phone,
+    appointmentReference,
+    doctorName: cleanDoctor,
+    uploadUrl,
+    smsBody,
+  });
   console.log(`[synthflow] records-sms accepted phone=${phone} ref=${appointmentReference}`);
 
   // Deliver after a short delay so this call can end before the SMS delivery call starts.

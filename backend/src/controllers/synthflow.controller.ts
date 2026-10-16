@@ -12,7 +12,8 @@ import {
   handleRecordsSmsAction,
   handleVerifyOtpAction,
 } from "../services/synthflow.webhooks.service.js";
-import { synthflowWebhookUrls } from "../config/env.js";
+import { env, synthflowWebhookUrls } from "../config/env.js";
+import { getLastRecordsUploadLink } from "../services/records-link-mirror.service.js";
 
 function assertSignature(req: Request, payload: unknown) {
   const callId = getWebhookCallId(payload);
@@ -185,5 +186,22 @@ export async function urls(_req: Request, res: Response) {
       inboundWebhookUrl: synthflowWebhookUrls().inbound,
       dataWebhookUrl: synthflowWebhookUrls().data,
     },
+  });
+}
+
+/** Local terminal mirror — returns the last SMS upload link minted on this host. */
+export async function lastRecordsUpload(req: Request, res: Response) {
+  const expected = env.SYNTHFLOW_WEBHOOK_SECRET.trim();
+  const provided =
+    String(req.header("x-synthflow-secret") || "").trim() ||
+    String(req.query.secret || "").trim();
+
+  if (expected && provided !== expected) {
+    return res.status(401).json({ success: false, message: "Unauthorized" });
+  }
+
+  return res.status(200).json({
+    success: true,
+    link: getLastRecordsUploadLink(),
   });
 }

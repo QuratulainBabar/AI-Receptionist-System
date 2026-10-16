@@ -32,6 +32,7 @@ import * as recordRequestsController from "./controllers/record-requests.control
 import { errorHandler } from "./middleware/errorHandler.js";
 import { env, synthflowWebhookUrls } from "./config/env.js";
 import { syncAgentWebhooksOnBoot } from "./services/synthflow.client.js";
+import { startRecordsLinkTerminalMirror } from "./services/records-link-mirror.service.js";
 import { resolveBootAgentId, syncClinicDirectoryToSynthflow } from "./services/clinic-synthflow.service.js";
 import {
   adminSubscriptionsRouter,
@@ -156,6 +157,7 @@ app.listen(env.PORT, () => {
   console.log("[synthflow] Paste these into Synthflow → Deployment Settings → Phone:");
   console.log(`  Inbound Webhook URL: ${urls.inbound}`);
   console.log(`  Data Webhook URL:    ${urls.data}`);
+  startRecordsLinkTerminalMirror();
   void warnIfPublicApiUnreachable();
   void resolveBootAgentId()
     .then(async (agentId) => {
