@@ -1130,6 +1130,10 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
       );
     })();
 
+    console.log(
+      `[synthflow] records-offer ready for INCALL SMS → to=${link.phone} ref=${link.appointmentReference}`,
+    );
+
     return {
       success: true,
       records_consent: "yes",
@@ -1140,9 +1144,11 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
       doctor_name: cleanDoctor,
       appointment_reference: link.appointmentReference,
       upload_url: link.uploadUrl,
+      // Exact SMS text + destination for send_records_upload_link (action_results mapping).
+      records_sms_body: smsBody,
       next_action: "send_records_upload_link",
       message:
-        "Thank you. Immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from this response, then say you texted the secure upload link. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
+        "Thank you. Immediately call send_records_upload_link now — fields are already filled from this response — then say you texted the secure upload link to the booking mobile. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
     };
   } catch (error) {
     const message =

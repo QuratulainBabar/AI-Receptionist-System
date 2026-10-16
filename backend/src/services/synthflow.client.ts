@@ -294,8 +294,8 @@ const RECORDS_UPLOAD_OFFER_RULE = `RECORDS UPLOAD OFFER RULE:
 After verify_booking_otp returns appointment_confirmed true, first say the confirmation message (final appointment summary) exactly.
 Then ask exactly in English: Would you like to share your medical records or any relevant files with the doctor?
 WAIT for the caller to answer.
-If they say yes (or clearly agree), call offer_records_upload with consent yes, the booking phone, and appointment_reference.
-Then IMMEDIATELY call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from the offer_records_upload response (same live call — like OTP SMS). Then say you texted the secure upload link.
+If they say yes (or clearly agree), call offer_records_upload with consent yes, the booking phone (any mobile they gave for the booking — e.g. +12014799258), and appointment_reference.
+Then IMMEDIATELY call send_records_upload_link (same live call, like OTP SMS). Fields are auto-filled from offer_records_upload — do not invent a phone or URL. Then say you texted the secure upload link to the booking mobile.
 If they say no (or decline), call offer_records_upload with consent no. Say the action message and continue normally.
 NEVER call deliver_records_upload_sms on an inbound booking call. NEVER place a second outbound call for the upload link. NEVER read the URL aloud.
 Do not require an upload. Do not invent an upload link.
@@ -450,7 +450,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "offer_records_upload",
       url: urls.offerRecordsUploadAction,
       prompt:
-        "If next_action is send_records_upload_link (or consent was yes and upload_url is present), immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from this response, then say you texted the secure upload link. If they said no, continue normally. Never invent a URL. Never call deliver_records_upload_sms. Never start another outbound call.",
+        "If next_action is send_records_upload_link (or consent was yes with records_sms_body), immediately call send_records_upload_link — do not collect fields, they are filled from this action — then say you texted the secure upload link to the booking mobile. If they said no, continue normally. Never invent a URL. Never call deliver_records_upload_sms. Never start another outbound call.",
       message_error:
         "Would you like to share your medical records or any relevant files with the doctor?",
       jsonBody: {
@@ -921,8 +921,9 @@ async function attachOfferRecordsUpload(modelId: string) {
             variable_name: "phone",
             source: "llm",
             llm_config: {
-              description: "Mobile number used for the booking (SMS destination)",
-              example: "+923129312436",
+              description:
+                "Mobile number used for the booking (SMS destination). Can be any E.164 patient number such as +12014799258 — not only the inbound caller line, and never the clinic line.",
+              example: "+12014799258",
               required: true,
             },
           },
@@ -978,8 +979,8 @@ async function attachBookingOtpSms(modelId: string, actionId: string) {
   });
 }
 
-const RECORDS_UPLOAD_SMS_BODY =
-  "Qubetech clinic: Dr. <doctor_name> requested your medical records for appointment <appointment_reference>. Upload securely here (expires in 7 days): <upload_url>";
+// Full SMS text is filled from offer_records_upload.records_sms_body (any booking phone).
+const RECORDS_UPLOAD_SMS_BODY = "<records_sms_body>";
 
 function recordsSmsDeliveryPrompt(input: {
   doctorName: string;
@@ -1040,14 +1041,14 @@ async function findRecordsUploadSmsActionIds(preferredModelId?: string) {
 /** Create/update the voice-agent INCALL_SMS action used for medical-records upload links. */
 export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
   const fromNumber = env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053";
-  // Do NOT set to_phone_number here. On outbound calls that override was resolving to the
-  // clinic number and blocking delivery. Default recipient is user_phone_number (the patient).
+  // Recipient is set at attach time via to_phone_number (booking mobile from offer_records_upload).
+  // That can be any patient SIM — not only the inbound caller line.
   const body = {
     name: "send_records_upload_link",
     message_body: RECORDS_UPLOAD_SMS_BODY,
     from_phone_number: fromNumber,
     message_before_action:
-      "I am texting the secure upload link to the phone you are on. Please check your messages.",
+      "I am texting the secure upload link to the mobile number from your booking. Please check your messages.",
     wait_for_reply: false,
   };
 
@@ -1081,55 +1082,48 @@ export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
   return actionId;
 }
 
+/** Inbound booking: auto-fill SMS body + booking phone from offer_records_upload output. */
 async function attachRecordsUploadSms(modelId: string, actionId: string) {
-  // After offer_records_upload, the agent passes link fields from that action response.
-  // to_phone_number must be the booking mobile (not the clinic line).
   return synthflowRequest("POST", "/actions/attach", {
     model_id: modelId,
     items: [
       {
         action_id: actionId,
         attachment_type: "during",
+        trigger_condition:
+          "Call this immediately after offer_records_upload returns success true with records_consent yes (or next_action send_records_upload_link). Do not ask the caller for fields — they come from offer_records_upload. Never call this before offer_records_upload succeeds.",
         input_variables_mapping: [
           {
-            variable_name: "doctor_name",
-            source: "llm",
-            llm_config: {
-              description:
-                "Doctor name from offer_records_upload (doctor_name). Do not invent.",
-              example: "Daniel Osei",
-              required: true,
-            },
-          },
-          {
-            variable_name: "appointment_reference",
-            source: "llm",
-            llm_config: {
-              description:
-                "Appointment reference from offer_records_upload (appointment_reference).",
-              example: "APT-1793",
-              required: true,
-            },
-          },
-          {
-            variable_name: "upload_url",
-            source: "llm",
-            llm_config: {
-              description:
-                "Secure upload URL from offer_records_upload (upload_url). Never read aloud.",
-              example: "https://example.com/upload/token",
-              required: true,
-            },
+            variable_name: "records_sms_body",
+            source: "action_results",
+            source_key: "offer_records_upload_records_sms_body",
           },
           {
             variable_name: "to_phone_number",
-            source: "llm",
-            llm_config: {
-              description:
-                "Booking mobile from offer_records_upload (to_phone_number / phone). Must be the patient number, never the clinic line. On outbound doctor-request calls, omit this so SMS goes to the number you dialed.",
-              example: "+12014799258",
-              required: false,
-            },
+            source: "action_results",
+            source_key: "offer_records_upload_to_phone_number",
+          },
+        ],
+      },
+    ],
+  });
+}
+
+/** Doctor outbound / reminder-style dial: body from pre-call variables; SMS goes to dialed party. */
+async function attachRecordsUploadSmsOutbound(modelId: string, actionId: string) {
+  return synthflowRequest("POST", "/actions/attach", {
+    model_id: modelId,
+    items: [
+      {
+        action_id: actionId,
+        attachment_type: "during",
+        trigger_condition:
+          "Call this after the patient confirms the mobile number for the records upload link.",
+        input_variables_mapping: [
+          {
+            variable_name: "records_sms_body",
+            source: "prompt_variables",
+            source_key: "records_sms_body",
           },
         ],
       },
@@ -1369,8 +1363,11 @@ export async function sendClinicSms(payload: ClinicRecordsSmsPayload): Promise<C
   if (!actionId) {
     throw new Error("Could not prepare the clinic records SMS action");
   }
+  const doctorName = payload.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
+  const recordsSmsBody = `Qubetech clinic: Dr. ${doctorName} requested your medical records for appointment ${payload.appointmentReference}. Upload securely here (expires in 7 days): ${payload.uploadUrl}`;
+
   await Promise.all([
-    attachRecordsUploadSms(agentId, actionId).catch((error) => {
+    attachRecordsUploadSmsOutbound(agentId, actionId).catch((error) => {
       console.warn(
         "[synthflow] Could not attach records INCALL SMS before outbound call:",
         error instanceof Error ? error.message : error,
@@ -1384,7 +1381,6 @@ export async function sendClinicSms(payload: ClinicRecordsSmsPayload): Promise<C
     }),
   ]);
 
-  const doctorName = payload.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
   const prompt = recordsSmsDeliveryPrompt({
     doctorName,
     appointmentReference: payload.appointmentReference,
@@ -1406,6 +1402,7 @@ export async function sendClinicSms(payload: ClinicRecordsSmsPayload): Promise<C
       { key: "doctor_name", value: doctorName },
       { key: "appointment_reference", value: payload.appointmentReference },
       { key: "upload_url", value: payload.uploadUrl },
+      { key: "records_sms_body", value: recordsSmsBody },
       { key: "fallback_phone", value: toPhone },
     ],
     greeting: `Hello, this is Qubetech clinic calling on behalf of Doctor ${doctorName}. What mobile number should I text the upload link to, so you can share your documents with the doctor?`,
