@@ -295,10 +295,11 @@ After verify_booking_otp returns appointment_confirmed true, first say the confi
 Then ask exactly in English: Would you like to share your medical records or any relevant files with the doctor?
 WAIT for the caller to answer.
 If they say yes (or clearly agree), call offer_records_upload with consent yes, the booking phone (any mobile they gave for the booking — e.g. +12014799258), and appointment_reference.
-Then IMMEDIATELY call send_records_upload_link (same live call, like OTP SMS). Fields are auto-filled from offer_records_upload — do not invent a phone or URL. Then say you texted the secure upload link to the booking mobile.
+Then IMMEDIATELY call send_records_upload_link on the same live call. Pass records_sms_body and to_phone_number exactly from the offer_records_upload response (same pattern as OTP uses the code from book_appointment). Then say you texted the secure upload link to the booking mobile.
+If send_records_upload_link errors, call it once more with the same two fields.
 If they say no (or decline), call offer_records_upload with consent no. Say the action message and continue normally.
 NEVER call deliver_records_upload_sms on an inbound booking call. NEVER place a second outbound call for the upload link. NEVER read the URL aloud.
-Do not require an upload. Do not invent an upload link.
+Do not require an upload. Do not invent an upload link or phone number.
 Do not run this rule before the appointment is confirmed.`;
 
 /** Prefix rules baked into every Sync so Fine-tuner matches live calls. */
@@ -450,7 +451,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "offer_records_upload",
       url: urls.offerRecordsUploadAction,
       prompt:
-        "If next_action is send_records_upload_link (or consent was yes with records_sms_body), immediately call send_records_upload_link — do not collect fields, they are filled from this action — then say you texted the secure upload link to the booking mobile. If they said no, continue normally. Never invent a URL. Never call deliver_records_upload_sms. Never start another outbound call.",
+        "If next_action is send_records_upload_link (or consent was yes with records_sms_body), immediately call send_records_upload_link and pass records_sms_body and to_phone_number exactly from this response (same as OTP uses the book_appointment code). Then say you texted the secure upload link to the booking mobile. If send_records_upload_link fails, call it one more time with the same values. If they said no, continue normally. Never invent a URL or phone. Never call deliver_records_upload_sms. Never start another outbound call.",
       message_error:
         "Would you like to share your medical records or any relevant files with the doctor?",
       jsonBody: {
@@ -1041,11 +1042,12 @@ async function findRecordsUploadSmsActionIds(preferredModelId?: string) {
 /** Create/update the voice-agent INCALL_SMS action used for medical-records upload links. */
 export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
   const fromNumber = env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053";
-  // Recipient is set at attach time via to_phone_number (booking mobile from offer_records_upload).
-  // That can be any patient SIM — not only the inbound caller line.
+  // Body + destination are filled at call time (like OTP). to_phone_number overrides
+  // the inbound caller so SMS can go to any booking mobile the patient gave.
   const body = {
     name: "send_records_upload_link",
     message_body: RECORDS_UPLOAD_SMS_BODY,
+    to_phone_number: "<to_phone_number>",
     from_phone_number: fromNumber,
     message_before_action:
       "I am texting the secure upload link to the mobile number from your booking. Please check your messages.",
@@ -1082,7 +1084,11 @@ export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
   return actionId;
 }
 
-/** Inbound booking: auto-fill SMS body + booking phone from offer_records_upload output. */
+/**
+ * Inbound booking: same pattern as OTP SMS — LLM copies values from the previous
+ * custom action response. action_results cannot be used until Synthflow has
+ * initialized offer_records_upload outputs (api_response is null today).
+ */
 async function attachRecordsUploadSms(modelId: string, actionId: string) {
   return synthflowRequest("POST", "/actions/attach", {
     model_id: modelId,
@@ -1091,17 +1097,28 @@ async function attachRecordsUploadSms(modelId: string, actionId: string) {
         action_id: actionId,
         attachment_type: "during",
         trigger_condition:
-          "Call this immediately after offer_records_upload returns success true with records_consent yes (or next_action send_records_upload_link). Do not ask the caller for fields — they come from offer_records_upload. Never call this before offer_records_upload succeeds.",
+          "Call this immediately after offer_records_upload returns success true with records_consent yes (or next_action send_records_upload_link). Pass records_sms_body and to_phone_number exactly from that response. Never invent a URL or phone. Never call this before offer_records_upload succeeds.",
         input_variables_mapping: [
           {
             variable_name: "records_sms_body",
-            source: "action_results",
-            source_key: "offer_records_upload_records_sms_body",
+            source: "llm",
+            llm_config: {
+              description:
+                "Exact records_sms_body string returned by offer_records_upload. Copy it character-for-character. Never invent a link.",
+              example:
+                "Qubetech clinic: Secure upload link for your appointment APT-9609 with Dr. Daniel Osei. Share medical records here (expires in 7 days): https://aidoctor.toolkitpro.cloud/backend/upload/token",
+              required: true,
+            },
           },
           {
             variable_name: "to_phone_number",
-            source: "action_results",
-            source_key: "offer_records_upload_to_phone_number",
+            source: "llm",
+            llm_config: {
+              description:
+                "Exact to_phone_number (or phone) returned by offer_records_upload — the booking mobile in E.164 (example +12014799258). Never use the clinic line.",
+              example: "+12014799258",
+              required: true,
+            },
           },
         ],
       },

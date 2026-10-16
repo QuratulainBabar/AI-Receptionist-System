@@ -1148,7 +1148,7 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
       records_sms_body: smsBody,
       next_action: "send_records_upload_link",
       message:
-        "Thank you. Immediately call send_records_upload_link now — fields are already filled from this response — then say you texted the secure upload link to the booking mobile. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
+        "Thank you. Immediately call send_records_upload_link and pass records_sms_body and to_phone_number exactly from this response, then say you texted the secure upload link to the booking mobile. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
     };
   } catch (error) {
     const message =
