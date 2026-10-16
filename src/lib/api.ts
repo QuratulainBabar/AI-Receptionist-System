@@ -1360,13 +1360,6 @@ export const doctorAppointmentsApi = {
       authHeader(),
     );
   },
-  requestRecords(appointmentId: string) {
-    return request<{ success: boolean; request: ApiRecordRequest; message?: string }>(
-      `/api/doctor/appointments/${appointmentId}/record-request`,
-      { method: "POST" },
-      authHeader(),
-    );
-  },
   sendInvoice(appointmentId: string) {
     return request<{
       success: boolean;
@@ -1941,13 +1934,6 @@ export const doctorPatientsApi = {
     return request<{ success: boolean; message?: string } & ApiDoctorPatientFile>(
       `/api/doctor/patients/${patientId}/prescriptions`,
       { method: "POST", body: JSON.stringify(body) },
-      authHeader(),
-    );
-  },
-  requestRecords(appointmentId: string) {
-    return request<{ success: boolean; request: ApiRecordRequest; message?: string }>(
-      `/api/doctor/appointments/${appointmentId}/record-request`,
-      { method: "POST" },
       authHeader(),
     );
   },

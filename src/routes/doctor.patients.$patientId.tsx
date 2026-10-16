@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { FollowUpDialog } from "@/components/doctor/FollowUpDialog";
 import { AppointmentInvoiceAction } from "@/components/doctor/AppointmentInvoiceAction";
 import { PatientTimeline } from "@/components/doctor/PatientTimeline";
@@ -43,8 +43,6 @@ function PatientDetails() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [requestingId, setRequestingId] = useState<string | null>(null);
-  const requestingLock = useRef<string | null>(null);
   const [followUpFor, setFollowUpFor] = useState<ApiAppointment | null>(null);
   const [noteBody, setNoteBody] = useState("");
   const [noteAppointmentId, setNoteAppointmentId] = useState("");
@@ -125,56 +123,6 @@ function PatientDetails() {
       setError(formatApiError(err, "Unable to update appointment status."));
     } finally {
       setBusyId(null);
-    }
-  }
-
-  async function requestRecords(appointment: ApiAppointment) {
-    if (requestingLock.current) return;
-    requestingLock.current = appointment.id;
-    setRequestingId(appointment.id);
-    setError("");
-    setMessage("");
-    try {
-      const result = await doctorAppointmentsApi.requestRecords(appointment.id);
-      setFile((current) =>
-        current
-          ? {
-              ...current,
-              appointments: current.appointments.map((row) =>
-                row.id === appointment.id
-                  ? {
-                      ...row,
-                      recordRequest: {
-                        status: result.request.status,
-                        smsSent: result.request.smsSent,
-                        smsError: result.request.smsError,
-                        expiresAt: result.request.expiresAt,
-                        createdAt: result.request.createdAt,
-                        recordsCount: result.request.recordsCount,
-                      },
-                    }
-                  : row,
-              ),
-            }
-          : current,
-      );
-      const base =
-        result.message ||
-        result.request.message ||
-        "Calling the patient to confirm their number and text the upload link.";
-      // Link creation can succeed even when the outbound SMS/call fails — show as notice, not hard error.
-      if (result.request.smsSent) {
-        setMessage(base);
-      } else if (result.request.uploadUrl) {
-        setMessage(`${base} Share this link if needed: ${result.request.uploadUrl}`);
-      } else {
-        setError(base);
-      }
-    } catch (err) {
-      setError(formatApiError(err, "Unable to request medical records."));
-    } finally {
-      requestingLock.current = null;
-      setRequestingId(null);
     }
   }
 
@@ -363,14 +311,9 @@ function PatientDetails() {
                     </>
                   ) : null}
                   {appointment.status !== "cancelled" ? (
-                    <>
-                      <Button size="sm" variant="soft" disabled={requestingId === appointment.id} onClick={() => void requestRecords(appointment)}>
-                        {requestingId === appointment.id ? "Calling…" : appointment.recordRequest ? "Resend records request" : "Request medical records"}
-                      </Button>
-                      <Button size="sm" variant="soft" onClick={() => setFollowUpFor(appointment)}>
-                        Schedule next visit
-                      </Button>
-                    </>
+                    <Button size="sm" variant="soft" onClick={() => setFollowUpFor(appointment)}>
+                      Schedule next visit
+                    </Button>
                   ) : null}
                   <AppointmentInvoiceAction
                     appointment={appointment}
