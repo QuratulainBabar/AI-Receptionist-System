@@ -181,6 +181,29 @@ function timeToLabel(t: string) {
   }
 }
 
+/** Native time inputs clip am/pm when a left icon + browser picker icon fight for width. */
+function SessionTimeInput({
+  value,
+  onChange,
+  className,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  className?: string;
+}) {
+  return (
+    <div className={cn("relative min-w-[10.5rem]", className)}>
+      <Clock className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-slate-400" />
+      <Input
+        type="time"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="min-w-[10.5rem] cursor-pointer pl-10 pr-3 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0"
+      />
+    </div>
+  );
+}
+
 function startOfLocalDay(d: Date) {
   return new Date(d.getFullYear(), d.getMonth(), d.getDate());
 }
@@ -1004,52 +1027,40 @@ function DoctorAvailabilityPage() {
                     {dateSessions.map((session, index) => (
                       <div
                         key={`ds-${index}`}
-                        className="grid gap-3 rounded-xl bg-white/80 p-3 sm:grid-cols-2 sm:items-end"
+                        className="grid grid-cols-1 gap-3 rounded-xl bg-white/80 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end"
                       >
                         <Field label="Start Time">
-                          <div className="relative">
-                            <Clock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                            <Input
-                              type="time"
-                              className="pl-10"
-                              value={session.startTime}
-                              onChange={(e) =>
-                                setDateSessions((rows) =>
-                                  rows.map((s, i) => (i === index ? { ...s, startTime: e.target.value } : s)),
-                                )
-                              }
-                            />
-                          </div>
+                          <SessionTimeInput
+                            value={session.startTime}
+                            onChange={(startTime) =>
+                              setDateSessions((rows) =>
+                                rows.map((s, i) => (i === index ? { ...s, startTime } : s)),
+                              )
+                            }
+                          />
                         </Field>
-                        <div className="flex items-end gap-2">
-                          <div className="min-w-0 flex-1">
-                            <Field label="End Time">
-                              <div className="relative">
-                                <Clock className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-                                <Input
-                                  type="time"
-                                  className="pl-10"
-                                  value={session.endTime}
-                                  onChange={(e) =>
-                                    setDateSessions((rows) =>
-                                      rows.map((s, i) => (i === index ? { ...s, endTime: e.target.value } : s)),
-                                    )
-                                  }
-                                />
-                              </div>
-                            </Field>
-                          </div>
-                          {dateSessions.length > 1 ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="mb-0.5 shrink-0 text-red-600"
-                              onClick={() => setDateSessions((rows) => rows.filter((_, i) => i !== index))}
-                            >
-                              <Trash2 className="size-3.5" />
-                            </Button>
-                          ) : null}
-                        </div>
+                        <Field label="End Time">
+                          <SessionTimeInput
+                            value={session.endTime}
+                            onChange={(endTime) =>
+                              setDateSessions((rows) =>
+                                rows.map((s, i) => (i === index ? { ...s, endTime } : s)),
+                              )
+                            }
+                          />
+                        </Field>
+                        {dateSessions.length > 1 ? (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="mb-0.5 justify-self-end text-red-600 sm:justify-self-auto"
+                            onClick={() => setDateSessions((rows) => rows.filter((_, i) => i !== index))}
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                        ) : (
+                          <span className="hidden sm:block" aria-hidden />
+                        )}
                       </div>
                     ))}
                   </div>
@@ -1379,28 +1390,22 @@ function DoctorAvailabilityPage() {
                               >
                                 {isEditing ? (
                                   <>
-                                    <div className="min-w-0 flex-1 sm:min-w-[8rem] sm:flex-none">
+                                    <div className="min-w-[10.5rem] flex-1 sm:flex-none">
                                       <Field label="Start">
-                                        <Input
-                                          type="time"
+                                        <SessionTimeInput
                                           value={session.startTime}
-                                          onChange={(e) =>
-                                            updateWeekDraftSession(day.dateKey, index, {
-                                              startTime: e.target.value,
-                                            })
+                                          onChange={(startTime) =>
+                                            updateWeekDraftSession(day.dateKey, index, { startTime })
                                           }
                                         />
                                       </Field>
                                     </div>
-                                    <div className="min-w-0 flex-1 sm:min-w-[8rem] sm:flex-none">
+                                    <div className="min-w-[10.5rem] flex-1 sm:flex-none">
                                       <Field label="End">
-                                        <Input
-                                          type="time"
+                                        <SessionTimeInput
                                           value={session.endTime}
-                                          onChange={(e) =>
-                                            updateWeekDraftSession(day.dateKey, index, {
-                                              endTime: e.target.value,
-                                            })
+                                          onChange={(endTime) =>
+                                            updateWeekDraftSession(day.dateKey, index, { endTime })
                                           }
                                         />
                                       </Field>

@@ -264,7 +264,7 @@ BOOKING ORDER (when they want to book but have not asked for a list yet):
 1. Say ONLY: "Which day would you like your appointment?" Then STOP and WAIT. Do not list dates yet.
 2. If they name a day (for example Friday, today, or October 17), call check_doctor_availability with that date. Say message / spoken_summary exactly (open times for that date). Ask which time. Then WAIT.
 3. Only if they say they do not know, call check_doctor_availability with date empty. Say message / spoken_summary exactly (open dates for the next seven days). Ask which date. Then WAIT.
-4. Only after they pick a time, collect booking details (reason, name, phone), then book and verify OTP.
+4. Only after they pick a time, collect booking details (reason, name, phone), then follow BOOKING OTP RULE step by step (check_existing_appointment → book_appointment → OTP → verify_booking_otp).
 Never recite open slots from the doctor profile. Never invent a date or time.
 Bookable times come only from check_doctor_availability message / spoken_summary.`;
 
@@ -272,22 +272,37 @@ const PHONE_APPOINTMENT_RULE = `PHONE APPOINTMENT RULE (FOLLOW BEFORE ANY BOOKIN
 Call check_existing_appointment only after the caller says a phone number. Do not call it when they say their name.
 If has_active_appointment is true, say exactly: I did not book a new appointment. This number already has an active appointment. Please complete or cancel that one first.
 If the caller asks "is my appointment confirmed?", say no. The new appointment was not booked. Only the older appointment is still confirmed.
-If has_active_appointment is false, or the previous appointment is Completed or Cancelled, continue.
+If has_active_appointment is false, or the previous appointment is Completed or Cancelled, you MUST next call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do NOT ask for a verification code yet. Do NOT call verify_booking_otp yet.
 Never say a new appointment is booked or confirmed unless verify_booking_otp returns appointment_confirmed true.`;
 
-const BOOKING_OTP_RULE = `BOOKING OTP RULE:
-The appointment is not booked and not confirmed until the caller says the correct 6-digit verification code and verify_booking_otp returns appointment_confirmed true.
-After the caller picks a real open time and you have their name, phone, and reason, call book_appointment. That only holds the time. It does not book or confirm.
-NEVER say, read, or hint any OTP digits (not 123456, not one two three…). Do not speak the otp field if present.
-Ask only: Please say the six-digit verification code. Then WAIT.
-Then call verify_booking_otp with the booking phone and the digits they speak.
+const BOOKING_OTP_RULE = `BOOKING OTP RULE — MANDATORY ORDER (never skip a step):
+The appointment is not booked and not confirmed until verify_booking_otp returns appointment_confirmed true.
+Required sequence after the caller picks a real open time and gives name, phone, and reason:
+1. Call check_existing_appointment with the booking phone.
+2. If has_active_appointment is true, stop. Do not book. Do not ask for a code.
+3. If has_active_appointment is false, you MUST call book_appointment with doctor_id, real slot_id from check_doctor_availability, patient_name, phone, and reason. This only holds the time.
+4. ONLY after book_appointment returns success true (and otp_required true): ask exactly "Please say the six-digit verification code." Then WAIT.
+5. Call verify_booking_otp with the booking phone and the digits they speak.
 If you did not catch the digits, say: Sorry, I did not catch that. Please say the six digits slowly. Then WAIT and call verify_booking_otp again.
-If appointment_confirmed is false, say the appointment is not booked and not confirmed.
-Never invent a confirmation. Never say the visit is booked before that check succeeds.`;
+If appointment_confirmed is false, say the message. If it says to call book_appointment first, do that before asking for a code again.
+NEVER ask for a verification code before book_appointment succeeds in this call.
+NEVER call verify_booking_otp before book_appointment succeeds in this call.
+NEVER say, read, or hint any OTP digits (not 123456, not one two three…). Do not speak the otp field if present.
+Never invent a confirmation. Never say the visit is booked before verify_booking_otp returns appointment_confirmed true.`;
+
+const RECORDS_UPLOAD_OFFER_RULE = `RECORDS UPLOAD OFFER RULE:
+After verify_booking_otp returns appointment_confirmed true, first say the confirmation message (final appointment summary) exactly.
+Then ask exactly in English: Would you like to share your medical records or any relevant files with the doctor?
+WAIT for the caller to answer.
+If they say yes (or clearly agree), call offer_records_upload with consent yes, the booking phone, and appointment_reference. Say the action message.
+If they say no (or decline), call offer_records_upload with consent no. Say the action message and continue normally.
+If offer_records_upload fails, call offer_records_upload again — NEVER call deliver_records_upload_sms on an inbound booking call (that action needs a pre-made upload_url and will fail).
+Do not require an upload. Do not invent an upload link. Do not read any URL aloud.
+Do not run this rule before the appointment is confirmed.`;
 
 /** Prefix rules baked into every Sync so Fine-tuner matches live calls. */
 export function synthflowPromptRulePrefix() {
-  return `${OPENING_RULE}\n\n${BOOKING_OTP_RULE}\n\n${AVAILABILITY_SPEAK_RULE}\n\n${PHONE_APPOINTMENT_RULE}`;
+  return `${OPENING_RULE}\n\n${BOOKING_OTP_RULE}\n\n${RECORDS_UPLOAD_OFFER_RULE}\n\n${AVAILABILITY_SPEAK_RULE}\n\n${PHONE_APPOINTMENT_RULE}`;
 }
 
 export async function syncCustomActionWebhookUrls(modelId?: string) {
@@ -297,7 +312,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "book_appointment",
       url: urls.bookAction,
       prompt:
-        "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Never say OTP digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. If you did not catch the digits, ask them to say the six digits slowly again. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not say the appointment is booked.",
+        "REQUIRED before any verification code. This does not book or confirm the appointment. If success is true, the time is only on hold — then ask the caller to say the six-digit verification code, WAIT, and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not ask for a code.",
       message_error: "Say the response message if one is present. Otherwise say the booking could not be saved.",
       jsonBody: {
         doctor_name: "<doctor_name>",
@@ -307,6 +322,56 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
         phone: "<phone>",
         reason: "<reason>",
         caller_phone: "<user_phone_number>",
+      },
+      create: {
+        description:
+          "REQUIRED after check_existing_appointment clears. Hold a real open slot_id for OTP verification. Call this before asking for any verification code.",
+        jsonBody: {
+          doctor_name: "<doctor_name>",
+          doctor_id: "<doctor_id>",
+          slot_id: "<slot_id>",
+          patient_name: "<patient_name>",
+          phone: "<phone>",
+          reason: "<reason>",
+          caller_phone: "<user_phone_number>",
+        },
+        variables: [
+          {
+            name: "doctor_name",
+            description: "Clinic doctor name",
+            example: "Daniel Osei",
+          },
+          {
+            name: "doctor_id",
+            description: "doctor_id from the Clinic doctor block",
+            example: "cmv4udnmu000074tukvml2t6m",
+          },
+          {
+            name: "slot_id",
+            description: "Real open slot id from check_doctor_availability (never invent)",
+            example: "cmv96y3ql000y74y1abmfy5fs",
+          },
+          {
+            name: "patient_name",
+            description: "Caller full name for the appointment",
+            example: "Ali Hamza",
+          },
+          {
+            name: "phone",
+            description: "Booking mobile number the caller provided",
+            example: "+12014799258",
+          },
+          {
+            name: "reason",
+            description: "Visit reason",
+            example: "Follow-up checkup",
+          },
+          {
+            name: "user_phone_number",
+            description: "Inbound caller phone; always send as caller_phone",
+            example: "+12014799258",
+          },
+        ],
       },
     },
     {
@@ -334,11 +399,11 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "check_existing_appointment",
       url: urls.checkAppointmentAction,
       prompt:
-        "Call this only after the caller has said a phone number. If has_active_appointment is true, say the message exactly and stop. The new appointment is NOT booked. If the caller asks 'is my appointment confirmed?', say no, the new one was not booked, and repeat the existing appointment. If has_active_appointment is false, continue and book.",
+        "Call this only after the caller has said a phone number. If has_active_appointment is true, say the message exactly and stop. The new appointment is NOT booked. If the caller asks 'is my appointment confirmed?', say no, the new one was not booked, and repeat the existing appointment. If has_active_appointment is false, say we can continue, then IMMEDIATELY call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do NOT ask for a verification code until book_appointment succeeds.",
       message_error: "Please repeat the phone number so I can check existing appointments.",
       create: {
         description:
-          "Check whether this phone number already has a Pending or Confirmed appointment. Call this as soon as the caller gives a phone number, before booking.",
+          "Check whether this phone number already has a Pending or Confirmed appointment. Call this as soon as the caller gives a phone number, before book_appointment.",
         jsonBody: { phone: "<phone>" },
         variables: [
           {
@@ -353,13 +418,13 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "verify_booking_otp",
       url: urls.verifyOtpAction,
       prompt:
-        "Say the message exactly. If appointment_confirmed is true, tell the caller the appointment is confirmed and read the reference, doctor, date, and time. If appointment_confirmed is false, say the appointment is not booked and not confirmed. Never say OTP digits aloud. If you did not catch the digits, ask them to say the six digits slowly, then call this action again. Do not invent a confirmation.",
+        "Only call this AFTER book_appointment succeeded in this call. Say the message exactly. If appointment_confirmed is true, give the final appointment summary from the message (reference, doctor, date, time). Then ask exactly: Would you like to share your medical records or any relevant files with the doctor? Wait for yes or no, then call offer_records_upload. If appointment_confirmed is false, say the message — if it says to call book_appointment first, call book_appointment before asking for a code again. Never say OTP digits aloud. If you did not catch the digits, ask them to say the six digits slowly, then call this action again. Do not invent a confirmation.",
       message_error:
         "Sorry, I did not catch that. Please say the six digits slowly.",
       jsonBody: { phone: "<phone>", otp: "<otp>", caller_phone: "<user_phone_number>" },
       create: {
         description:
-          "Verify the 6-digit testing code 123456 the caller speaks. Confirm the appointment only when this returns appointment_confirmed true.",
+          "Verify the 6-digit testing code 123456 the caller speaks AFTER book_appointment. Confirm the appointment only when this returns appointment_confirmed true.",
         jsonBody: { phone: "<phone>", otp: "<otp>", caller_phone: "<user_phone_number>" },
         variables: [
           {
@@ -375,6 +440,52 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
           {
             name: "user_phone_number",
             description: "Inbound caller phone; always send this as caller_phone",
+            example: "+923129312436",
+          },
+        ],
+      },
+    },
+    {
+      name: "offer_records_upload",
+      url: urls.offerRecordsUploadAction,
+      prompt:
+        "Say the message exactly. If they said yes and success is true, the upload link SMS was sent — do not invent a URL and do not call deliver_records_upload_sms. If they said no, continue normally. If success is false, follow the message and retry offer_records_upload only — never call deliver_records_upload_sms on this inbound booking call.",
+      message_error:
+        "Would you like to share your medical records or any relevant files with the doctor?",
+      jsonBody: {
+        consent: "<consent>",
+        phone: "<phone>",
+        appointment_reference: "<appointment_reference>",
+        caller_phone: "<user_phone_number>",
+      },
+      create: {
+        description:
+          "After the confirmed appointment summary, log whether the caller wants to share medical records. If yes, text a secure upload link to the booking phone. If no, continue without upload.",
+        jsonBody: {
+          consent: "<consent>",
+          phone: "<phone>",
+          appointment_reference: "<appointment_reference>",
+          caller_phone: "<user_phone_number>",
+        },
+        variables: [
+          {
+            name: "consent",
+            description: "Caller answer: yes or no",
+            example: "yes",
+          },
+          {
+            name: "phone",
+            description: "Mobile number used during booking (where the SMS should go)",
+            example: "+923129312436",
+          },
+          {
+            name: "appointment_reference",
+            description: "Confirmed appointment reference such as APT-8302 when known",
+            example: "APT-8302",
+          },
+          {
+            name: "user_phone_number",
+            description: "Inbound caller phone; send as caller_phone",
             example: "+923129312436",
           },
         ],
@@ -539,6 +650,14 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
     });
   }
   if (modelId) {
+    await attachOfferRecordsUpload(modelId).catch((error) => {
+      console.warn(
+        "[synthflow] Could not map offer_records_upload variables:",
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }
+  if (modelId) {
     await attachBookCallerPhone(modelId).catch((error) => {
       console.warn(
         "[synthflow] Could not map the caller phone on book_appointment:",
@@ -597,8 +716,9 @@ async function ensureBookingOtpSmsAction() {
 /** Drop legacy multi-doctor blocks so boot-time rule patching cannot revive them. */
 function stripStaleMultiDoctorPrompt(prompt: string) {
   let next = prompt.replace(/\r\n/g, "\n");
+  // Remove any leading rule-prefix block (including RECORDS / MANDATORY ORDER titles).
   next = next.replace(
-    /^(OPENING RULE:|BOOKING OTP RULE:|AVAILABILITY SPEAK RULE:|PHONE APPOINTMENT RULE)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
+    /^(?:OPENING RULE:|BOOKING OTP RULE(?:[^\n]*):|RECORDS UPLOAD OFFER RULE:|AVAILABILITY SPEAK RULE(?:[^\n]*):|PHONE APPOINTMENT RULE(?:[^\n]*):)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
     "",
   );
   next = next.replace(
@@ -638,61 +758,18 @@ async function ensurePhoneAppointmentRule(modelId: string) {
     return;
   }
 
-  prompt = stripStaleMultiDoctorPrompt(prompt);
-  let changed = false;
-  if (!prompt.includes("I did not book a new appointment")) {
-    prompt = prompt
-      .replace(/PHONE APPOINTMENT RULE[\s\S]*?(?=\n\n|\nYou are|\nPRIMARY|\nCRITICAL|$)/, "")
-      .trim();
-    prompt = `${PHONE_APPOINTMENT_RULE}\n\n${prompt}`.trim();
-    changed = true;
-  }
-  if (prompt.includes("AVAILABILITY SPEAK RULE")) {
-    const refreshed = prompt.replace(
-      /AVAILABILITY SPEAK RULE:[\s\S]*?(?=\n\n[A-Z]|\n\nYou are|$)/,
-      AVAILABILITY_SPEAK_RULE,
-    );
-    if (refreshed !== prompt) {
-      prompt = refreshed;
-      changed = true;
-    }
-  } else {
-    prompt = `${AVAILABILITY_SPEAK_RULE}\n\n${prompt}`.trim();
-    changed = true;
-  }
-  if (prompt.includes("BOOKING OTP RULE")) {
-    const refreshed = prompt.replace(
-      /BOOKING OTP RULE:[\s\S]*?(?=\n\n[A-Z]|\n\nYou are|$)/,
-      BOOKING_OTP_RULE,
-    );
-    if (refreshed !== prompt) {
-      prompt = refreshed;
-      changed = true;
-    }
-  } else {
-    prompt = `${BOOKING_OTP_RULE}\n\n${prompt}`.trim();
-    changed = true;
-  }
-  if (prompt.includes("OPENING RULE")) {
-    const refreshed = prompt.replace(
-      /OPENING RULE:[\s\S]*?(?=\n\n[A-Z]|\n\nYou are|$)/,
-      OPENING_RULE,
-    );
-    if (refreshed !== prompt) {
-      prompt = refreshed;
-      changed = true;
-    }
-  } else {
-    prompt = `${OPENING_RULE}\n\n${prompt}`.trim();
-    changed = true;
-  }
-  if (prompt.includes("unless book_appointment returns success true")) {
-    prompt = prompt.replaceAll(
+  const bodyPrompt = stripStaleMultiDoctorPrompt(prompt);
+  const nextPrefix = synthflowPromptRulePrefix();
+  let nextPrompt = `${nextPrefix}\n\n${bodyPrompt}`.trim();
+  let changed = nextPrompt !== prompt.trim();
+  if (nextPrompt.includes("unless book_appointment returns success true")) {
+    nextPrompt = nextPrompt.replaceAll(
       "unless book_appointment returns success true",
       "unless verify_booking_otp returns appointment_confirmed true",
     );
     changed = true;
   }
+  prompt = nextPrompt;
   const greetingMessage = greetingWithOpeningLine(
     typeof agent.greeting_message === "string" ? agent.greeting_message : "",
   );
@@ -807,6 +884,54 @@ async function attachVerifyOtpCallerPhone(modelId: string) {
             llm_config: {
               description: "The six digits the caller spoke. Testing code is always 123456.",
               example: "123456",
+            },
+          },
+          {
+            variable_name: "user_phone_number",
+            source: "system_vars",
+          },
+        ],
+      },
+    ],
+  });
+}
+
+/** Map offer_records_upload: consent + booking phone from the live call. */
+async function attachOfferRecordsUpload(modelId: string) {
+  const actionId = await findActionIdByName("offer_records_upload", modelId);
+  if (!actionId) return null;
+  return synthflowRequest("POST", "/actions/attach", {
+    model_id: modelId,
+    items: [
+      {
+        action_id: actionId,
+        attachment_type: "during",
+        input_variables_mapping: [
+          {
+            variable_name: "consent",
+            source: "llm",
+            llm_config: {
+              description: "Caller answer after the medical-records offer: yes or no",
+              example: "yes",
+              required: true,
+            },
+          },
+          {
+            variable_name: "phone",
+            source: "llm",
+            llm_config: {
+              description: "Mobile number used for the booking (SMS destination)",
+              example: "+923129312436",
+              required: true,
+            },
+          },
+          {
+            variable_name: "appointment_reference",
+            source: "llm",
+            llm_config: {
+              description: "Confirmed appointment reference when known",
+              example: "APT-8302",
+              required: false,
             },
           },
           {

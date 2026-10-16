@@ -236,6 +236,7 @@ async function confirmOtpAppointment(appointmentId: string, otpRowId: string) {
     return {
       success: true,
       appointment_confirmed: true,
+      ask_records_upload: true,
       reference: appointment.reference,
       doctor: appointment.doctorName,
       date: appointment.date,
@@ -248,6 +249,7 @@ async function confirmOtpAppointment(appointmentId: string, otpRowId: string) {
     return {
       success: false,
       appointment_confirmed: false,
+      ask_records_upload: false,
       message:
         error instanceof AppError
           ? `${error.message} The appointment is not booked and not confirmed.`
@@ -274,11 +276,15 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
   if (isTestOtp) {
     const testRow = await findPendingOtpForPhones(phones, { allowUsed: true });
     if (!testRow) {
+      console.warn(
+        `[otp] verify_booking_otp called with no pending hold phones=${phones.join(",")}`,
+      );
       return {
         success: false,
         appointment_confirmed: false,
+        needs_book_appointment: true,
         message:
-          "There is no appointment waiting for verification on this number. The appointment is not booked and not confirmed.",
+          "No booking is waiting for a code yet. Call book_appointment first with doctor_id, slot_id, patient_name, phone, and reason. Do not say the appointment is confirmed.",
       };
     }
     return confirmOtpAppointment(testRow.appointmentId, testRow.id);
@@ -292,14 +298,18 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
       orderBy: { createdAt: "desc" },
       include: { appointment: true },
     });
+    console.warn(
+      `[otp] verify_booking_otp with no open OTP phones=${phones.join(",")} latest=${latest?.appointment.status || "none"}`,
+    );
     return {
       success: false,
       appointment_confirmed: false,
+      needs_book_appointment: !latest || latest.appointment.status !== "PENDING",
       message: latest?.appointment.status === "PENDING"
         ? "Please say the six-digit verification code again. The appointment is not booked yet."
         : latest?.usedAt
           ? "That code was already used. The appointment is not booked and not confirmed."
-          : "There is no verification code waiting for this number. The appointment is not booked and not confirmed.",
+          : "No booking is waiting for a code yet. Call book_appointment first with doctor_id, slot_id, patient_name, phone, and reason. Do not say the appointment is confirmed.",
     };
   }
 
@@ -349,6 +359,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     return {
       success: true,
       appointment_confirmed: true,
+      ask_records_upload: true,
       reference: appointment.reference,
       doctor: appointment.doctorName,
       date: appointment.date,
@@ -361,6 +372,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     return {
       success: false,
       appointment_confirmed: false,
+      ask_records_upload: false,
       message:
         error instanceof AppError
           ? `${error.message} The appointment is not booked and not confirmed.`

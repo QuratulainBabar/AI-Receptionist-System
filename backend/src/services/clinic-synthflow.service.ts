@@ -109,6 +109,7 @@ CRITICAL RULES:
 - Availability and bookable times come only from open slots / check_doctor_availability — never invent times.
 - One active appointment per mobile: if active_appointment_found is true, tell the caller using active_appointment_block_message and do not book again.
 - If asked about the doctor, answer from the Clinic doctor profile (specialty, experience, qualifications, clinic, fee, languages, and other listed details).
+- Booking order is mandatory: check_existing_appointment → book_appointment → ask for code → verify_booking_otp. Never ask for a verification code before book_appointment succeeds.
 - Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.
 
 Use the Clinic doctor profile and open slots injected on sync and on each call.`;
@@ -120,7 +121,7 @@ export function stripOutdatedDoctorLists(prompt: string) {
   let next = prompt.replace(/\r\n/g, "\n");
   // Drop boot-time rule prefixes — Sync re-adds the current one-doctor versions.
   next = next.replace(
-    /^(OPENING RULE:|BOOKING OTP RULE:|AVAILABILITY SPEAK RULE:|PHONE APPOINTMENT RULE)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
+    /^(?:OPENING RULE:|BOOKING OTP RULE(?:[^\n]*):|RECORDS UPLOAD OFFER RULE:|AVAILABILITY SPEAK RULE(?:[^\n]*):|PHONE APPOINTMENT RULE(?:[^\n]*):)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
     "",
   );
   next = next.replace(/\n## Specialties[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|\n## Clinic doctor|$)/, "\n");
@@ -216,7 +217,8 @@ export async function buildDoctorsDirectoryKnowledge() {
       "- On the opening, say the doctor name and the consultation fee when one is set.",
       "- If the caller asks about the doctor, answer from this block (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about).",
       "- Availability: if they ask about today, call check_doctor_availability with date today and say the message exactly. If they ask about the weekly schedule / available days, call with date empty and say the message exactly. When booking without a list request: ask which day → WAIT → then call with that date and say times → WAIT. Never invent times.",
-      "- Never say OTP digits aloud. Ask for the six-digit verification code. Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
+      "- After phone number: call check_existing_appointment. If clear, call book_appointment with a real slot_id. Only then ask for the six-digit verification code and call verify_booking_otp.",
+      "- Never say OTP digits aloud. Never ask for a verification code before book_appointment succeeds. Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
     ].join("\n"),
   };
 }

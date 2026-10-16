@@ -62,5 +62,6 @@ export function synthflowWebhookUrls(baseUrl = env.PUBLIC_API_URL) {
     checkAppointmentAction: `${root}/api/webhooks/synthflow/actions/check-appointment`,
     verifyOtpAction: `${root}/api/webhooks/synthflow/actions/verify-otp`,
     recordsSmsAction: `${root}/api/webhooks/synthflow/actions/records-sms`,
+    offerRecordsUploadAction: `${root}/api/webhooks/synthflow/actions/offer-records-upload`,
   };
 }

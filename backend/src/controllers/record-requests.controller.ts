@@ -25,17 +25,28 @@ const storage = multer.diskStorage({
 
 export const publicUploadMiddleware = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024, files: 6 },
+  limits: { fileSize: 10 * 1024 * 1024, files: 24 },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED_MIME.has(file.mimetype)) {
+    if (!ALLOWED_MIME.has(file.mimetype) && !file.mimetype.startsWith("image/")) {
+      cb(new AppError(400, "Only PDF, JPG or PNG files are allowed"));
+      return;
+    }
+    if (
+      !ALLOWED_MIME.has(file.mimetype) &&
+      file.mimetype.startsWith("image/") &&
+      file.mimetype !== "image/jpeg" &&
+      file.mimetype !== "image/png" &&
+      file.mimetype !== "image/jpg"
+    ) {
+      // Some phone cameras send image/webp or image/heic — reject clearly.
       cb(new AppError(400, "Only PDF, JPG or PNG files are allowed"));
       return;
     }
     cb(null, true);
   },
 }).fields([
-  { name: "files", maxCount: 3 },
-  { name: "images", maxCount: 3 },
+  { name: "files", maxCount: 12 },
+  { name: "images", maxCount: 12 },
   // Legacy single-file field from older upload page
   { name: "file", maxCount: 1 },
 ]);
@@ -120,6 +131,10 @@ export async function uploadViaToken(req: Request, res: Response, next: NextFunc
       throw new AppError(400, "Add at least one file, image, or note before submitting.");
     }
 
+    console.log(
+      `[records] Upload activity started token=${token.slice(0, 8)}… docs=${docs.length} images=${images.length} notes=${notes.trim() ? "yes" : "no"}`,
+    );
+
     const records = await recordRequestsService.uploadBatchViaToken({
       rawToken: token,
       files: docs.map((file) => ({
@@ -138,6 +153,10 @@ export async function uploadViaToken(req: Request, res: Response, next: NextFunc
       category,
     });
 
+    console.log(
+      `[records] Upload activity completed token=${token.slice(0, 8)}… saved=${records.length}`,
+    );
+
     res.status(201).json({
       success: true,
       records,
@@ -145,6 +164,10 @@ export async function uploadViaToken(req: Request, res: Response, next: NextFunc
       message: "Records uploaded",
     });
   } catch (error) {
+    console.warn(
+      `[records] Upload activity failed token=${String(req.params.token || "").slice(0, 8)}…:`,
+      error instanceof Error ? error.message : error,
+    );
     cleanupFiles(allDiskFiles);
     next(error);
   }

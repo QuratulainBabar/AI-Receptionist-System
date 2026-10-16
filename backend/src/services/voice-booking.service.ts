@@ -10,7 +10,6 @@ import {
 import { issueBookingOtp } from "./booking-otp.service.js";
 import { emptyish, looksLikeRecordId } from "./synthflow-fields.service.js";
 import { findOrCreatePatientForVoice } from "./voice-patient.service.js";
-import { findPatientByPhone } from "./patient-phone.service.js";
 import { getClinicDoctorUserId } from "./clinic-doctor.service.js";
 
 export type VoiceBookingInput = {
@@ -125,30 +124,43 @@ export async function processVoiceBooking(
     }
   }
 
+  const phone = normalizePhone(input.phone || "");
+  const spokenName = input.patientName?.trim() || "";
   let patientId = input.patientId?.trim() || "";
   let patient: User | null = null;
 
-  if (patientId) {
+  // Prefer the booking phone + spoken name over inbound patient_id.
+  // Inbound webhooks often inject a previous patient_id for the caller line, which
+  // must not override a different person booking on a different mobile number.
+  if (phone) {
+    patient = await findOrCreatePatientForVoice({
+      phone,
+      fullName: spokenName || undefined,
+      email: input.email,
+      allowCreate: input.allowRegister !== false,
+    });
+  }
+
+  if (!patient && patientId) {
     patient = await prisma.user.findFirst({
       where: { id: patientId, role: "PATIENT", isActive: true },
     });
   }
 
-  const phone = normalizePhone(input.phone || "");
-  if (!patient && phone) {
-    patient = await findPatientByPhone(phone);
-  }
-
-  if (!patient && phone && input.allowRegister !== false) {
-    patient = await findOrCreatePatientForVoice({
-      phone,
-      fullName: input.patientName,
-      email: input.email,
-      allowCreate: true,
-    });
-  }
-
   if (!patient) return null;
+
+  if (
+    spokenName &&
+    spokenName.toLowerCase() !== patient.fullName.trim().toLowerCase()
+  ) {
+    patient = await prisma.user.update({
+      where: { id: patient.id },
+      data: { fullName: spokenName },
+    });
+    console.log(
+      `[voice-booking] Updated patient name to "${spokenName}" for phone=${phone || "(none)"} id=${patient.id}`,
+    );
+  }
 
   // Enforce one-active-appointment before slot/doctor work so Synthflow always
   // receives a clear speakable message (not a generic booking failure).

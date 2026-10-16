@@ -162,8 +162,11 @@ function PatientDetails() {
         result.message ||
         result.request.message ||
         "Calling the patient to confirm their number and text the upload link.";
+      // Link creation can succeed even when the outbound SMS/call fails — show as notice, not hard error.
       if (result.request.smsSent) {
         setMessage(base);
+      } else if (result.request.uploadUrl) {
+        setMessage(`${base} Share this link if needed: ${result.request.uploadUrl}`);
       } else {
         setError(base);
       }

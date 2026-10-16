@@ -20,6 +20,10 @@ import { processVoiceBooking } from "./voice-booking.service.js";
 import { verifyBookingOtp } from "./booking-otp.service.js";
 import { fetchCallRecordingUrl, sendPatientReminderSms } from "./synthflow.client.js";
 import {
+  createUploadLinkForVoiceBooking,
+  markRecordRequestSmsResult,
+} from "./record-requests.service.js";
+import {
   clinicDoctorProfileBlock,
   consultationFeeToSpeak,
   formatOpenSlotLabels,
@@ -105,7 +109,7 @@ async function buildClinicContext() {
       opening_doctor_line: "",
       availability_summary: "No open slots. Do not invent a time.",
       booking_instructions:
-        "This clinic has one doctor. When the caller wants to book, ask only which day they want, then WAIT — do not list dates yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say only open dates for the next seven days (speak slowly). After they pick a date, call again with that date and say only that day's times. Then collect booking details. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise call book_appointment for a real slot_id. Never say OTP digits aloud. Ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true.",
+        "This clinic has one doctor. When the caller wants to book, ask only which day they want, then WAIT — do not list dates yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say only open dates for the next seven days (speak slowly). After they pick a date, call again with that date and say only that day's times. Then collect booking details. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, you MUST call book_appointment with a real slot_id before asking for any code. Never say OTP digits aloud. Only after book_appointment succeeds, ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true. After the final appointment summary, ask exactly: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes. If no, call offer_records_upload with consent no.",
     };
   }
 
@@ -129,7 +133,7 @@ async function buildClinicContext() {
       ? "Do not read this aloud. Use check_doctor_availability: date today for today's times; date empty for weekly open dates; or the chosen day for that day's times. Always speak the action message exactly."
       : `${profile.doctorName} has no open slots right now.`,
     booking_instructions:
-      "If the caller asks about today's availability, call check_doctor_availability with date today and say the message. If they ask about the weekly schedule, call with date empty and say the message. When booking: ask which day, WAIT, then call with that date and say times. After phone number, call check_existing_appointment. If has_active_appointment is true, do not book. Otherwise book_appointment with a real slot_id, then verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true.",
+      "If the caller asks about today's availability, call check_doctor_availability with date today and say the message. If they ask about the weekly schedule, call with date empty and say the message. When booking: ask which day, WAIT, then call with that date and say times. After phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, MUST call book_appointment with a real slot_id — do not ask for a code yet. Only after book_appointment succeeds, ask for the six-digit code and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. After the final appointment summary, ask exactly in English: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes and the booking phone. If no, call offer_records_upload with consent no.",
   };
 }
 
@@ -745,7 +749,9 @@ export async function handleCheckAppointmentAction(body: unknown) {
     success: true,
     has_active_appointment: false,
     can_book: true,
-    message: "This number has no active appointment. We can book a new one.",
+    next_action: "book_appointment",
+    message:
+      "This number has no active appointment. Next call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do not ask for a verification code until book_appointment succeeds.",
   };
 }
 
@@ -760,8 +766,8 @@ export async function handleBookAction(body: unknown) {
     pickString(root, ["reason", "visit_reason"]) || fields.reason || "Booked via AI voice receptionist";
   const spokenPhone = normalizePhone(pickString(root, ["phone", "phone_number"]) || fields.phone);
   const callerPhone = normalizePhone(pickString(root, ["caller_phone", "user_phone_number"]) || "");
-  // OTP SMS is delivered to the inbound caller. Store and verify against that number.
-  const phone = callerPhone || spokenPhone;
+  // Prefer the booking number the caller said; fall back to the inbound caller line.
+  const phone = spokenPhone || callerPhone;
   const smsTo = phone;
   const patientId = pickString(root, ["patient_id", "patientId"]);
   const patientName =
@@ -844,7 +850,7 @@ export async function handleBookAction(body: unknown) {
   }
 
   console.log(
-    `[synthflow] Booking OTP issued for ${phone}; in-call SMS must text the inbound caller, not the clinic number`,
+    `[synthflow] book_appointment held ref=${appointment.reference} phone=${phone} slot=${slotId || "(resolved)"} otp_required=true`,
   );
 
   return {
@@ -855,8 +861,12 @@ export async function handleBookAction(body: unknown) {
     // Never return the OTP digits to the voice agent — it will speak them.
     expires_seconds: booked.expiresSeconds,
     to_phone_number: smsTo,
+    reference: appointment.reference,
+    doctor: appointment.doctorName,
+    date: appointment.date,
+    time: appointment.time,
     message:
-      "The appointment is not booked yet. Do not say any code digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp with the digits they speak. If you did not catch the digits, ask them to say the six digits slowly again. Confirm only when appointment_confirmed is true. If the code is wrong, say the appointment is not booked and that time was released.",
+      "The appointment is not booked yet. Do not say any code digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp with the booking phone and the digits they speak. If you did not catch the digits, ask them to say the six digits slowly again. Confirm only when appointment_confirmed is true. If the code is wrong, say the appointment is not booked and that time was released.",
     patient_id: patient.id,
     patient_reference: patient.reference,
   };
@@ -969,6 +979,184 @@ function collectPhoneCandidates(body: unknown): string[] {
     // ignore
   }
   return out;
+}
+
+function parseRecordsConsent(raw: string): "yes" | "no" | "" {
+  const text = raw.trim().toLowerCase().replace(/[^\w\s]/g, " ");
+  if (!text) return "";
+  if (
+    /\b(no|nope|nah|decline|don'?t|do not|not really|no thanks|no thank you)\b/.test(text)
+  ) {
+    return "no";
+  }
+  if (
+    /\b(yes|yeah|yep|yup|sure|ok|okay|please|affirmative|of course|go ahead|i would|i'?d like|send|share)\b/.test(
+      text,
+    )
+  ) {
+    return "yes";
+  }
+  if (text === "y") return "yes";
+  if (text === "n") return "no";
+  return "";
+}
+
+function extractAppointmentReference(body: unknown, fallback = "") {
+  const root = asRecord(body);
+  const custom = asRecord(root.custom_variables || root.customVariables);
+  const direct =
+    pickString(root, ["appointment_reference", "reference", "appointment"]) ||
+    asString(custom.appointment_reference).trim() ||
+    fallback.trim();
+  const fromDirect = direct.match(/APT-?\s*([0-9]{3,6})/i);
+  if (fromDirect?.[1]) return `APT-${fromDirect[1]}`;
+  if (/^APT-\d+/i.test(direct)) return direct.toUpperCase().replace(/\s+/g, "");
+  try {
+    const blob = JSON.stringify(body);
+    const fromBlob = blob.match(/APT-?\s*([0-9]{3,6})/i);
+    if (fromBlob?.[1]) return `APT-${fromBlob[1]}`;
+  } catch {
+    // ignore
+  }
+  return "";
+}
+
+/**
+ * After OTP confirmation summary: log the caller's yes/no, and if yes mint + SMS
+ * an upload link to the booking phone. Does not change appointment confirmation.
+ */
+export async function handleOfferRecordsUploadAction(body: unknown) {
+  const root = asRecord(body);
+  const bookingFields = extractVoiceBookingFields(body);
+  const custom = asRecord(root.custom_variables || root.customVariables);
+
+  let phone = "";
+  for (const candidate of collectPhoneCandidates(body)) {
+    phone = coercePhoneCandidate(candidate);
+    if (phone) break;
+  }
+  if (!phone) {
+    phone = coercePhoneCandidate(
+      bookingFields.phone || asString(custom.caller_phone) || asString(custom.phone),
+    );
+  }
+
+  const consentRaw =
+    pickString(root, ["consent", "answer", "response", "records_consent", "choice"]) ||
+    asString(custom.consent).trim() ||
+    asString(custom.records_consent).trim();
+  let consent = parseRecordsConsent(consentRaw);
+  // Agent is instructed to call this only after yes/no. Missing consent usually means
+  // Synthflow omitted the field after the caller already agreed — default to yes.
+  if (!consent) {
+    try {
+      consent = parseRecordsConsent(JSON.stringify(body)) || "yes";
+    } catch {
+      consent = "yes";
+    }
+  }
+
+  const appointmentReference = extractAppointmentReference(body);
+
+  console.log(
+    `[synthflow] records-offer response consent_raw="${consentRaw}" consent=${consent} phone=${phone || "(none)"} ref=${appointmentReference || "(none)"}`,
+  );
+
+  if (consent === "no") {
+    console.log(`[synthflow] records-offer declined phone=${phone || "(none)"}`);
+    return {
+      success: true,
+      records_consent: "no",
+      records_sms_sent: false,
+      message:
+        "No problem. Your appointment is already confirmed. Is there anything else I can help you with?",
+    };
+  }
+
+  if (!phone && !appointmentReference) {
+    console.warn("[synthflow] records-offer yes but missing booking phone and reference");
+    return {
+      success: false,
+      records_consent: "yes",
+      records_sms_sent: false,
+      message:
+        "Please say the mobile number from your booking so I can text the secure upload link.",
+    };
+  }
+
+  try {
+    const link = await createUploadLinkForVoiceBooking({
+      phone: phone || undefined,
+      appointmentReference: appointmentReference || undefined,
+    });
+
+    const cleanDoctor = link.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
+    const smsBody = `Qubetech clinic: Secure upload link for your appointment ${link.appointmentReference} with Dr. ${cleanDoctor}. Share medical records here (expires in 7 days): ${link.uploadUrl}`;
+
+    console.log(
+      `[synthflow] records-offer accepted phone=${link.phone} ref=${link.appointmentReference} link_generated=true url=${link.uploadUrl}`,
+    );
+
+    // Send SMS in the background so Synthflow does not time out waiting on the
+    // outbound messaging call. The upload link is already stored on the appointment.
+    void (async () => {
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      try {
+        await sendPatientReminderSms({
+          toPhone: link.phone,
+          body: smsBody,
+          purpose: "confirmation",
+        });
+        await markRecordRequestSmsResult({
+          requestId: link.requestId,
+          smsSent: true,
+        });
+        console.log(
+          `[synthflow] records-offer SMS sent phone=${link.phone} ref=${link.appointmentReference}`,
+        );
+      } catch (error) {
+        const smsError = error instanceof Error ? error.message : String(error);
+        await markRecordRequestSmsResult({
+          requestId: link.requestId,
+          smsSent: false,
+          smsError,
+        }).catch(() => undefined);
+        console.warn(
+          `[synthflow] records-offer SMS failed phone=${link.phone} ref=${link.appointmentReference}:`,
+          smsError,
+        );
+      }
+    })();
+
+    return {
+      success: true,
+      records_consent: "yes",
+      records_sms_sent: true,
+      phone: link.phone,
+      appointment_reference: link.appointmentReference,
+      // For logging / retries only — never read aloud.
+      upload_url: link.uploadUrl,
+      message:
+        "Thank you. I am texting a secure upload link to the phone number from your booking. Please open it to attach files or photos for the doctor. Do not call deliver_records_upload_sms. Is there anything else I can help you with?",
+    };
+  } catch (error) {
+    const message =
+      error instanceof AppError
+        ? error.message
+        : error instanceof Error
+          ? error.message
+          : "Could not create the upload link.";
+    console.warn(
+      `[synthflow] records-offer link/SMS error phone=${phone} ref=${appointmentReference}:`,
+      message,
+    );
+    return {
+      success: false,
+      records_consent: "yes",
+      records_sms_sent: false,
+      message: `${message} Your appointment is still confirmed. Do not call deliver_records_upload_sms.`,
+    };
+  }
 }
 
 /**

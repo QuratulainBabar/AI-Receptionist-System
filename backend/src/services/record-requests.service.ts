@@ -3,8 +3,9 @@ import path from "node:path";
 import { prisma } from "../lib/prisma.js";
 import { env } from "../config/env.js";
 import { AppError } from "../utils/AppError.js";
-import { normalizePhone } from "../utils/phone.js";
+import { normalizePhone, phonesMatch } from "../utils/phone.js";
 import { createRawToken, hashToken } from "./auth.helpers.js";
+import { findPatientIdsByPhone } from "./patient-phone.service.js";
 import {
   absoluteStoragePath,
   createRecordForPatient,
@@ -223,6 +224,162 @@ export async function requestRecordsForAppointment(input: {
   };
 }
 
+/**
+ * After voice booking OTP confirmation: mint a secure upload link for the
+ * caller's confirmed appointment. Does not send SMS — the webhook handler does.
+ */
+export async function createUploadLinkForVoiceBooking(input: {
+  phone?: string;
+  appointmentReference?: string;
+}) {
+  const phone = normalizePhone(input.phone || "");
+  const reference = (input.appointmentReference || "").trim().replace(/\s+/g, "");
+  const referenceKey = reference.match(/APT-?(\d+)/i)?.[1]
+    ? `APT-${reference.match(/APT-?(\d+)/i)![1]}`
+    : reference;
+
+  if (!phone && !referenceKey) {
+    throw new AppError(400, "A mobile number or appointment reference is required for the upload link.");
+  }
+
+  const patientIds = phone ? await findPatientIdsByPhone(phone) : [];
+
+  const recentConfirmed = await prisma.appointment.findMany({
+    where: {
+      status: "CONFIRMED",
+      ...(referenceKey
+        ? { reference: { equals: referenceKey, mode: "insensitive" } }
+        : patientIds.length
+          ? {
+              OR: [{ bookingPhone: phone }, { patientId: { in: patientIds } }],
+            }
+          : phone
+            ? undefined
+            : { id: "__none__" }),
+    },
+    include: {
+      patient: { include: { medicalHistory: true } },
+      doctorUser: true,
+      recordRequest: true,
+    },
+    orderBy: { createdAt: "desc" },
+    take: 50,
+  });
+
+  let appointment =
+    recentConfirmed.find((row) => {
+      if (referenceKey) return row.reference.toLowerCase() === referenceKey.toLowerCase();
+      const booking = row.bookingPhone || "";
+      const history = row.patient.medicalHistory?.phone || "";
+      const account = row.patient.phone || "";
+      return (
+        phonesMatch(booking, phone) ||
+        phonesMatch(history, phone) ||
+        phonesMatch(account, phone) ||
+        (patientIds.length > 0 && patientIds.includes(row.patientId))
+      );
+    }) ||
+    (!referenceKey && phone
+      ? recentConfirmed.find((row) => phonesMatch(row.bookingPhone || "", phone))
+      : undefined);
+
+  // Fallback: scan recent confirmed visits when phone formatting differs in DB.
+  if (!appointment && phone) {
+    const broader = await prisma.appointment.findMany({
+      where: { status: "CONFIRMED" },
+      include: {
+        patient: { include: { medicalHistory: true } },
+        doctorUser: true,
+        recordRequest: true,
+      },
+      orderBy: { createdAt: "desc" },
+      take: 80,
+    });
+    appointment = broader.find((row) => {
+      const booking = row.bookingPhone || "";
+      const history = row.patient.medicalHistory?.phone || "";
+      const account = row.patient.phone || "";
+      return (
+        phonesMatch(booking, phone) ||
+        phonesMatch(history, phone) ||
+        phonesMatch(account, phone)
+      );
+    });
+  }
+
+  if (!appointment) {
+    throw new AppError(404, "I could not find a confirmed appointment for this phone number.");
+  }
+
+  const smsPhone = normalizePhone(
+    appointment.bookingPhone ||
+      appointment.patient.medicalHistory?.phone ||
+      appointment.patient.phone ||
+      phone,
+  );
+  if (!smsPhone) {
+    throw new AppError(400, "This appointment has no phone number for the upload link text.");
+  }
+
+  const rawToken = createRawToken();
+  const tokenHash = hashToken(rawToken);
+  const expiresAt = new Date(Date.now() + LINK_TTL_MS);
+
+  const request = await prisma.recordRequest.upsert({
+    where: { appointmentId: appointment.id },
+    create: {
+      tokenHash,
+      appointmentId: appointment.id,
+      patientId: appointment.patientId,
+      doctorUserId: appointment.doctorUserId,
+      phone: smsPhone,
+      status: "sent",
+      smsSent: false,
+      smsError: "",
+      expiresAt,
+    },
+    update: {
+      tokenHash,
+      phone: smsPhone,
+      status: "sent",
+      smsSent: false,
+      smsError: "",
+      expiresAt,
+      openedAt: null,
+    },
+  });
+
+  const uploadUrl = uploadUrlForToken(rawToken);
+  console.log(
+    `[records] Voice booking upload link generated request=${request.id} appointment=${appointment.reference} phone=${smsPhone} url=${uploadUrl}`,
+  );
+
+  return {
+    requestId: request.id,
+    appointmentId: appointment.id,
+    appointmentReference: appointment.reference,
+    doctorName: appointment.doctorUser.fullName,
+    patientName: appointment.patient.fullName,
+    phone: smsPhone,
+    uploadUrl,
+    expiresAt,
+  };
+}
+
+export async function markRecordRequestSmsResult(input: {
+  requestId: string;
+  smsSent: boolean;
+  smsError?: string;
+}) {
+  return prisma.recordRequest.update({
+    where: { id: input.requestId },
+    data: {
+      smsSent: input.smsSent,
+      smsError: input.smsError || "",
+    },
+  });
+}
+
 export async function getRecordRequestSummaryForAppointments(appointmentIds: string[]) {
   if (!appointmentIds.length) return new Map<string, PublicRecordRequest>();
 
@@ -274,6 +431,9 @@ export async function resolveRecordRequestByToken(rawToken: string) {
       where: { id: row.id },
       data: { openedAt: new Date(), status: row.status === "sent" ? "opened" : row.status },
     });
+    console.log(
+      `[records] Upload link opened appointment=${row.appointment.reference} request=${row.id} phone=${row.phone}`,
+    );
   }
 
   return {
@@ -285,8 +445,8 @@ export async function resolveRecordRequestByToken(rawToken: string) {
   };
 }
 
-const MAX_DOC_FILES = 3;
-const MAX_IMAGE_FILES = 3;
+const MAX_DOC_FILES = 12;
+const MAX_IMAGE_FILES = 12;
 
 function isImageMime(mimeType: string) {
   return mimeType.startsWith("image/");
@@ -354,6 +514,10 @@ export async function uploadRecordViaToken(input: {
     where: { id: resolved.recordRequestId },
     data: { status: "uploaded" },
   });
+
+  console.log(
+    `[records] File uploaded appointment=${resolved.appointmentId} request=${resolved.recordRequestId} file=${input.fileName} mime=${input.mimeType} bytes=${input.sizeBytes}`,
+  );
 
   return record;
 }
@@ -578,17 +742,20 @@ export function renderUploadPageHtml(input: {
           <option value="">Select a type (optional for images/notes)</option>
           ${categoryOptions}
         </select>
-        <label for="files">Files — PDF (max 3 · 10 MB each)</label>
+        <label for="files">Files — PDF (max 12 · 10 MB each)</label>
         <input id="files" name="files" type="file" accept=".pdf,application/pdf" multiple />
-        <p class="hint" id="files-hint">0 of 3 files selected</p>
-        <label for="images">Images — JPG or PNG (max 3 · 10 MB each)</label>
+        <p class="hint" id="files-hint">0 of 12 files selected</p>
+        <label for="images">Images — gallery JPG or PNG (max 12 · 10 MB each)</label>
         <input id="images" name="images" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" multiple />
-        <p class="hint" id="images-hint">0 of 3 images selected</p>
+        <p class="hint" id="images-hint">0 of 12 images selected</p>
+        <label for="camera">Camera — take a photo</label>
+        <input id="camera" name="camera" type="file" accept="image/*" capture="environment" />
+        <p class="hint" id="camera-hint">Use your phone camera to capture a document or photo</p>
         <label for="notes">Notes for the doctor (optional)</label>
         <textarea id="notes" name="notes" maxlength="4000" placeholder="Anything else your doctor should know…"></textarea>
         <button type="submit" id="submit">Submit records</button>
       </form>
-      <p class="hint">Up to 3 files and 3 images, plus optional notes. Everything is saved on this appointment for your doctor.</p>
+      <p class="hint">Attach files, gallery images, or camera photos — up to 12 each — plus optional notes. Everything is saved on this appointment for your doctor.</p>
     </div>
   </main>
   <script>
@@ -598,20 +765,29 @@ export function renderUploadPageHtml(input: {
     const submit = document.getElementById("submit");
     const filesInput = document.getElementById("files");
     const imagesInput = document.getElementById("images");
+    const cameraInput = document.getElementById("camera");
     const filesHint = document.getElementById("files-hint");
     const imagesHint = document.getElementById("images-hint");
+    const cameraHint = document.getElementById("camera-hint");
     const token = ${JSON.stringify(input.token)};
+    const maxDocs = 12;
+    const maxImages = 12;
 
     function syncHints() {
-      const fileCount = Math.min(filesInput.files.length, 3);
-      const imageCount = Math.min(imagesInput.files.length, 3);
-      filesHint.textContent = fileCount + " of 3 files selected";
-      imagesHint.textContent = imageCount + " of 3 images selected";
-      if (filesInput.files.length > 3) {
-        errorEl.textContent = "You can attach at most 3 files.";
+      const fileCount = Math.min(filesInput.files.length, maxDocs);
+      const galleryCount = imagesInput.files ? imagesInput.files.length : 0;
+      const cameraCount = cameraInput.files && cameraInput.files.length ? 1 : 0;
+      const imageCount = Math.min(galleryCount + cameraCount, maxImages);
+      filesHint.textContent = fileCount + " of " + maxDocs + " files selected";
+      imagesHint.textContent = imageCount + " of " + maxImages + " images selected (gallery + camera)";
+      cameraHint.textContent = cameraCount
+        ? "1 camera photo ready to upload"
+        : "Use your phone camera to capture a document or photo";
+      if (filesInput.files.length > maxDocs) {
+        errorEl.textContent = "You can attach at most " + maxDocs + " files.";
         errorEl.style.display = "block";
-      } else if (imagesInput.files.length > 3) {
-        errorEl.textContent = "You can attach at most 3 images.";
+      } else if (galleryCount + cameraCount > maxImages) {
+        errorEl.textContent = "You can attach at most " + maxImages + " images.";
         errorEl.style.display = "block";
       } else {
         errorEl.style.display = "none";
@@ -619,28 +795,31 @@ export function renderUploadPageHtml(input: {
     }
     filesInput.addEventListener("change", syncHints);
     imagesInput.addEventListener("change", syncHints);
+    cameraInput.addEventListener("change", syncHints);
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       errorEl.style.display = "none";
       okEl.style.display = "none";
-      const fileList = Array.from(filesInput.files || []).slice(0, 3);
-      const imageList = Array.from(imagesInput.files || []).slice(0, 3);
+      const fileList = Array.from(filesInput.files || []).slice(0, maxDocs);
+      const imageList = Array.from(imagesInput.files || []);
+      if (cameraInput.files && cameraInput.files[0]) imageList.push(cameraInput.files[0]);
+      const finalImages = imageList.slice(0, maxImages);
       const notes = document.getElementById("notes").value.trim();
       const category = document.getElementById("category").value;
-      if (!fileList.length && !imageList.length && !notes) {
-        errorEl.textContent = "Add at least one file, image, or note.";
+      if (!fileList.length && !finalImages.length && !notes) {
+        errorEl.textContent = "Add at least one file, image, camera photo, or note.";
         errorEl.style.display = "block";
         return;
       }
-      if ((filesInput.files || []).length > 3 || (imagesInput.files || []).length > 3) {
-        errorEl.textContent = "Maximum is 3 files and 3 images.";
+      if ((filesInput.files || []).length > maxDocs || imageList.length > maxImages) {
+        errorEl.textContent = "Maximum is " + maxDocs + " files and " + maxImages + " images.";
         errorEl.style.display = "block";
         return;
       }
       const body = new FormData();
       fileList.forEach((file) => body.append("files", file));
-      imageList.forEach((file) => body.append("images", file));
+      finalImages.forEach((file) => body.append("images", file));
       if (category) body.append("category", category);
       if (notes) body.append("notes", notes);
       submit.disabled = true;

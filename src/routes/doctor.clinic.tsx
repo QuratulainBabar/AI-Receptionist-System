@@ -418,8 +418,8 @@ function DoctorClinicPage() {
               <SectionLabel>AI receptionist</SectionLabel>
             </div>
             <p className="text-[12.5px] text-slate-500">
-              Greeting and live system instructions. The synced prompt includes booking OTP rules and your
-              current open slots — refresh it after changing availability.
+              Greeting and live system instructions. After Sync you should see “BOOKING OTP RULE — MANDATORY
+              ORDER”, “RECORDS UPLOAD OFFER RULE”, and your current open slots.
             </p>
             <Field
               label="First message (greeting)"
