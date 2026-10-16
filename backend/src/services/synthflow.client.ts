@@ -294,10 +294,11 @@ const RECORDS_UPLOAD_OFFER_RULE = `RECORDS UPLOAD OFFER RULE:
 After verify_booking_otp returns appointment_confirmed true, first say the confirmation message (final appointment summary) exactly.
 Then ask exactly in English: Would you like to share your medical records or any relevant files with the doctor?
 WAIT for the caller to answer.
-If they say yes (or clearly agree), call offer_records_upload with consent yes, the booking phone, and appointment_reference. Say the action message.
+If they say yes (or clearly agree), call offer_records_upload with consent yes, the booking phone, and appointment_reference.
+Then IMMEDIATELY call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from the offer_records_upload response (same live call — like OTP SMS). Then say you texted the secure upload link.
 If they say no (or decline), call offer_records_upload with consent no. Say the action message and continue normally.
-If offer_records_upload fails, call offer_records_upload again — NEVER call deliver_records_upload_sms on an inbound booking call (that action needs a pre-made upload_url and will fail).
-Do not require an upload. Do not invent an upload link. Do not read any URL aloud.
+NEVER call deliver_records_upload_sms on an inbound booking call. NEVER place a second outbound call for the upload link. NEVER read the URL aloud.
+Do not require an upload. Do not invent an upload link.
 Do not run this rule before the appointment is confirmed.`;
 
 /** Prefix rules baked into every Sync so Fine-tuner matches live calls. */
@@ -449,7 +450,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "offer_records_upload",
       url: urls.offerRecordsUploadAction,
       prompt:
-        "Say the message exactly. If they said yes and success is true, the upload link SMS was sent — do not invent a URL and do not call deliver_records_upload_sms. If they said no, continue normally. If success is false, follow the message and retry offer_records_upload only — never call deliver_records_upload_sms on this inbound booking call.",
+        "If next_action is send_records_upload_link (or consent was yes and upload_url is present), immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from this response, then say you texted the secure upload link. If they said no, continue normally. Never invent a URL. Never call deliver_records_upload_sms. Never start another outbound call.",
       message_error:
         "Would you like to share your medical records or any relevant files with the doctor?",
       jsonBody: {
@@ -1081,8 +1082,8 @@ export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
 }
 
 async function attachRecordsUploadSms(modelId: string, actionId: string) {
-  // Same pattern as booking OTP: fill message fields from call variables.
-  // Never map to_phone_number — Synthflow would treat it as the clinic number and SMS fails.
+  // After offer_records_upload, the agent passes link fields from that action response.
+  // to_phone_number must be the booking mobile (not the clinic line).
   return synthflowRequest("POST", "/actions/attach", {
     model_id: modelId,
     items: [
@@ -1092,20 +1093,87 @@ async function attachRecordsUploadSms(modelId: string, actionId: string) {
         input_variables_mapping: [
           {
             variable_name: "doctor_name",
-            source: "prompt_variables",
+            source: "llm",
+            llm_config: {
+              description:
+                "Doctor name from offer_records_upload (doctor_name). Do not invent.",
+              example: "Daniel Osei",
+              required: true,
+            },
           },
           {
             variable_name: "appointment_reference",
-            source: "prompt_variables",
+            source: "llm",
+            llm_config: {
+              description:
+                "Appointment reference from offer_records_upload (appointment_reference).",
+              example: "APT-1793",
+              required: true,
+            },
           },
           {
             variable_name: "upload_url",
-            source: "prompt_variables",
+            source: "llm",
+            llm_config: {
+              description:
+                "Secure upload URL from offer_records_upload (upload_url). Never read aloud.",
+              example: "https://example.com/upload/token",
+              required: true,
+            },
+          },
+          {
+            variable_name: "to_phone_number",
+            source: "llm",
+            llm_config: {
+              description:
+                "Booking mobile from offer_records_upload (to_phone_number / phone). Must be the patient number, never the clinic line. On outbound doctor-request calls, omit this so SMS goes to the number you dialed.",
+              example: "+12014799258",
+              required: false,
+            },
           },
         ],
       },
     ],
   });
+}
+
+/**
+ * Send a plain SMS without placing a voice call (Synthflow chat outbound).
+ * Falls back gracefully when the workspace has no SMS chat channel configured.
+ */
+export async function sendDirectSms(input: {
+  toPhone: string;
+  body: string;
+}): Promise<{ ok: true; mode: "chat_outbound" } | { ok: false; error: string }> {
+  const fromNumber = normalizePhone(env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053");
+  const agentId = env.SYNTHFLOW_AGENT_ID.trim();
+  const toPhone = normalizePhone(input.toPhone);
+  const body = input.body.trim();
+
+  if (!isSynthflowConfigured() || !agentId || !fromNumber) {
+    return { ok: false, error: "The clinic messaging number is not configured" };
+  }
+  if (!toPhone) return { ok: false, error: "Patient phone number is invalid" };
+  if (toPhone === fromNumber) return { ok: false, error: "Patient phone cannot be the clinic number" };
+  if (!body) return { ok: false, error: "SMS body is empty" };
+
+  try {
+    const result = await synthflowRequest<SynthflowJson>("POST", "/chat/outbound", {
+      agent_id: agentId,
+      channel: "sms",
+      to_number: toPhone,
+      from_number: fromNumber,
+      initial_message: body,
+    });
+    console.log(
+      `[synthflow] Direct SMS accepted → ${toPhone} body_len=${body.length} response=${JSON.stringify(result).slice(0, 240)}`,
+    );
+    return { ok: true, mode: "chat_outbound" };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[synthflow] Direct SMS failed → ${toPhone}:`, message);
+    return { ok: false, error: message };
+  }
 }
 
 /** Map deliver_records_upload_sms: phone from what the caller said; link fields from call vars. */

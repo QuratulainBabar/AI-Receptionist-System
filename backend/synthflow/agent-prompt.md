@@ -141,5 +141,5 @@ Doctor name, fee when set, and open slots come from the clinic doctor and Doctor
 9. Optional email for confirmation.
 10. Call book_appointment with a real slot_id (required). Do not ask for a verification code yet. Do not say it is booked.
 11. Only after book_appointment succeeds: ask for the six-digit verification code. Never say OTP digits. Call verify_booking_otp. Confirm only when appointment_confirmed is true.
-12. After confirmation summary: ask if they want to share medical records; if yes call offer_records_upload with consent yes; if no call offer_records_upload with consent no.
+12. After confirmation summary: ask if they want to share medical records; if yes call offer_records_upload with consent yes, then immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from that response (same call — do not place another call); if no call offer_records_upload with consent no.
 ```

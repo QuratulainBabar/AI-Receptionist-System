@@ -18,7 +18,11 @@ import { emptyish, extractSynthflowFields, extractVoiceBookingFields } from "./s
 import { findActiveAppointmentForMobile, type PublicAppointment } from "./appointments.service.js";
 import { processVoiceBooking } from "./voice-booking.service.js";
 import { verifyBookingOtp } from "./booking-otp.service.js";
-import { fetchCallRecordingUrl, sendPatientReminderSms } from "./synthflow.client.js";
+import {
+  fetchCallRecordingUrl,
+  sendDirectSms,
+  sendPatientReminderSms,
+} from "./synthflow.client.js";
 import {
   createUploadLinkForVoiceBooking,
   markRecordRequestSmsResult,
@@ -109,7 +113,7 @@ async function buildClinicContext() {
       opening_doctor_line: "",
       availability_summary: "No open slots. Do not invent a time.",
       booking_instructions:
-        "This clinic has one doctor. When the caller wants to book, ask only which day they want, then WAIT — do not list dates yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say only open dates for the next seven days (speak slowly). After they pick a date, call again with that date and say only that day's times. Then collect booking details. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, you MUST call book_appointment with a real slot_id before asking for any code. Never say OTP digits aloud. Only after book_appointment succeeds, ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true. After the final appointment summary, ask exactly: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes. If no, call offer_records_upload with consent no.",
+        "This clinic has one doctor. When the caller wants to book, ask only which day they want, then WAIT — do not list dates yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say only open dates for the next seven days (speak slowly). After they pick a date, call again with that date and say only that day's times. Then collect booking details. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, you MUST call book_appointment with a real slot_id before asking for any code. Never say OTP digits aloud. Only after book_appointment succeeds, ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true. After the final appointment summary, ask exactly: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes, then immediately call send_records_upload_link with the fields from that response on the same call. If no, call offer_records_upload with consent no.",
     };
   }
 
@@ -133,7 +137,7 @@ async function buildClinicContext() {
       ? "Do not read this aloud. Use check_doctor_availability: date today for today's times; date empty for weekly open dates; or the chosen day for that day's times. Always speak the action message exactly."
       : `${profile.doctorName} has no open slots right now.`,
     booking_instructions:
-      "If the caller asks about today's availability, call check_doctor_availability with date today and say the message. If they ask about the weekly schedule, call with date empty and say the message. When booking: ask which day, WAIT, then call with that date and say times. After phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, MUST call book_appointment with a real slot_id — do not ask for a code yet. Only after book_appointment succeeds, ask for the six-digit code and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. After the final appointment summary, ask exactly in English: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes and the booking phone. If no, call offer_records_upload with consent no.",
+      "If the caller asks about today's availability, call check_doctor_availability with date today and say the message. If they ask about the weekly schedule, call with date empty and say the message. When booking: ask which day, WAIT, then call with that date and say times. After phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, MUST call book_appointment with a real slot_id — do not ask for a code yet. Only after book_appointment succeeds, ask for the six-digit code and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. After the final appointment summary, ask exactly in English: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes and the booking phone, then immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from that response (same call). If no, call offer_records_upload with consent no.",
   };
 }
 
@@ -1093,51 +1097,50 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
     const cleanDoctor = link.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
     const smsBody = `Qubetech clinic: Secure upload link for your appointment ${link.appointmentReference} with Dr. ${cleanDoctor}. Share medical records here (expires in 7 days): ${link.uploadUrl}`;
 
-    console.log(
-      `[synthflow] records-offer accepted phone=${link.phone} ref=${link.appointmentReference} link_generated=true url=${link.uploadUrl}`,
-    );
+    // Always print the link in the backend terminal so operators can copy it.
+    console.log("========== RECORDS UPLOAD LINK ==========");
+    console.log(`[records] phone=${link.phone}`);
+    console.log(`[records] appointment=${link.appointmentReference}`);
+    console.log(`[records] doctor=${link.doctorName}`);
+    console.log(`[records] upload_url=${link.uploadUrl}`);
+    console.log("=========================================");
 
-    // Send SMS in the background so Synthflow does not time out waiting on the
-    // outbound messaging call. The upload link is already stored on the appointment.
+    // Never dial a second outbound call for this (missed call = no SMS).
+    // Primary delivery: agent calls send_records_upload_link on THIS live call.
+    // Bonus: try chat SMS in the background (needs a chat-capable agent; may fail).
     void (async () => {
-      await new Promise((resolve) => setTimeout(resolve, 3000));
-      try {
-        await sendPatientReminderSms({
-          toPhone: link.phone,
-          body: smsBody,
-          purpose: "confirmation",
-        });
+      const direct = await sendDirectSms({
+        toPhone: link.phone,
+        body: smsBody,
+      });
+      if (direct.ok) {
         await markRecordRequestSmsResult({
           requestId: link.requestId,
           smsSent: true,
-        });
-        console.log(
-          `[synthflow] records-offer SMS sent phone=${link.phone} ref=${link.appointmentReference}`,
-        );
-      } catch (error) {
-        const smsError = error instanceof Error ? error.message : String(error);
-        await markRecordRequestSmsResult({
-          requestId: link.requestId,
-          smsSent: false,
-          smsError,
         }).catch(() => undefined);
-        console.warn(
-          `[synthflow] records-offer SMS failed phone=${link.phone} ref=${link.appointmentReference}:`,
-          smsError,
+        console.log(
+          `[synthflow] records-offer bonus direct SMS ok phone=${link.phone} ref=${link.appointmentReference}`,
         );
+        return;
       }
+      console.warn(
+        `[synthflow] records-offer direct SMS skipped (${direct.error}). Relying on in-call send_records_upload_link.`,
+      );
     })();
 
     return {
       success: true,
       records_consent: "yes",
-      records_sms_sent: true,
+      records_sms_sent: false,
+      sms_mode: "incall_required",
       phone: link.phone,
+      to_phone_number: link.phone,
+      doctor_name: cleanDoctor,
       appointment_reference: link.appointmentReference,
-      // For logging / retries only — never read aloud.
       upload_url: link.uploadUrl,
+      next_action: "send_records_upload_link",
       message:
-        "Thank you. I am texting a secure upload link to the phone number from your booking. Please open it to attach files or photos for the doctor. Do not call deliver_records_upload_sms. Is there anything else I can help you with?",
+        "Thank you. Immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from this response, then say you texted the secure upload link. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
     };
   } catch (error) {
     const message =
