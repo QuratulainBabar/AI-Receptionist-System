@@ -125,7 +125,8 @@ export async function processVoiceBooking(
   }
 
   const phone = normalizePhone(input.phone || "");
-  const spokenName = input.patientName?.trim() || "";
+  const rawSpokenName = input.patientName?.trim() || "";
+  const spokenName = emptyish(rawSpokenName) ? "" : rawSpokenName;
   let patientId = input.patientId?.trim() || "";
   let patient: User | null = null;
 
@@ -160,6 +161,11 @@ export async function processVoiceBooking(
     console.log(
       `[voice-booking] Updated patient name to "${spokenName}" for phone=${phone || "(none)"} id=${patient.id}`,
     );
+  } else if (emptyish(patient.fullName) && spokenName) {
+    patient = await prisma.user.update({
+      where: { id: patient.id },
+      data: { fullName: spokenName },
+    });
   }
 
   // Enforce one-active-appointment before slot/doctor work so Synthflow always
@@ -192,7 +198,8 @@ export async function processVoiceBooking(
     return null;
   }
 
-  const reason = input.reason?.trim() || "Booked via AI voice receptionist";
+  const rawReason = input.reason?.trim() || "";
+  const reason = emptyish(rawReason) ? "Booked via AI voice receptionist" : rawReason;
 
   const issued = await issueBookingOtp({
     patientId: patient.id,

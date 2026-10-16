@@ -695,6 +695,12 @@ export function renderUploadPageHtml(input: {
   const categoryOptions = input.categories
     .map((category) => `<option value="${escapeHtml(category)}">${escapeHtml(category)}</option>`)
     .join("");
+  // Must include /backend (or tunnel) prefix — absolute /api/... misses the Apache proxy.
+  const uploadApiUrl = `${env.PUBLIC_API_URL.replace(/\/$/, "")}/api/record-uploads/${encodeURIComponent(input.token)}`;
+  const displayPatient =
+    !input.patientName || /^<[^>]+>$/.test(input.patientName.trim())
+      ? "Patient"
+      : input.patientName;
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -732,7 +738,7 @@ export function renderUploadPageHtml(input: {
     <div class="brand">Qubetech clinic</div>
     <h1>Upload your medical records</h1>
     <p>Dr. ${escapeHtml(input.doctorName.replace(/^Dr\.?\s*/i, ""))} asked for documents for appointment <strong>${escapeHtml(input.appointmentReference)}</strong>.</p>
-    <p class="meta">Patient: ${escapeHtml(input.patientName)} · Link expires ${escapeHtml(expiresLabel)}</p>
+    <p class="meta">Patient: ${escapeHtml(displayPatient)} · Link expires ${escapeHtml(expiresLabel)}</p>
     <div class="card">
       <div id="error" class="error" ${input.error ? "" : 'style="display:none"'}>${escapeHtml(input.error || "")}</div>
       <div id="ok" class="ok"></div>
@@ -825,7 +831,7 @@ export function renderUploadPageHtml(input: {
       submit.disabled = true;
       submit.textContent = "Submitting…";
       try {
-        const response = await fetch("/api/record-uploads/" + encodeURIComponent(token), {
+        const response = await fetch(${JSON.stringify(uploadApiUrl)}, {
           method: "POST",
           body,
         });

@@ -55,7 +55,8 @@ function pickString(obj: JsonRecord, keys: string[]) {
   for (const key of keys) {
     const value = obj[key];
     const str = asString(value).trim();
-    if (str) return str;
+    // Reject unresolved Synthflow placeholders like "<patient_name>".
+    if (str && !emptyish(str)) return str;
   }
   return "";
 }
