@@ -1,7 +1,15 @@
 const DEFAULT_API_URL = "http://localhost:4000";
 
 export function getApiBaseUrl() {
-  return (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") || DEFAULT_API_URL;
+  const raw = (import.meta.env.VITE_API_URL as string | undefined)?.trim() || DEFAULT_API_URL;
+  // Guard against empty/malformed env values that would produce broken fetch URLs.
+  try {
+    const url = new URL(raw);
+    if (!url.hostname) return DEFAULT_API_URL;
+    return url.origin;
+  } catch {
+    return DEFAULT_API_URL;
+  }
 }
 
 function withApiHeaders(init?: HeadersInit) {
@@ -662,6 +670,22 @@ async function request<T>(path: string, options: RequestInit = {}, token?: strin
   }
 
   if (!response.ok) {
+    // Expired/invalid JWT — clear local session so the user is not stuck on a blank gate page.
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      token &&
+      !path.startsWith("/api/auth/login") &&
+      !path.startsWith("/api/auth/admin-login") &&
+      !path.startsWith("/api/auth/signup")
+    ) {
+      window.localStorage.removeItem("ai-receptionist-session");
+      window.localStorage.removeItem("ai-receptionist-token");
+      window.localStorage.removeItem("ai-receptionist-demo-session");
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.assign("/login");
+      }
+    }
     throw new ApiError(response.status, body.message || "Request failed", body.errors);
   }
 
@@ -1302,6 +1326,51 @@ export const doctorSynthflowApi = {
       settings: ClinicSynthflowSettings;
     }>("/api/doctor/synthflow/sync", { method: "POST", body: JSON.stringify({}) }, authHeader());
   },
+  getCallHealth() {
+    return request<{
+      success: boolean;
+      ok: boolean;
+      modelId: string | null;
+      clinicPhone: string | null;
+      openSlotsSummary: string | null;
+      tunnel: { ok: boolean; url: string; error: string | null };
+      availability: { ok: boolean; preview: string | null; error: string | null };
+      recentCalls: { completed: number; failed: number; lastStatus: string | null };
+      checks: {
+        synthflowConfigured: boolean;
+        agentLinked: boolean;
+        clinicPhoneSet: boolean;
+        tunnelOk: boolean;
+        availabilityOk: boolean;
+        hasOpenSlots: boolean;
+      };
+      message: string;
+    }>("/api/doctor/synthflow/call-health", { method: "GET" }, authHeader());
+  },
+  startTestCall(phone: string) {
+    return request<{
+      success: boolean;
+      callId: string;
+      status: string;
+      toPhone: string;
+      fromPhone: string;
+      modelId: string;
+      warning: string | null;
+      message: string;
+    }>("/api/doctor/synthflow/test-call", { method: "POST", body: JSON.stringify({ phone }) }, authHeader());
+  },
+  getTestCall(callId: string) {
+    return request<{
+      success: boolean;
+      callId: string;
+      status: string;
+      duration: string | number | null;
+      endReason: string | null;
+      transcriptPreview: string | null;
+      working: boolean;
+      finished: boolean;
+    }>(`/api/doctor/synthflow/test-call/${encodeURIComponent(callId)}`, { method: "GET" }, authHeader());
+  },
 };
 
 export const appointmentsApi = {
@@ -1350,6 +1419,20 @@ export const doctorAppointmentsApi = {
       authHeader(),
     );
   },
+  reschedule(appointmentId: string, slotId: string) {
+    return request<{ success: boolean; appointment: ApiAppointment; message?: string }>(
+      `/api/doctor/appointments/${appointmentId}/reschedule`,
+      { method: "POST", body: JSON.stringify({ slotId }) },
+      authHeader(),
+    );
+  },
+  delete(appointmentId: string) {
+    return request<{
+      success: boolean;
+      deleted: { id: string; reference: string };
+      message?: string;
+    }>(`/api/doctor/appointments/${appointmentId}`, { method: "DELETE" }, authHeader());
+  },
   scheduleFollowUp(
     appointmentId: string,
     body: { slotId: string; reason?: string; mode?: ApiAppointment["mode"] },
@@ -1357,6 +1440,32 @@ export const doctorAppointmentsApi = {
     return request<{ success: boolean; appointment: ApiAppointment; message?: string }>(
       `/api/doctor/appointments/${appointmentId}/follow-up`,
       { method: "POST", body: JSON.stringify(body) },
+      authHeader(),
+    );
+  },
+  previewInvoice(appointmentId: string) {
+    return request<{
+      success: boolean;
+      preview: {
+        appointmentId: string;
+        reference: string;
+        patientName: string;
+        patientPhone: string;
+        doctorName: string;
+        whenLabel: string;
+        reason: string;
+        clinic: string;
+        feeLabel: string;
+        amountCents: number;
+        amountLabel: string;
+        currency: string;
+        alreadyPaid: boolean;
+        invoiceStatus: ApiAppointmentInvoice["status"] | null;
+        existingPaymentUrl: string;
+      };
+    }>(
+      `/api/doctor/appointments/${appointmentId}/invoice/preview`,
+      { method: "GET" },
       authHeader(),
     );
   },
@@ -1497,6 +1606,8 @@ export type ApiDoctorNotification = {
   detail: string;
   time: string;
   kind: "new" | "changed" | "cancelled";
+  /** booking | cancellation | reschedule | report */
+  eventType?: string;
   unread: boolean;
 };
 
@@ -1519,6 +1630,13 @@ export const doctorNotificationsApi = {
   markAllRead() {
     return request<{ success: boolean; marked: number }>(
       "/api/doctor/notifications/read",
+      { method: "POST", body: "{}" },
+      authHeader(),
+    );
+  },
+  markOneRead(id: string) {
+    return request<{ success: boolean; marked: number; id: string }>(
+      `/api/doctor/notifications/${encodeURIComponent(id)}/read`,
       { method: "POST", body: "{}" },
       authHeader(),
     );

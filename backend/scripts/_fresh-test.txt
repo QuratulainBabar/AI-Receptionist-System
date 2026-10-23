@@ -1,0 +1,65 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+preflight_outbound [
+  {
+    id: 'b05f8ab5-c7d8-48f0-bbf2-387cae58684f',
+    name: 'Qubetech AI Receptionist Clinic Outbound Test',
+    phone: '+14244849053',
+    attached: [ [Object] ]
+  },
+  {
+    id: 'bf9557d6-f636-41ca-afa4-d2f0a78b46db',
+    name: 'Clinic Test Call Probe (temp)',
+    phone: '+14244849053',
+    attached: [ [Object] ]
+  },
+  {
+    id: '0e9fdbe9-8eba-483e-933d-e772953e89c5',
+    name: 'Ace Customer Call Center Agent',
+    phone: '+16402244749',
+    attached: [ [Object] ]
+  }
+]
+starting_test_call +923708321774
+[synthflow] Cleared clinic number from competing outbound agent bf9557d6-f636-41ca-afa4-d2f0a78b46db (Clinic Test Call Probe (temp))
+[synthflow] Outbound test agent ready b05f8ab5-c7d8-48f0-bbf2-387cae58684f with from_phone +14244849053
+[synthflow] Doctor test call ΓåÆ +923708321774 from +14244849053 (outbound agent b05f8ab5-c7d8-48f0-bbf2-387cae58684f; inbound ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0)
+[synthflow] Doctor test call accepted call_id=f655b686-cf24-465a-8e7b-aaad223c8d42 raw={"status":"ok","response":{"answer":"","call_id":"f655b686-cf24-465a-8e7b-aaad223c8d42"},"_id":"f655b686-cf24-465a-8e7b-aaad223c8d42","eta":0}
+[synthflow] Doctor test call poll 1: status=in-progress model=b05f8ab5-c7d8-48f0-bbf2-387cae58684f to=+923708321774
+started {
+  "success": true,
+  "callId": "f655b686-cf24-465a-8e7b-aaad223c8d42",
+  "status": "in-progress",
+  "toPhone": "+923708321774",
+  "fromPhone": "+14244849053",
+  "modelId": "b05f8ab5-c7d8-48f0-bbf2-387cae58684f",
+  "inboundModelId": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+  "warning": null,
+  "message": "Calling +923708321774 from +14244849053. Answer to test the receptionist."
+}
+immediate_detail {
+  "callId": "f655b686-cf24-465a-8e7b-aaad223c8d42",
+  "status": "in-progress",
+  "model_id": "b05f8ab5-c7d8-48f0-bbf2-387cae58684f",
+  "type_of_call": "outbound",
+  "name": "Doctor clinic test",
+  "to": "+923708321774",
+  "from": null,
+  "error_message": ""
+}
+poll_1 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_2 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_3 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_4 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_5 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_6 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_7 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_8 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_9 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}
+poll_10 {"success":true,"callId":"f655b686-cf24-465a-8e7b-aaad223c8d42","status":"in-progress","duration":0,"endReason":null,"transcriptPreview":null,"working":true,"finished":false}

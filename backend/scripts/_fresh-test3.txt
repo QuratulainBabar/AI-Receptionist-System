@@ -1,0 +1,33 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+preflight_outbound [
+  {
+    id: 'b05f8ab5-c7d8-48f0-bbf2-387cae58684f',
+    name: 'Qubetech AI Receptionist Clinic Outbound Test',
+    phone: '+14244849053',
+    attached: [ [Object] ]
+  },
+  {
+    id: '0e9fdbe9-8eba-483e-933d-e772953e89c5',
+    name: 'Ace Customer Call Center Agent',
+    phone: '+16402244749',
+    attached: [ [Object] ]
+  }
+]
+starting_test_call +923708321774
+[synthflow] Outbound test agent ready b05f8ab5-c7d8-48f0-bbf2-387cae58684f with from_phone +14244849053
+[synthflow] Doctor test call ΓåÆ +923708321774 from +14244849053 (outbound agent b05f8ab5-c7d8-48f0-bbf2-387cae58684f; inbound ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0)
+[synthflow] Doctor test call accepted call_id=79844e01-d2ca-4da7-a815-096f733db980 raw={"status":"ok","response":{"answer":"","call_id":"79844e01-d2ca-4da7-a815-096f733db980"},"_id":"79844e01-d2ca-4da7-a815-096f733db980","eta":0}
+[synthflow] Doctor test call poll 1: status=paused model=b05f8ab5-c7d8-48f0-bbf2-387cae58684f to=+923708321774
+[synthflow] Doctor test call poll 2: status=paused model=b05f8ab5-c7d8-48f0-bbf2-387cae58684f to=+923708321774
+[synthflow] Doctor test call poll 3: status=paused model=b05f8ab5-c7d8-48f0-bbf2-387cae58684f to=+923708321774
+[synthflow] Doctor test call poll 4: status=paused model=b05f8ab5-c7d8-48f0-bbf2-387cae58684f to=+923708321774
+FAILED Synthflow accepted the call (79844e01-d2ca-4da7-a815-096f733db980) but it never started ringing (status 
+"paused"). Usually this means another outbound agent still shares +14244849053, or a prior dial is still live. Wait 
+~60s and try once more.

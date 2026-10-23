@@ -1,7 +1,7 @@
 import type { Appointment, AppointmentMode, AppointmentStatus, Prisma, User } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { AppError } from "../utils/AppError.js";
-import { normalizePhone } from "../utils/phone.js";
+import { normalizePhone, phonesMatch } from "../utils/phone.js";
 import { findPatientIdsByPhone } from "./patient-phone.service.js";
 import { createMessagesForAppointment } from "./messages.service.js";
 import { cancelPendingReminders, scheduleAppointmentReminders } from "./appointment-reminders.service.js";
@@ -21,6 +21,7 @@ import {
   logAppointmentRescheduledForDoctor,
 } from "./notifications.service.js";
 
+/** Only these statuses can block a new booking. COMPLETED / CANCELLED never block. */
 const ACTIVE_BOOKING_STATUSES: AppointmentStatus[] = ["PENDING", "CONFIRMED"];
 
 /** A voice hold is not a booking until the caller submits the correct OTP. */
@@ -30,6 +31,11 @@ export const excludeUnconfirmedVoiceHold: Prisma.AppointmentWhereInput = {
     otps: { some: { usedAt: null } },
   },
 };
+
+/** True while the visit window is still upcoming or in progress. */
+function appointmentWindowOpen(row: { startsAt: Date; durationMinutes: number }) {
+  return row.startsAt.getTime() + Math.max(1, row.durationMinutes) * 60_000 > Date.now();
+}
 
 export type PublicAppointmentRecordRequest = {
   status: string;
@@ -142,7 +148,8 @@ export type ActiveAppointmentForMobile = {
 
 /**
  * Find a Pending/Confirmed appointment for this mobile (and optional patient id).
- * Completed/Cancelled are ignored.
+ * COMPLETED and CANCELLED never block. Past visit windows (start + duration elapsed)
+ * also do not block, even if status was left PENDING/CONFIRMED.
  */
 export async function findActiveAppointmentForMobile(input: {
   phone?: string;
@@ -168,24 +175,75 @@ export async function findActiveAppointmentForMobile(input: {
     }
   }
 
-  if (patientIds.size === 0) return null;
+  if (patientIds.size === 0 && !phone) return null;
 
   await releaseExpiredOtpHolds();
 
-  // Voice OTP holds (PENDING) are not bookings until verified. When ignoring them,
-  // only a CONFIRMED appointment blocks — including stuck PENDING rows with used OTPs.
-  const active = await prisma.appointment.findFirst({
-    where: {
-      patientId: { in: [...patientIds] },
-      ...(input.ignoreOpenOtpHolds === false
-        ? { status: { in: ACTIVE_BOOKING_STATUSES } }
-        : { status: "CONFIRMED" }),
-    },
-    include: { doctorUser: true },
-    orderBy: { startsAt: "asc" },
-  });
+  // Active = PENDING or CONFIRMED only. Completed/Cancelled are never queried.
+  // When ignoreOpenOtpHolds is true (voice), skip in-progress OTP holds
+  // (PENDING with an unused OTP) so the current caller can finish verification.
+  const statusFilter: Prisma.AppointmentWhereInput =
+    input.ignoreOpenOtpHolds === false
+      ? { status: { in: ACTIVE_BOOKING_STATUSES } }
+      : {
+          status: { in: ACTIVE_BOOKING_STATUSES },
+          ...excludeUnconfirmedVoiceHold,
+        };
 
-  if (!active) return null;
+  type ActiveRow = {
+    id: string;
+    reference: string;
+    status: AppointmentStatus;
+    startsAt: Date;
+    durationMinutes: number;
+    patientId: string;
+    bookingPhone: string;
+    doctorUser: { fullName: string };
+  };
+
+  const candidates: ActiveRow[] = [];
+
+  if (patientIds.size > 0) {
+    const byPatient = await prisma.appointment.findMany({
+      where: {
+        AND: [{ patientId: { in: [...patientIds] } }, statusFilter],
+      },
+      include: { doctorUser: true },
+      orderBy: { startsAt: "asc" },
+      take: 50,
+    });
+    candidates.push(...byPatient);
+  }
+
+  // Also match by bookingPhone — voice bookings may not share medical-history phone yet.
+  if (phone) {
+    const byBookingPhone = await prisma.appointment.findMany({
+      where: {
+        AND: [{ bookingPhone: { not: "" } }, statusFilter],
+      },
+      include: { doctorUser: true },
+      orderBy: { startsAt: "asc" },
+      take: 200,
+    });
+    for (const row of byBookingPhone) {
+      if (!phonesMatch(row.bookingPhone, phone)) continue;
+      if (candidates.some((c) => c.id === row.id)) continue;
+      candidates.push(row);
+    }
+  }
+
+  const active = candidates
+    .filter((row) => appointmentWindowOpen(row))
+    .sort((a, b) => a.startsAt.getTime() - b.startsAt.getTime())[0];
+
+  if (!active) {
+    if (candidates.length > 0) {
+      console.log(
+        `[appointments] Ignoring ${candidates.length} past PENDING/CONFIRMED visit(s) for phone=${phone || "(none)"} — window ended, not blocking.`,
+      );
+    }
+    return null;
+  }
 
   const status = toPublicStatus(active.status);
   const date = formatDateLabel(active.startsAt);
@@ -200,7 +258,8 @@ export async function findActiveAppointmentForMobile(input: {
     time,
     patientId: active.patientId,
     spokenSummary,
-    blockMessage: `You already have an active appointment (${spokenSummary}). Please complete or cancel it before booking another one.`,
+    blockMessage:
+      "It looks like you already have an active appointment associated with this number. Please complete your existing appointment before booking another one.",
   };
 }
 
@@ -410,6 +469,8 @@ export async function createAppointment(input: {
     await logAppointmentBooked(appointment);
     await logAppointmentBookedForDoctor(appointment);
   }
+  // Voice OTP hold (PENDING): do NOT notify the doctor yet. Notification fires only
+  // from confirmHeldAppointment after verify_booking_otp → appointment_confirmed.
 
   return toPublicAppointment(appointment);
 }
@@ -560,8 +621,10 @@ export async function listAppointmentsForDoctor(doctorUserId: string) {
 
   await syncDoctorAppointmentInvoices(doctorUserId);
 
+  // Include PENDING voice OTP holds so doctors see bookings awaiting verification
+  // (and so Notifications / Pending tabs match what the phone agent just created).
   const rows = await prisma.appointment.findMany({
-    where: { AND: [{ doctorUserId }, excludeUnconfirmedVoiceHold] },
+    where: { doctorUserId },
     include: appointmentInclude,
     orderBy: { startsAt: "asc" },
   });
@@ -620,7 +683,8 @@ async function updateAppointmentStatus(
   }
 
   const updated = await prisma.$transaction(async (tx) => {
-    if (nextStatus === "CANCELLED") {
+    // Cancelled and completed visits must not keep the calendar slot booked.
+    if (nextStatus === "CANCELLED" || nextStatus === "COMPLETED") {
       if (existing.slotId) {
         await tx.availabilitySlot.update({
           where: { id: existing.slotId },
@@ -678,12 +742,19 @@ export async function updateAppointmentStatusForAdmin(
   return updateAppointmentStatus(appointmentId, statusInput);
 }
 
-export async function rescheduleAppointmentForAdmin(appointmentId: string, slotId: string) {
+async function rescheduleAppointment(
+  appointmentId: string,
+  slotId: string,
+  options?: { doctorUserId?: string },
+) {
   const existing = await prisma.appointment.findUnique({
     where: { id: appointmentId },
     include: { patient: true, doctorUser: true },
   });
   if (!existing) {
+    throw new AppError(404, "Appointment not found");
+  }
+  if (options?.doctorUserId && existing.doctorUserId !== options.doctorUserId) {
     throw new AppError(404, "Appointment not found");
   }
   if (existing.status === "CANCELLED" || existing.status === "COMPLETED") {
@@ -742,6 +813,50 @@ export async function rescheduleAppointmentForAdmin(appointmentId: string, slotI
   await scheduleAppointmentReminders(updated.id);
 
   return toPublicAppointment(updated);
+}
+
+export async function rescheduleAppointmentForAdmin(appointmentId: string, slotId: string) {
+  return rescheduleAppointment(appointmentId, slotId);
+}
+
+export async function rescheduleAppointmentForDoctor(
+  appointmentId: string,
+  doctorUserId: string,
+  slotId: string,
+) {
+  return rescheduleAppointment(appointmentId, slotId, { doctorUserId });
+}
+
+/** Permanently remove an appointment and free its calendar slot. */
+export async function deleteAppointmentForDoctor(appointmentId: string, doctorUserId: string) {
+  const existing = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+  });
+  if (!existing || existing.doctorUserId !== doctorUserId) {
+    throw new AppError(404, "Appointment not found");
+  }
+
+  const reference = existing.reference;
+  const slotId = existing.slotId;
+
+  await cancelPendingReminders(existing.id);
+
+  await prisma.$transaction(async (tx) => {
+    // Detach first — AvailabilitySlot relation uses onDelete: Restrict.
+    if (slotId) {
+      await tx.appointment.update({
+        where: { id: existing.id },
+        data: { slotId: null },
+      });
+      await tx.availabilitySlot.update({
+        where: { id: slotId },
+        data: { isBooked: false },
+      });
+    }
+    await tx.appointment.delete({ where: { id: existing.id } });
+  });
+
+  return { id: appointmentId, reference };
 }
 
 export async function listOpenSlotsForDoctorAdmin(doctorUserId: string) {

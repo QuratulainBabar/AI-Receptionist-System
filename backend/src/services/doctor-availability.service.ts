@@ -94,7 +94,8 @@ function parseStartsAt(value: string) {
 }
 
 function parseClock(value: string) {
-  const match = /^(\d{1,2}):(\d{2})$/.exec(value.trim());
+  // Browsers may send HH:mm or HH:mm:ss from <input type="time">.
+  const match = /^(\d{1,2}):(\d{2})(?::\d{2}(?:\.\d+)?)?$/.exec(value.trim());
   if (!match) return null;
   const hour = Number(match[1]);
   const minute = Number(match[2]);
@@ -268,6 +269,20 @@ export async function createSlotsFromRangeForDoctor(
 
   const now = new Date();
   const zone = clinicTimeZone();
+  const [year, month, day] = date.split("-").map(Number);
+  const windowEndUtc = wallTimeToUtc(
+    { year: year!, month: month!, day: day!, hour: end.hour, minute: end.minute },
+    zone,
+  );
+  // Past days / fully-elapsed windows are a no-op (weekly regen must not 400).
+  if (windowEndUtc.getTime() <= now.getTime()) {
+    return {
+      created: 0,
+      considered: 0,
+      durationMinutes: duration,
+    };
+  }
+
   const candidates = expandSessionsToStarts(
     date,
     [{ startTime: input.startTime, endTime: input.endTime }],
@@ -276,7 +291,10 @@ export async function createSlotsFromRangeForDoctor(
     zone,
   );
   if (!candidates.length) {
-    throw new AppError(400, "No future slots fall in that time range.");
+    throw new AppError(
+      400,
+      `No future ${duration}-minute slots fit between ${input.startTime} and ${input.endTime}. Pick a later start time, or extend the end time.`,
+    );
   }
 
   const result = await prisma.availabilitySlot.createMany({

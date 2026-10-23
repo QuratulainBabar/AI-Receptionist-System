@@ -1,0 +1,131 @@
+{
+  "agent": {
+    "llm": "synthflow",
+    "stt": "deepgram-nova-3",
+    "recog": "high_accuracy",
+    "patience": "medium",
+    "idle": 90,
+    "voice_speed": 1,
+    "min_words": 3,
+    "noise": "standard",
+    "suppression": 0.2,
+    "actions": 7,
+    "prompt_len": 14236
+  },
+  "calls": [
+    {
+      "id": "633d4481-d426-4153-adc6-9219e0e4b078",
+      "status": "completed",
+      "type": "outbound",
+      "duration": 169,
+      "end": "human_pick_up_cut_off",
+      "transcript": "\nbot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today?  Sorry, could you say that again? \nhuman: I want to book an apartment.\nbot: Which day would you like your appointment? \nhuman: Tomorrow.\nbot: Got it, checking that now.  Tomorrow, the open time is nine o’clock AM. Which time would you like? \nhuman: Nine nine AM.\nbot: So\nhuman: Nine AM.\nbot: Which day would you like your appointment? \nhuman: Tomorrow, nine AM.\nbot: Got it... checking that slot.  Tomorrow, the open time is nine AM. Which time would you like? \nhuman: Nine AM. Nine\nbot: May I have your full name? \nhuman: Could I put in\nbot: Sorry, could you say that again? \nhuman: That's it.\nbot: May I have your full name? \nhuman: A Sunday.\nbot: Which day would you like your appointment? \nhuman: Tomorrow.\nbot: Che\nhuman: at nine AM.\nbot: May I have your full name? \nhuman: A third onion.\nbot: Sorry, could you say that again? \nhuman: Classic.\nbot: May I have your full name? \nhuman: That's\nbot: Sorry, could you say that again? \nhuman: Lemon lemon\nbot: May I have your full name? \nhuman: Extra American.\nbot: Sorry\nhuman: Lemon.\nbot: May I have your full n\nhuman: Good.\nbot: Sorr May I have your full name? \nhuman: Hello.\nbot: May I have your\nhuman: Yeah. But let me try.\nbot: May I have your f\nhuman: A ticket month.\nbot: May I have your full name?  May I have your full name? ",
+      "timeline": null,
+      "executed_action_names": [
+        "check_doctor_availability"
+      ],
+      "latency_hints": {}
+    },
+    {
+      "id": "3157ee6b-f4db-4a4b-bb8d-69f56c7f1748",
+      "status": "completed",
+      "type": "outbound",
+      "duration": 176,
+      "end": "human_goodbye",
+      "transcript": "\nbot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today?  Sorry, could you say that again? \nhuman: I want to book an appointment.\nbot: Which day would you like your appointment? \nhuman: This one is available. And this\nbot: Got it... checking now.  Today, the open times are one o’clock PM, one-thirty PM, two o’clock PM, and two-thirty PM. Which time would you like? \nhuman: One thirty. One thirty PM. Hello?\nbot: May I have your full name? \nhuman: Astead... a seventeen.\nbot: What is the reason for your visit today?  What phone number should we use for this booking? \nhuman: Yes, please. two zero one four seven nine nine two five.\nbot: Thank you. Let me check whether there is already an active appointment associated with this number.  Got it... one moment.  Just a second while I finish that booking.  Please say the six-digit verification code. \nhuman: One two three four five six.\nbot: One moment...  The code is correct. Your appointment is confirmed. Reference APT- 7792 with Dr. Daniel Osei on Fri, Oct 23, 2026 at 1: 30 PM. Would you like to share your medical records or any relevant files with the doctor?  Are you still there? \nhuman: Yes. Yes. I want to share my medical report.\nbot: Got it... sending the upload option now.  Just a second while I send that over.  I texted the secure upload link to your booking mobile. \nhuman: Okay. Thank you.\nbot: You’re welcome. ",
+      "timeline": null,
+      "executed_action_names": [
+        "check_doctor_availability",
+        "check_existing_appointment",
+        "book_appointment",
+        "verify_booking_otp",
+        "offer_records_upload",
+        "send_records_upload_link"
+      ],
+      "latency_hints": {}
+    },
+    {
+      "id": "724f7e83-1a0c-489f-94f9-e4c950e34a52",
+      "status": "hangup_on_voicemail",
+      "type": "outbound",
+      "duration": 67,
+      "end": "voicemail",
+      "transcript": "\nbot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today?  Hello... are you still there? ",
+      "timeline": null,
+      "executed_action_names": [
+        "extract_info_email",
+        "extract_info_slot_id",
+        "extract_info_phone",
+        "extract_info_reason",
+        "extract_info_doctor_name",
+        "extract_info_patient_name",
+        "extract_info_doctor_id"
+      ],
+      "latency_hints": {}
+    },
+    {
+      "id": "2867b341-0372-40da-9710-3688528cb60c",
+      "status": "completed",
+      "type": "inbound",
+      "duration": 37,
+      "end": "human_pick_up_cut_off",
+      "transcript": "\nbot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today? \nhuman: I want to defend abundance. I want to defend abundance. Hello. Hello.",
+      "timeline": null,
+      "executed_action_names": [
+        "extract_info_patient_name",
+        "extract_info_phone",
+        "extract_info_doctor_id",
+        "extract_info_doctor_name",
+        "extract_info_slot_id",
+        "extract_info_reason",
+        "extract_info_email",
+        "extract_info_specialty",
+        "extract_info_patient_name_1",
+        "extract_info_phone_1",
+        "extract_info_doctor_id_1",
+        "extract_info_patient_name_2",
+        "extract_info_phone_2",
+        "extract_info_doctor_id_2",
+        "extract_info_doctor_name_1",
+        "extract_info_slot_id_1",
+        "extract_info_reason_1",
+        "extract_info_email_1",
+        "extract_info_patient_name_3",
+        "extract_info_phone_3",
+        "extract_info_doctor_id_3",
+        "extract_info_doctor_name_2",
+        "extract_info_slot_id_2",
+        "extract_info_reason_2",
+        "extract_info_email_2",
+        "extract_info_patient_name_4",
+        "extract_info_phone_4",
+        "extract_info_doctor_id_4",
+        "extract_info_doctor_name_3",
+        "extract_info_slot_id_3"
+      ],
+      "latency_hints": {}
+    },
+    {
+      "id": "8fcdba6c-9609-433a-9c34-e2dcbe276ccf",
+      "status": "paused",
+      "type": null,
+      "duration": 0,
+      "end": null,
+      "transcript": "",
+      "timeline": null,
+      "executed_action_names": [],
+      "latency_hints": {}
+    },
+    {
+      "id": "3b00cc05-942a-407f-a4cd-37cd2368ef75",
+      "status": "paused",
+      "type": null,
+      "duration": 0,
+      "end": null,
+      "transcript": "",
+      "timeline": null,
+      "executed_action_names": [],
+      "latency_hints": {}
+    }
+  ]
+}

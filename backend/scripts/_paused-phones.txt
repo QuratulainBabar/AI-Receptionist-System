@@ -1,0 +1,44 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+{
+  "id": "bfab7ba7-efc0-4fd5-b648-30f444c57de2",
+  "status": "paused",
+  "name": null,
+  "model_id": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+  "phone_number_to": null,
+  "phone_number_from": null,
+  "start_time": "1792756497132",
+  "campaign_type": null,
+  "error_message": "",
+  "type_of_call": null
+}
+{
+  "id": "dd944167-1719-4016-9f6e-b64424b6a285",
+  "status": "paused",
+  "name": null,
+  "model_id": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+  "phone_number_to": null,
+  "phone_number_from": null,
+  "start_time": "1792756433185",
+  "campaign_type": null,
+  "error_message": "",
+  "type_of_call": null
+}
+{
+  "id": "add9ebf8-b8f0-4d89-ae8d-9fa3c0a434d5",
+  "status": "paused",
+  "name": null,
+  "model_id": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+  "phone_number_to": null,
+  "phone_number_from": null,
+  "start_time": "1792756084912",
+  "campaign_type": null,
+  "error_message": "",
+  "type_of_call": null
+}

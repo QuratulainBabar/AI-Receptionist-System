@@ -1,11 +1,21 @@
 import { Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { FollowUpDialog } from "@/components/doctor/FollowUpDialog";
-import { Badge, Button, EmptyNote, PageHeader, Panel, SectionLabel } from "@/components/ui/primitives";
+import {
+  Badge,
+  Button,
+  EmptyNote,
+  Field,
+  PageHeader,
+  Panel,
+  SectionLabel,
+} from "@/components/ui/primitives";
 import {
   doctorAppointmentsApi,
+  doctorAvailabilityApi,
   formatApiError,
   type ApiAppointment,
+  type ApiDoctorSlot,
 } from "@/lib/api";
 import { initials, statusTone } from "@/lib/mock-data";
 import {
@@ -21,6 +31,8 @@ import {
   MoreHorizontal,
   Check,
   X,
+  Pencil,
+  Trash2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -170,6 +182,7 @@ export function DoctorAppointmentsView({ view }: { view: AppointmentView }) {
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [followUpFor, setFollowUpFor] = useState<ApiAppointment | null>(null);
+  const [editFor, setEditFor] = useState<ApiAppointment | null>(null);
   const [searchQ, setSearchQ] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("All Types");
   const [statusFilter, setStatusFilter] = useState<string>("All Status");
@@ -248,6 +261,25 @@ export function DoctorAppointmentsView({ view }: { view: AppointmentView }) {
       if (status === "completed") setFollowUpFor(result.appointment);
     } catch (err) {
       setError(formatApiError(err, "Unable to update appointment status."));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function deleteAppointment(appointment: ApiAppointment) {
+    const ok = window.confirm(
+      `Delete appointment ${appointment.reference} for ${appointment.patientName}? This cannot be undone.`,
+    );
+    if (!ok) return;
+    setBusyId(appointment.id);
+    setError("");
+    setMessage("");
+    try {
+      const result = await doctorAppointmentsApi.delete(appointment.id);
+      setAppointments((current) => current.filter((row) => row.id !== appointment.id));
+      setMessage(result.message || `Appointment ${appointment.reference} deleted.`);
+    } catch (err) {
+      setError(formatApiError(err, "Unable to delete appointment."));
     } finally {
       setBusyId(null);
     }
@@ -439,7 +471,7 @@ export function DoctorAppointmentsView({ view }: { view: AppointmentView }) {
                         )}
                       </td>
                       <td className="px-5 py-4 align-middle">
-                        <div className="flex flex-wrap items-center justify-end gap-2">
+                        <div className="flex flex-wrap items-center justify-end gap-1.5">
                           {view === "pending" || (view === "new" && apt.status === "pending") ? (
                             <>
                               <Button
@@ -493,6 +525,28 @@ export function DoctorAppointmentsView({ view }: { view: AppointmentView }) {
                               onScheduleNext={() => setFollowUpFor(apt)}
                             />
                           ) : null}
+                          {apt.status !== "completed" && apt.status !== "cancelled" ? (
+                            <button
+                              type="button"
+                              title="Edit / reschedule"
+                              aria-label="Edit appointment"
+                              disabled={busyId === apt.id}
+                              onClick={() => setEditFor(apt)}
+                              className="grid size-9 place-items-center rounded-lg border border-sky-200 bg-white text-blue-700 transition-all hover:bg-sky-50 disabled:opacity-40"
+                            >
+                              <Pencil className="size-3.5" />
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            title="Delete appointment"
+                            aria-label="Delete appointment"
+                            disabled={busyId === apt.id}
+                            onClick={() => void deleteAppointment(apt)}
+                            className="grid size-9 place-items-center rounded-lg border border-rose-200 bg-white text-rose-600 transition-all hover:bg-rose-50 disabled:opacity-40"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
                           <Link to="/doctor/patients/$patientId" params={{ patientId: apt.patientId }}>
                             <Button variant="outline" size="sm">
                               View
@@ -548,7 +602,164 @@ export function DoctorAppointmentsView({ view }: { view: AppointmentView }) {
           }}
         />
       ) : null}
+
+      {editFor ? (
+        <RescheduleDialog
+          appointment={editFor}
+          busy={busyId === editFor.id}
+          onClose={() => setEditFor(null)}
+          onSaved={(appointment, note) => {
+            setAppointments((current) =>
+              current.map((row) => (row.id === appointment.id ? appointment : row)),
+            );
+            setMessage(note);
+            setEditFor(null);
+          }}
+          onError={(note) => setError(note)}
+          setBusy={(busy) => setBusyId(busy ? editFor.id : null)}
+        />
+      ) : null}
     </>
+  );
+}
+
+function RescheduleDialog({
+  appointment,
+  busy,
+  onClose,
+  onSaved,
+  onError,
+  setBusy,
+}: {
+  appointment: ApiAppointment;
+  busy: boolean;
+  onClose: () => void;
+  onSaved: (appointment: ApiAppointment, message: string) => void;
+  onError: (message: string) => void;
+  setBusy: (busy: boolean) => void;
+}) {
+  const [slots, setSlots] = useState<ApiDoctorSlot[]>([]);
+  const [date, setDate] = useState("");
+  const [slotId, setSlotId] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [localError, setLocalError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void doctorAvailabilityApi
+      .list({ includeBooked: false })
+      .then((result) => {
+        if (cancelled) return;
+        const open = result.slots.filter(
+          (slot) => !slot.isBooked && new Date(slot.startsAt).getTime() > Date.now(),
+        );
+        setSlots(open);
+        const firstDate = open[0]?.date ?? "";
+        setDate(firstDate);
+        setSlotId(open.find((slot) => slot.date === firstDate)?.id ?? "");
+      })
+      .catch((err) => {
+        if (!cancelled) setLocalError(formatApiError(err, "Unable to load open slots."));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [appointment.id]);
+
+  const dates = useMemo(() => [...new Set(slots.map((slot) => slot.date))], [slots]);
+  const times = useMemo(() => slots.filter((slot) => slot.date === date), [slots, date]);
+
+  async function submit() {
+    if (!slotId) {
+      setLocalError("Select a new date and time.");
+      return;
+    }
+    setBusy(true);
+    setLocalError("");
+    try {
+      const result = await doctorAppointmentsApi.reschedule(appointment.id, slotId);
+      onSaved(result.appointment, result.message || "Appointment rescheduled.");
+    } catch (err) {
+      const note = formatApiError(err, "Unable to reschedule appointment.");
+      setLocalError(note);
+      onError(note);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-foreground/35 p-3 sm:p-4">
+      <Panel className="my-4 w-full max-w-lg space-y-4 p-4 sm:my-0 sm:p-5">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <SectionLabel>Edit appointment</SectionLabel>
+            <p className="mt-1 text-sm font-semibold break-words">
+              {appointment.reference} · {appointment.patientName}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Current: {appointment.date} · {appointment.time}
+            </p>
+          </div>
+          <Button variant="ghost" size="sm" onClick={onClose}>
+            Close
+          </Button>
+        </div>
+
+        {localError ? <p className="text-sm text-destructive">{localError}</p> : null}
+
+        {loading ? (
+          <EmptyNote>Loading open times…</EmptyNote>
+        ) : slots.length === 0 ? (
+          <EmptyNote>No open times available. Add availability first, then reschedule.</EmptyNote>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="New date">
+              <select
+                className="h-11 w-full rounded-xl border border-transparent bg-input-fill px-3.5 text-sm"
+                value={date}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setDate(next);
+                  setSlotId(slots.find((slot) => slot.date === next)?.id ?? "");
+                }}
+              >
+                {dates.map((d) => (
+                  <option key={d} value={d}>
+                    {d}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="New time">
+              <select
+                className="h-11 w-full rounded-xl border border-transparent bg-input-fill px-3.5 text-sm"
+                value={slotId}
+                onChange={(e) => setSlotId(e.target.value)}
+              >
+                {times.map((slot) => (
+                  <option key={slot.id} value={slot.id}>
+                    {slot.time}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+        )}
+
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => void submit()} disabled={!slotId || loading || busy}>
+            {busy ? "Saving…" : "Save changes"}
+          </Button>
+        </div>
+      </Panel>
+    </div>
   );
 }
 

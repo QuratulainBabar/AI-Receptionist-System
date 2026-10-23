@@ -83,7 +83,10 @@ function DoctorNotifications() {
       ) : (
         <div className="space-y-3">
           {notifications.map((note) => (
-            <Panel key={note.id} className="p-4">
+            <Panel
+              key={note.id}
+              className={`p-4 ${note.unread ? "ring-1 ring-primary/20" : ""}`}
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <SectionLabel>{kindLabel[note.kind]}</SectionLabel>
@@ -91,7 +94,14 @@ function DoctorNotifications() {
                   <p className="mt-1 text-sm text-muted-foreground">{note.detail}</p>
                   <p className="mt-2 font-mono text-[10px] text-muted-foreground">{note.time}</p>
                 </div>
-                <Badge tone={kindTone[note.kind]}>{kindLabel[note.kind]}</Badge>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <Badge tone={kindTone[note.kind]}>{kindLabel[note.kind]}</Badge>
+                  {note.unread ? (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-primary">
+                      Unread
+                    </span>
+                  ) : null}
+                </div>
               </div>
             </Panel>
           ))}

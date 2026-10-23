@@ -1,0 +1,117 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+{
+  "agent": {
+    "llm": "synthflow",
+    "stt": "deepgram-nova-3",
+    "recog": "high_accuracy",
+    "patience": "medium",
+    "voice_speed": 1,
+    "actions": 7,
+    "prompt_len": 14236
+  },
+  "recent": [
+    {
+      "id": "633d4481-d426-4153-adc6-9219e0e4b078",
+      "status": "completed",
+      "type": "outbound",
+      "duration": 169,
+      "preview": " | bot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today?  Sorry, could you say that again?  | human: I want to book an apartment. | bot: Which day would you like your appointment?  | human: Tomorrow. | bot: Got it, checking that now.  Tomorrow, the open time is",
+      "actions": [
+        "check_doctor_availability"
+      ]
+    },
+    {
+      "id": "3157ee6b-f4db-4a4b-bb8d-69f56c7f1748",
+      "status": "completed",
+      "type": "outbound",
+      "duration": 176,
+      "preview": " | bot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today?  Sorry, could you say that again?  | human: I want to book an appointment. | bot: Which day would you like your appointment?  | human: This one is available. And this | bot: Got it... checking now.  Today",
+      "actions": [
+        "check_doctor_availability",
+        "check_existing_appointment",
+        "book_appointment",
+        "verify_booking_otp",
+        "offer_records_upload",
+        "send_records_upload_link"
+      ]
+    },
+    {
+      "id": "724f7e83-1a0c-489f-94f9-e4c950e34a52",
+      "status": "hangup_on_voicemail",
+      "type": "outbound",
+      "duration": 67,
+      "preview": " | bot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today?  Hello... are you still there? ",
+      "actions": [
+        "extract_info_email",
+        "extract_info_slot_id",
+        "extract_info_phone",
+        "extract_info_reason",
+        "extract_info_doctor_name",
+        "extract_info_patient_name",
+        "extract_info_doctor_id"
+      ]
+    },
+    {
+      "id": "2867b341-0372-40da-9710-3688528cb60c",
+      "status": "completed",
+      "type": "inbound",
+      "duration": 37,
+      "preview": " | bot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today?  | human: I want to defend abundance. I want to defend abundance. Hello. Hello.",
+      "actions": [
+        "extract_info_patient_name",
+        "extract_info_phone",
+        "extract_info_doctor_id",
+        "extract_info_doctor_name",
+        "extract_info_slot_id",
+        "extract_info_reason",
+        "extract_info_email",
+        "extract_info_specialty",
+        "extract_info_patient_name_1",
+        "extract_info_phone_1",
+        "extract_info_doctor_id_1",
+        "extract_info_patient_name_2",
+        "extract_info_phone_2",
+        "extract_info_doctor_id_2",
+        "extract_info_doctor_name_1",
+        "extract_info_slot_id_1",
+        "extract_info_reason_1",
+        "extract_info_email_1",
+        "extract_info_patient_name_3",
+        "extract_info_phone_3",
+        "extract_info_doctor_id_3",
+        "extract_info_doctor_name_2",
+        "extract_info_slot_id_2",
+        "extract_info_reason_2",
+        "extract_info_email_2",
+        "extract_info_patient_name_4",
+        "extract_info_phone_4",
+        "extract_info_doctor_id_4",
+        "extract_info_doctor_name_3",
+        "extract_info_slot_id_3"
+      ]
+    },
+    {
+      "id": "8fcdba6c-9609-433a-9c34-e2dcbe276ccf",
+      "status": "paused",
+      "type": null,
+      "duration": 0,
+      "preview": "",
+      "actions": []
+    },
+    {
+      "id": "3b00cc05-942a-407f-a4cd-37cd2368ef75",
+      "status": "paused",
+      "type": null,
+      "duration": 0,
+      "preview": "",
+      "actions": []
+    }
+  ]
+}

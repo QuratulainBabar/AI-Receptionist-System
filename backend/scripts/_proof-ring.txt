@@ -1,0 +1,24 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Error: Synthflow GET /calls/f655b686-cf24-465a-8e7b-aaad223c8d42 failed (404): Agent not found: 
+b05f8ab5-c7d8-48f0-bbf2-387cae58684f
+    at synthflowRequest (E:\AI-Receptionist-System\backend\src\services\synthflow.client.ts:61:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (E:\AI-Receptionist-System\backend\scripts\check-call.ts:7:13) {
+  status: 404,
+  payload: {
+    detail: {
+      status: 'error',
+      description: 'Agent not found: b05f8ab5-c7d8-48f0-bbf2-387cae58684f',
+      timestamp: '2026-10-23T12:19:48.419129+00:00',
+      request_id: 'e175d2f1538f4f14a096802ff2144615',
+      category: 'important'
+    }
+  }
+}

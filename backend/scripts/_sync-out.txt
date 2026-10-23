@@ -1,0 +1,42 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+Syncing inbound agent (promptOnly=false)...
+[synthflow] Syncing clinic doctor ΓåÆ Dr. Daniel Osei (cmu16ksa00001vgis6s1oq1m9)
+[synthflow] Open slots pushed to prompt ΓåÆ Fri, Oct 23, 1:00 PM [slot:cmvj5uo72000bvge4whwyup52]; Fri, Oct 23, 1:30 PM [slot:cmvj5uo72000cvge48ee8n6vw]; Fri, Oct 23, 2:00 PM [slot:cmvj5uo72000dvge4yhz7rnl0]; Sat, Oct 24, 9:00 AM [slot:cmvj5uo7d000fvge4ye63jw1t]
+[synthflow] Live prompt length ΓåÆ 14236 chars
+[synthflow] Reconciling agent ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0: detaching 1 excess action(s), keeping 7
+[synthflow] Action reconcile ΓåÆ before=8 detached=1 after=7
+{
+  "sync_warning": null,
+  "synthflowAgentId": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+  "actions_count": 7,
+  "action_names": [
+    "book_appointment",
+    "check_doctor_availability",
+    "verify_booking_otp",
+    "offer_records_upload",
+    "check_existing_appointment",
+    "send_booking_otp",
+    "send_records_upload_link"
+  ],
+  "llm": "synthflow",
+  "transcriber_provider": "deepgram-nova-3",
+  "transcriber_speech_recognition": "high_accuracy",
+  "patience_level": "medium",
+  "min_words_to_interrupt": 3,
+  "allowed_idle_time_seconds": 90,
+  "noise_cancellation": "standard",
+  "suppression_level": 0.2,
+  "greeting_message_mode": "agent_static",
+  "prompt_len": 14236,
+  "prompt_has_fast_response": true,
+  "prompt_has_listening_capture": true,
+  "prompt_has_exact_which_day": true,
+  "list_count_check": 7
+}

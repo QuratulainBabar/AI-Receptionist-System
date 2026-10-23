@@ -145,8 +145,19 @@ function normalizeConfig(raw?: ApiAvailabilityConfig | null, weeklyHours?: ApiWe
   return base;
 }
 
+/** Normalize browser time-input values (often HH:mm:ss) to HH:mm. */
+function normalizeClock(value: string) {
+  const match = /^(\d{1,2}):(\d{2})/.exec(String(value || "").trim());
+  if (!match) return "";
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isInteger(hour) || !Number.isInteger(minute) || hour > 23 || minute > 59) return "";
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 function toMinutes(t: string) {
-  const [h, m] = t.split(":").map(Number);
+  const normalized = normalizeClock(t) || t;
+  const [h, m] = normalized.split(":").map(Number);
   return (h || 0) * 60 + (m || 0);
 }
 
@@ -156,7 +167,10 @@ function sessionsOverlap(a: ApiWeeklyHourSession, b: ApiWeeklyHourSession) {
 
 function validateSessions(sessions: ApiWeeklyHourSession[]) {
   for (const s of sessions) {
-    if (s.startTime >= s.endTime) return "Each session end time must be after its start.";
+    const start = normalizeClock(s.startTime);
+    const end = normalizeClock(s.endTime);
+    if (!start || !end) return "Choose valid start and end times.";
+    if (start >= end) return "Each session end time must be after its start.";
   }
   for (let i = 0; i < sessions.length; i += 1) {
     for (let j = i + 1; j < sessions.length; j += 1) {
@@ -196,12 +210,42 @@ function SessionTimeInput({
       <Clock className="pointer-events-none absolute left-3 top-1/2 z-10 size-4 -translate-y-1/2 text-slate-400" />
       <Input
         type="time"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        step={60}
+        value={normalizeClock(value) || value}
+        onChange={(e) => onChange(normalizeClock(e.target.value) || e.target.value)}
         className="min-w-[10.5rem] cursor-pointer pl-10 pr-3 [&::-webkit-calendar-picker-indicator]:absolute [&::-webkit-calendar-picker-indicator]:inset-0 [&::-webkit-calendar-picker-indicator]:h-full [&::-webkit-calendar-picker-indicator]:w-full [&::-webkit-calendar-picker-indicator]:cursor-pointer [&::-webkit-calendar-picker-indicator]:opacity-0"
       />
     </div>
   );
+}
+
+/** Next upcoming half-hour clock in the clinic zone (fallback: device local). */
+function nextHalfHourClock(timeZone?: string) {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: timeZone || undefined,
+    hourCycle: "h23",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).formatToParts(now);
+  let hour = Number(parts.find((p) => p.type === "hour")?.value ?? now.getHours());
+  let minute = Number(parts.find((p) => p.type === "minute")?.value ?? now.getMinutes());
+  if (hour === 24) hour = 0;
+  minute = minute < 30 ? 30 : 0;
+  if (minute === 0) hour = (hour + 1) % 24;
+  // Always leave at least a couple minutes of buffer past "now".
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function addMinutesToClockValue(clock: string, minutes: number) {
+  const normalized = normalizeClock(clock);
+  if (!normalized) return "";
+  const [hStr, mStr] = normalized.split(":");
+  const total = Number(hStr) * 60 + Number(mStr) + minutes;
+  const wrapped = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hour = Math.floor(wrapped / 60);
+  const minute = wrapped % 60;
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function startOfLocalDay(d: Date) {
@@ -309,18 +353,20 @@ function DoctorAvailabilityPage() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [clinicTimeZoneLabel, setClinicTimeZoneLabel] = useState("the clinic US time zone");
+  const [clinicTimeZone, setClinicTimeZone] = useState("America/Los_Angeles");
   const [clinicToday, setClinicToday] = useState("");
 
   const [weekCursor, setWeekCursor] = useState(() => startOfWeekMonday(new Date()));
   const [selectedDate, setSelectedDate] = useState(() => startOfLocalDay(new Date()));
 
-  // "Today's Availability" follows the doctor's device calendar day so the date
-  // rolls forward every local midnight (not stuck on a previous Pacific day).
+  // "Today's Availability" must match clinic calendar day (same as phone agent
+  // check_doctor_availability date=today). Device local date can differ by timezone.
   const [rangeDate, setRangeDate] = useState(() => localDateKey(new Date()));
   const [pinnedTodayKey, setPinnedTodayKey] = useState(() => localDateKey(new Date()));
-  const [dateSessions, setDateSessions] = useState<ApiWeeklyHourSession[]>([
-    { startTime: "10:00", endTime: "10:30" },
-  ]);
+  const [dateSessions, setDateSessions] = useState<ApiWeeklyHourSession[]>(() => {
+    const start = nextHalfHourClock();
+    return [{ startTime: start, endTime: addMinutesToClockValue(start, FIXED_SLOT_DURATION) }];
+  });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editStartsAt, setEditStartsAt] = useState("");
 
@@ -335,6 +381,7 @@ function DoctorAvailabilityPage() {
   async function refreshSlots() {
     const result = await doctorAvailabilityApi.list({ includeBooked: true });
     setSlots(result.slots);
+    if (result.clinicTimeZone) setClinicTimeZone(result.clinicTimeZone);
     if (result.clinicTimeZoneLabel) setClinicTimeZoneLabel(result.clinicTimeZoneLabel);
     if (result.clinicToday) setClinicToday(result.clinicToday);
   }
@@ -345,14 +392,15 @@ function DoctorAvailabilityPage() {
       .then(([slotsResult, profileResult]) => {
         if (cancelled) return;
         setSlots(slotsResult.slots);
+        if (slotsResult.clinicTimeZone) setClinicTimeZone(slotsResult.clinicTimeZone);
         if (slotsResult.clinicTimeZoneLabel) setClinicTimeZoneLabel(slotsResult.clinicTimeZoneLabel);
         if (slotsResult.clinicToday) setClinicToday(slotsResult.clinicToday);
-        // Keep Today's Availability on the device calendar date (auto day rollover).
-        const localToday = localDateKey(new Date());
-        setPinnedTodayKey(localToday);
-        setRangeDate(localToday);
-        setSelectedDate(startOfLocalDay(new Date()));
-        setWeekCursor(startOfWeekMonday(new Date()));
+        // Pin Today's Availability to the clinic calendar day the phone agent uses.
+        const clinicDay = slotsResult.clinicToday || localDateKey(new Date());
+        setPinnedTodayKey(clinicDay);
+        setRangeDate(clinicDay);
+        setSelectedDate(new Date(`${clinicDay}T12:00:00`));
+        setWeekCursor(startOfWeekMonday(new Date(`${clinicDay}T12:00:00`)));
         setConfig(normalizeConfig(profileResult.profile.availabilityConfig, profileResult.profile.weeklyHours));
       })
       .catch((err) => {
@@ -366,27 +414,35 @@ function DoctorAvailabilityPage() {
     };
   }, []);
 
-  // When the local calendar day changes, advance "Today" automatically if the
-  // doctor was still viewing the previous today (or had not picked another day).
+  // When the clinic calendar day rolls forward, advance "Today" if the doctor
+  // was still viewing the previous clinic today (or had not picked another day).
   useEffect(() => {
-    function syncLocalToday() {
-      const next = localDateKey(new Date());
-      setPinnedTodayKey((prevPinned) => {
-        if (prevPinned === next) return prevPinned;
-        setRangeDate((current) => {
-          if (current !== prevPinned) return current;
-          setWeekCursor(startOfWeekMonday(new Date()));
-          return next;
-        });
-        setSelectedDate((current) =>
-          localDateKey(current) === prevPinned ? startOfLocalDay(new Date()) : current,
-        );
-        return next;
-      });
+    function syncClinicToday() {
+      void doctorAvailabilityApi
+        .list({ includeBooked: true })
+        .then((result) => {
+          if (result.clinicToday) setClinicToday(result.clinicToday);
+          if (result.clinicTimeZone) setClinicTimeZone(result.clinicTimeZone);
+          if (result.clinicTimeZoneLabel) setClinicTimeZoneLabel(result.clinicTimeZoneLabel);
+          const next = result.clinicToday || localDateKey(new Date());
+          setPinnedTodayKey((prevPinned) => {
+            if (prevPinned === next) return prevPinned;
+            setRangeDate((current) => {
+              if (current !== prevPinned) return current;
+              setWeekCursor(startOfWeekMonday(new Date(`${next}T12:00:00`)));
+              return next;
+            });
+            setSelectedDate((current) =>
+              localDateKey(current) === prevPinned ? new Date(`${next}T12:00:00`) : current,
+            );
+            return next;
+          });
+        })
+        .catch(() => undefined);
     }
-    syncLocalToday();
-    const timer = window.setInterval(syncLocalToday, 30_000);
-    const onFocus = () => syncLocalToday();
+    syncClinicToday();
+    const timer = window.setInterval(syncClinicToday, 60_000);
+    const onFocus = () => syncClinicToday();
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onFocus);
     return () => {
@@ -458,7 +514,8 @@ function DoctorAvailabilityPage() {
   }
 
   function openTodaySlotsModal() {
-    setDateSessions([{ startTime: "10:00", endTime: "10:30" }]);
+    const start = nextHalfHourClock(clinicTimeZone);
+    setDateSessions([{ startTime: start, endTime: addMinutesToClockValue(start, FIXED_SLOT_DURATION) }]);
     setModalSuccess("");
     setModalError("");
     setTodayModalOpen(true);
@@ -470,7 +527,11 @@ function DoctorAvailabilityPage() {
       setModalSuccess("");
       return;
     }
-    const sessionError = validateSessions(dateSessions);
+    const normalizedSessions = dateSessions.map((session) => ({
+      startTime: normalizeClock(session.startTime),
+      endTime: normalizeClock(session.endTime) || addMinutesToClockValue(session.startTime, FIXED_SLOT_DURATION),
+    }));
+    const sessionError = validateSessions(normalizedSessions);
     if (sessionError) {
       setModalError(sessionError);
       setModalSuccess("");
@@ -480,10 +541,9 @@ function DoctorAvailabilityPage() {
     setModalError("");
     setModalSuccess("");
     try {
-      // Replace that day's open slots by date (not stale UI ids).
-      await doctorAvailabilityApi.clearDates([rangeDate], true);
+      // Additive: never wipe existing slots when adding new ones.
       let created = 0;
-      for (const session of dateSessions) {
+      for (const session of normalizedSessions) {
         const result = await doctorAvailabilityApi.createRange({
           date: rangeDate,
           startTime: session.startTime,
@@ -493,14 +553,18 @@ function DoctorAvailabilityPage() {
         });
         created += result.created;
       }
+      if (!created) {
+        setModalError(
+          "No new slots were created. Pick a future start time (clinic clock), and make sure the end time is at least 30 minutes later.",
+        );
+        return;
+      }
       await doctorSynthflowApi.syncSynthflowDirectory().catch(() => null);
       await refreshSlots();
       setSelectedDate(new Date(`${rangeDate}T12:00:00`));
       setWeekCursor(startOfWeekMonday(new Date(`${rangeDate}T12:00:00`)));
       setModalSuccess(
-        created
-          ? `Slots saved successfully. Created ${created} open slot${created === 1 ? "" : "s"}.`
-          : "Slots saved successfully.",
+        `Added ${created} open slot${created === 1 ? "" : "s"} for ${formatRangeDateLabel(rangeDate)}.`,
       );
     } catch (err) {
       setModalError(formatApiError(err, "Unable to create slots for that date."));
@@ -737,16 +801,25 @@ function DoctorAvailabilityPage() {
       });
       setConfig(normalizeConfig(result.profile.availabilityConfig, result.profile.weeklyHours));
 
-      const weekDates = weekDraft.map((day) => day.dateKey);
-      const cleared = await doctorAvailabilityApi.clearDates(weekDates, true);
+      // Only rebuild today and future days — clearing past dates would wipe slots
+      // that can never be recreated (API rejects past times).
+      const todayKey = clinicToday || localDateKey(new Date());
+      const rebuildDays = weekDraft.filter((day) => day.dateKey >= todayKey);
+      const weekDates = rebuildDays.map((day) => day.dateKey);
+      const cleared = weekDates.length
+        ? await doctorAvailabilityApi.clearDates(weekDates, true)
+        : { removed: 0, dates: [] as string[] };
       let created = 0;
-      for (const day of weekDraft) {
+      for (const day of rebuildDays) {
         if (!day.enabled || !day.sessions.length) continue;
         for (const session of day.sessions) {
+          const startTime = normalizeClock(session.startTime);
+          const endTime = normalizeClock(session.endTime);
+          if (!startTime || !endTime) continue;
           const range = await doctorAvailabilityApi.createRange({
             date: day.dateKey,
-            startTime: session.startTime,
-            endTime: session.endTime,
+            startTime,
+            endTime,
             durationMinutes: FIXED_SLOT_DURATION,
             skipSynthflowSync: true,
           });
@@ -843,12 +916,9 @@ function DoctorAvailabilityPage() {
       </Panel>
 
       <p className="mb-5 text-[12.5px] text-slate-500">
-        Today&apos;s date follows your device calendar ({formatRangeDateLabel(pinnedTodayKey)}
-        ). Slot clock times use {clinicTimeZoneLabel}
-        {clinicToday && clinicToday !== pinnedTodayKey
-          ? ` (clinic calendar day there is currently ${formatRangeDateLabel(clinicToday)})`
-          : ""}
-        . Booked appointments are never overwritten when you regenerate open slots.
+        Today&apos;s Availability uses the clinic calendar day ({formatRangeDateLabel(pinnedTodayKey || clinicToday)}
+        ) so it matches what callers hear for &quot;today&quot;. Slot clock times use {clinicTimeZoneLabel}. Booked
+        appointments are never overwritten when you regenerate open slots.
       </p>
 
       {loading ? (
@@ -1005,22 +1075,30 @@ function DoctorAvailabilityPage() {
               ) : null}
 
               <div className="space-y-4">
+                <p className="text-[12.5px] text-slate-500">
+                  Adds new open slots without removing ones you already have. Times use{" "}
+                  {clinicTimeZoneLabel}.
+                </p>
                 <Field label="Date">
                   <Input type="date" value={rangeDate} onChange={(e) => setRangeDate(e.target.value)} />
                 </Field>
 
                 <div>
                   <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                    <SectionLabel>Sessions</SectionLabel>
+                    <SectionLabel>Time windows</SectionLabel>
                     <Button
                       variant="soft"
                       size="sm"
-                      onClick={() =>
-                        setDateSessions((rows) => [...rows, { startTime: "14:00", endTime: "14:30" }])
-                      }
+                      onClick={() => {
+                        const start = nextHalfHourClock(clinicTimeZone);
+                        setDateSessions((rows) => [
+                          ...rows,
+                          { startTime: start, endTime: addMinutesToClockValue(start, FIXED_SLOT_DURATION) },
+                        ]);
+                      }}
                     >
                       <Plus className="size-3.5" />
-                      Add session
+                      Add another
                     </Button>
                   </div>
                   <div className="space-y-2 rounded-2xl border border-sky-100 bg-sky-50/50 p-3">
@@ -1034,7 +1112,14 @@ function DoctorAvailabilityPage() {
                             value={session.startTime}
                             onChange={(startTime) =>
                               setDateSessions((rows) =>
-                                rows.map((s, i) => (i === index ? { ...s, startTime } : s)),
+                                rows.map((s, i) =>
+                                  i === index
+                                    ? {
+                                        startTime,
+                                        endTime: addMinutesToClockValue(startTime, FIXED_SLOT_DURATION),
+                                      }
+                                    : s,
+                                ),
                               )
                             }
                           />
@@ -1064,6 +1149,10 @@ function DoctorAvailabilityPage() {
                       </div>
                     ))}
                   </div>
+                  <p className="mt-2 text-[12px] text-slate-500">
+                    Each window is split into {FIXED_SLOT_DURATION}-minute bookable slots. Changing start
+                    auto-sets end to +{FIXED_SLOT_DURATION} minutes (you can extend the end for a block).
+                  </p>
                 </div>
               </div>
 
@@ -1082,7 +1171,7 @@ function DoctorAvailabilityPage() {
                       onClick={() => void createDateSessionSlots()}
                       disabled={busyId === "range"}
                     >
-                      {busyId === "range" ? "Saving…" : "Save slot"}
+                      {busyId === "range" ? "Saving…" : "Add slot"}
                     </Button>
                   </>
                 )}

@@ -1,11 +1,13 @@
 import type { AppointmentInvoiceStatus } from "@prisma/client";
 import type Stripe from "stripe";
+import { env } from "../config/env.js";
 import { prisma } from "../lib/prisma.js";
 import { getStripe, isStripeConfigured } from "../lib/stripe.js";
 import { AppError } from "../utils/AppError.js";
 import { normalizePhone } from "../utils/phone.js";
 import { sendPatientReminderSms } from "./synthflow.client.js";
 import { isDoctorSmsEnabled } from "./doctor-sms-preferences.service.js";
+import { rememberInvoicePaymentLink } from "./records-link-mirror.service.js";
 import { formatClinicDateTime } from "../utils/clinic-time.js";
 
 const OPEN_STATUSES: AppointmentInvoiceStatus[] = ["PENDING", "SENT", "FAILED"];
@@ -20,6 +22,24 @@ export type PublicAppointmentInvoice = {
   smsError: string;
   sentAt: string | null;
   paidAt: string | null;
+};
+
+export type InvoicePreview = {
+  appointmentId: string;
+  reference: string;
+  patientName: string;
+  patientPhone: string;
+  doctorName: string;
+  whenLabel: string;
+  reason: string;
+  clinic: string;
+  feeLabel: string;
+  amountCents: number;
+  amountLabel: string;
+  currency: string;
+  alreadyPaid: boolean;
+  invoiceStatus: PublicAppointmentInvoice["status"] | null;
+  existingPaymentUrl: string;
 };
 
 function toPublicStatus(status: AppointmentInvoiceStatus): PublicAppointmentInvoice["status"] {
@@ -89,14 +109,21 @@ function billingEmail(patientId: string, email: string) {
   return usableEmail(email) || `billing.${patientId}@example.com`;
 }
 
-async function patientPhone(patientId: string, bookingPhone: string) {
+/** Prefer the mobile the patient gave while booking (appointment.bookingPhone). */
+async function bookingPhoneForInvoice(patientId: string, bookingPhone: string) {
   const stored = normalizePhone(bookingPhone);
   if (stored) return stored;
   const history = await prisma.patientMedicalHistory.findUnique({
     where: { userId: patientId },
     select: { phone: true },
   });
-  return normalizePhone(history?.phone || "");
+  const fromHistory = normalizePhone(history?.phone || "");
+  if (fromHistory) return fromHistory;
+  const patient = await prisma.user.findUnique({
+    where: { id: patientId },
+    select: { phone: true },
+  });
+  return normalizePhone(patient?.phone || "");
 }
 
 async function customerIdForPatient(input: {
@@ -123,60 +150,113 @@ async function customerIdForPatient(input: {
   return customer.id;
 }
 
-async function createHostedInvoice(input: {
+async function createCheckoutSession(input: {
   customerId: string;
   amountCents: number;
+  currency: string;
   appointmentId: string;
   reference: string;
+  doctorName: string;
+  patientId: string;
+  doctorUserId: string;
   description: string;
 }) {
   const stripe = getStripe();
-  const draft = await stripe.invoices.create({
+  const clientRoot = env.CLIENT_URL.replace(/\/$/, "");
+  const doctorLabel = input.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
+  const session = await stripe.checkout.sessions.create({
+    mode: "payment",
     customer: input.customerId,
-    collection_method: "send_invoice",
-    days_until_due: 7,
-    currency: "usd",
-    auto_advance: false,
-    pending_invoice_items_behavior: "exclude",
-    description: input.description,
-    metadata: { appointmentId: input.appointmentId, kind: "appointment_invoice" },
+    client_reference_id: input.appointmentId,
+    success_url: `${clientRoot}/invoice/complete?status=success&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${clientRoot}/invoice/complete?status=cancelled&session_id={CHECKOUT_SESSION_ID}`,
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: input.currency.toLowerCase() || "usd",
+          unit_amount: input.amountCents,
+          product_data: {
+            name: `Consultation — ${input.reference}`,
+            description: input.description,
+          },
+        },
+      },
+    ],
+    metadata: {
+      kind: "appointment_invoice",
+      appointmentId: input.appointmentId,
+      appointmentReference: input.reference,
+      patientId: input.patientId,
+      doctorUserId: input.doctorUserId,
+      doctorName: doctorLabel,
+    },
+    payment_intent_data: {
+      metadata: {
+        kind: "appointment_invoice",
+        appointmentId: input.appointmentId,
+      },
+    },
   });
-  await stripe.invoiceItems.create({
-    customer: input.customerId,
-    invoice: draft.id,
-    amount: input.amountCents,
-    currency: "usd",
-    description: input.description,
-  });
-  const finalized = await stripe.invoices.finalizeInvoice(draft.id);
-  if (!finalized.hosted_invoice_url) {
-    throw new AppError(502, "Stripe did not return a payment link for this invoice.");
+
+  if (!session.url) {
+    throw new AppError(502, "Stripe did not return a Checkout URL for this invoice.");
   }
-  return { invoiceId: finalized.id, url: finalized.hosted_invoice_url };
+
+  return { sessionId: session.id, url: session.url };
 }
 
 function invoiceMessage(input: {
-  reference: string;
   doctorName: string;
-  clinic: string;
-  when: string;
   amountLabel: string;
   url: string;
 }) {
-  return `Qubetech: invoice for appointment ${input.reference} with ${input.doctorName} at ${input.clinic || "the clinic"} on ${input.when}. Amount ${input.amountLabel}. Pay securely here: ${input.url}`;
+  const doctorLabel = input.doctorName.startsWith("Dr")
+    ? input.doctorName
+    : `Dr. ${input.doctorName.replace(/^Dr\.?\s*/i, "").trim()}`;
+  return `Hello, your consultation invoice from ${doctorLabel} is ${input.amountLabel}. You can securely complete your payment using this link: ${input.url}`;
 }
 
+/**
+ * Deliver the payment link via the clinic voice agent's INCALL_SMS path
+ * (short outbound call). POST /chat/outbound is chat-agent-only and fails
+ * for the AI Receptionist voice agent with "Omnichannel chat is only supported
+ * for chat agents."
+ */
 async function deliverInvoiceLink(phone: string, body: string) {
   try {
     await sendPatientReminderSms({ toPhone: phone, body, purpose: "invoice" });
+    console.log(`[invoices] Payment link SMS delivered → ${phone}`);
     return { smsError: "" };
   } catch (error) {
-    console.error(
-      "[invoices] Payment link text failed:",
-      error instanceof Error ? error.message : error,
-    );
-    return { smsError: "The payment link could not be texted to the patient's mobile." };
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`[invoices] Payment link SMS failed → ${phone}:`, message);
+    return {
+      smsError:
+        message ||
+        "The payment link could not be texted. Checkout URL is still valid — use Payment link.",
+    };
   }
+}
+
+async function markPaidByAppointmentId(appointmentId: string, stripeSessionOrInvoiceId?: string) {
+  const data: {
+    status: AppointmentInvoiceStatus;
+    paidAt: Date;
+    smsError: string;
+    stripeInvoiceId?: string;
+  } = {
+    status: "PAID",
+    paidAt: new Date(),
+    smsError: "",
+  };
+  if (stripeSessionOrInvoiceId) data.stripeInvoiceId = stripeSessionOrInvoiceId;
+
+  const result = await prisma.appointmentInvoice.updateMany({
+    where: { appointmentId, status: { not: "PAID" } },
+    data,
+  });
+  return result.count > 0;
 }
 
 export async function syncDoctorAppointmentInvoices(doctorUserId: string) {
@@ -195,12 +275,23 @@ export async function syncDoctorAppointmentInvoices(doctorUserId: string) {
   const stripe = getStripe();
   for (const row of rows) {
     try {
-      const invoice = await stripe.invoices.retrieve(row.stripeInvoiceId);
+      const id = row.stripeInvoiceId;
+      if (id.startsWith("cs_")) {
+        const session = await stripe.checkout.sessions.retrieve(id);
+        if (session.payment_status === "paid" && row.status !== "PAID") {
+          await markPaidByAppointmentId(row.appointmentId, id);
+        } else if (session.status === "expired" && row.status !== "FAILED") {
+          await prisma.appointmentInvoice.update({
+            where: { id: row.id },
+            data: { status: "FAILED", smsError: "Stripe Checkout session expired." },
+          });
+        }
+        continue;
+      }
+
+      const invoice = await stripe.invoices.retrieve(id);
       if (invoice.status === "paid" && row.status !== "PAID") {
-        await prisma.appointmentInvoice.update({
-          where: { id: row.id },
-          data: { status: "PAID", paidAt: new Date(), smsError: "" },
-        });
+        await markPaidByAppointmentId(row.appointmentId, id);
       } else if ((invoice.status === "uncollectible" || invoice.status === "void") && row.status !== "FAILED") {
         await prisma.appointmentInvoice.update({
           where: { id: row.id },
@@ -214,6 +305,48 @@ export async function syncDoctorAppointmentInvoices(doctorUserId: string) {
       );
     }
   }
+}
+
+export async function previewInvoiceForDoctor(
+  doctorUserId: string,
+  appointmentId: string,
+): Promise<InvoicePreview> {
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    include: {
+      patient: true,
+      doctorUser: true,
+      invoice: true,
+    },
+  });
+  if (!appointment || appointment.doctorUserId !== doctorUserId) {
+    throw new AppError(404, "Appointment not found");
+  }
+  if (appointment.status === "CANCELLED") {
+    throw new AppError(400, "Cancelled appointments cannot be invoiced.");
+  }
+
+  const phone = await bookingPhoneForInvoice(appointment.patientId, appointment.bookingPhone);
+  const amountCents = appointment.invoice?.amountCents || parseFeeCents(appointment.fee);
+  const currency = (appointment.invoice?.currency || "usd").toLowerCase();
+
+  return {
+    appointmentId: appointment.id,
+    reference: appointment.reference,
+    patientName: appointment.patient.fullName,
+    patientPhone: phone || "",
+    doctorName: appointment.doctorUser.fullName,
+    whenLabel: formatClinicDateTime(appointment.startsAt),
+    reason: appointment.reason || "",
+    clinic: appointment.clinic || "",
+    feeLabel: appointment.fee || formatInvoiceAmount(amountCents, currency),
+    amountCents,
+    amountLabel: formatInvoiceAmount(amountCents, currency),
+    currency,
+    alreadyPaid: appointment.invoice?.status === "PAID",
+    invoiceStatus: appointment.invoice ? toPublicStatus(appointment.invoice.status) : null,
+    existingPaymentUrl: appointment.invoice?.hostedInvoiceUrl || "",
+  };
 }
 
 export async function sendInvoiceForDoctor(doctorUserId: string, appointmentId: string): Promise<{
@@ -242,35 +375,65 @@ export async function sendInvoiceForDoctor(doctorUserId: string, appointmentId: 
     throw new AppError(409, "This appointment is already paid.");
   }
 
-  const phone = await patientPhone(appointment.patientId, appointment.bookingPhone);
+  // Always use the number captured during booking when present.
+  const phone = await bookingPhoneForInvoice(appointment.patientId, appointment.bookingPhone);
   if (!phone) {
-    throw new AppError(400, "This patient has no registered mobile number to receive the invoice.");
+    throw new AppError(
+      400,
+      "This appointment has no booking phone number. The patient must provide a mobile number when booking.",
+    );
   }
 
   const amountCents = appointment.invoice?.amountCents || parseFeeCents(appointment.fee);
-  const amountLabel = formatInvoiceAmount(amountCents);
+  const currency = "usd";
+  const amountLabel = formatInvoiceAmount(amountCents, currency);
   const when = formatClinicDateTime(appointment.startsAt);
   const description = `${appointment.reference} with ${appointment.doctorUser.fullName} on ${when}`;
 
   let stripeCustomerId = appointment.invoice?.stripeCustomerId || "";
-  let stripeInvoiceId = appointment.invoice?.stripeInvoiceId || "";
-  let hostedInvoiceUrl = appointment.invoice?.hostedInvoiceUrl || "";
+  let stripeSessionId = appointment.invoice?.stripeInvoiceId || "";
+  let paymentUrl = appointment.invoice?.hostedInvoiceUrl || "";
 
   const stripe = getStripe();
-  if (stripeInvoiceId) {
-    const remote = await stripe.invoices.retrieve(stripeInvoiceId);
-    if (remote.status === "paid") {
-      await prisma.appointmentInvoice.update({
-        where: { appointmentId: appointment.id },
-        data: { status: "PAID", paidAt: new Date(), smsError: "" },
-      });
-      return { message: "This invoice is already paid.", paymentUrl: hostedInvoiceUrl };
+
+  // Reuse an open Checkout session when still valid; otherwise create a new one.
+  if (stripeSessionId.startsWith("cs_") && paymentUrl) {
+    try {
+      const remote = await stripe.checkout.sessions.retrieve(stripeSessionId);
+      if (remote.payment_status === "paid") {
+        await markPaidByAppointmentId(appointment.id, stripeSessionId);
+        return { message: "This invoice is already paid.", paymentUrl };
+      }
+      if (remote.status === "open" && remote.url) {
+        paymentUrl = remote.url;
+      } else {
+        stripeSessionId = "";
+        paymentUrl = "";
+      }
+    } catch {
+      stripeSessionId = "";
+      paymentUrl = "";
     }
-    if (remote.status === "void" || remote.status === "uncollectible") {
-      stripeInvoiceId = "";
-      hostedInvoiceUrl = "";
-    } else if (remote.hosted_invoice_url) {
-      hostedInvoiceUrl = remote.hosted_invoice_url;
+  } else if (stripeSessionId.startsWith("in_")) {
+    // Legacy hosted invoices — keep link if still unpaid, else create Checkout.
+    try {
+      const remote = await stripe.invoices.retrieve(stripeSessionId);
+      if (remote.status === "paid") {
+        await markPaidByAppointmentId(appointment.id, stripeSessionId);
+        return {
+          message: "This invoice is already paid.",
+          paymentUrl: remote.hosted_invoice_url || paymentUrl,
+        };
+      }
+      if (remote.status === "open" && remote.hosted_invoice_url) {
+        paymentUrl = remote.hosted_invoice_url;
+      } else {
+        stripeSessionId = "";
+        paymentUrl = "";
+      }
+    } catch {
+      stripeSessionId = "";
+      paymentUrl = "";
     }
   }
 
@@ -289,26 +452,31 @@ export async function sendInvoiceForDoctor(doctorUserId: string, appointmentId: 
     });
   }
 
-  if (!hostedInvoiceUrl) {
-    const created = await createHostedInvoice({
+  if (!paymentUrl || !stripeSessionId.startsWith("cs_")) {
+    const created = await createCheckoutSession({
       customerId: stripeCustomerId,
       amountCents,
+      currency,
       appointmentId: appointment.id,
       reference: appointment.reference,
+      doctorName: appointment.doctorUser.fullName,
+      patientId: appointment.patientId,
+      doctorUserId: appointment.doctorUserId,
       description,
     });
-    stripeInvoiceId = created.invoiceId;
-    hostedInvoiceUrl = created.url;
+    stripeSessionId = created.sessionId;
+    paymentUrl = created.url;
   }
 
   await prisma.appointmentInvoice.upsert({
     where: { appointmentId: appointment.id },
     update: {
       amountCents,
+      currency,
       status: "PENDING",
       stripeCustomerId,
-      stripeInvoiceId,
-      hostedInvoiceUrl,
+      stripeInvoiceId: stripeSessionId,
+      hostedInvoiceUrl: paymentUrl,
       phone,
       smsError: "",
     },
@@ -317,12 +485,27 @@ export async function sendInvoiceForDoctor(doctorUserId: string, appointmentId: 
       patientId: appointment.patientId,
       doctorUserId: appointment.doctorUserId,
       amountCents,
+      currency,
       status: "PENDING",
       stripeCustomerId,
-      stripeInvoiceId,
-      hostedInvoiceUrl,
+      stripeInvoiceId: stripeSessionId,
+      hostedInvoiceUrl: paymentUrl,
       phone,
     },
+  });
+
+  const smsBody = invoiceMessage({
+    doctorName: appointment.doctorUser.fullName,
+    amountLabel,
+    url: paymentUrl,
+  });
+
+  rememberInvoicePaymentLink({
+    phone,
+    appointmentReference: appointment.reference,
+    amountLabel,
+    paymentUrl,
+    smsBody,
   });
 
   const invoiceSmsOn = await isDoctorSmsEnabled(doctorUserId, "invoiceLinks");
@@ -332,22 +515,12 @@ export async function sendInvoiceForDoctor(doctorUserId: string, appointmentId: 
       data: { status: "PENDING", smsError: "Invoice SMS is turned off in Settings." },
     });
     return {
-      message: `Invoice created. Invoice texts are turned off in Settings, so the payment link was not sent. ${hostedInvoiceUrl}`,
-      paymentUrl: hostedInvoiceUrl,
+      message: `Invoice created. Invoice texts are turned off in Settings, so the payment link was not sent. ${paymentUrl}`,
+      paymentUrl,
     };
   }
 
-  const delivery = await deliverInvoiceLink(
-    phone,
-    invoiceMessage({
-      reference: appointment.reference,
-      doctorName: appointment.doctorUser.fullName,
-      clinic: appointment.clinic,
-      when,
-      amountLabel,
-      url: hostedInvoiceUrl,
-    }),
-  );
+  const delivery = await deliverInvoiceLink(phone, smsBody);
 
   await prisma.appointmentInvoice.update({
     where: { appointmentId: appointment.id },
@@ -357,22 +530,49 @@ export async function sendInvoiceForDoctor(doctorUserId: string, appointmentId: 
   });
 
   const message = delivery.smsError
-    ? `Invoice created, but the text was not delivered. Payment link: ${hostedInvoiceUrl}`
-    : `Invoice for ${amountLabel} sent to the patient's mobile.`;
-  return { message, paymentUrl: hostedInvoiceUrl };
+    ? `Invoice created, but the text was not delivered to ${phone}. Payment link: ${paymentUrl}`
+    : `Invoice for ${amountLabel} sent to ${phone}.`;
+  return { message, paymentUrl };
 }
 
 export async function handleStripeInvoiceEvent(event: Stripe.Event) {
-  if (event.type !== "invoice.paid" && event.type !== "invoice.payment_failed") return false;
+  if (
+    event.type !== "checkout.session.completed" &&
+    event.type !== "checkout.session.expired" &&
+    event.type !== "invoice.paid" &&
+    event.type !== "invoice.payment_failed"
+  ) {
+    return false;
+  }
+
+  if (event.type === "checkout.session.completed" || event.type === "checkout.session.expired") {
+    const session = event.data.object as Stripe.Checkout.Session;
+    if (session.metadata?.kind !== "appointment_invoice") return false;
+    const appointmentId = session.metadata.appointmentId || session.client_reference_id || "";
+    if (!appointmentId) return false;
+
+    if (event.type === "checkout.session.completed" && session.payment_status === "paid") {
+      await markPaidByAppointmentId(appointmentId, session.id);
+      console.log(`[invoices] Checkout paid appointment=${appointmentId} session=${session.id}`);
+      return true;
+    }
+
+    if (event.type === "checkout.session.expired") {
+      await prisma.appointmentInvoice.updateMany({
+        where: { appointmentId, status: { not: "PAID" } },
+        data: { status: "FAILED", smsError: "Checkout session expired before payment." },
+      });
+      return true;
+    }
+    return true;
+  }
+
   const invoice = event.data.object as Stripe.Invoice;
   const appointmentId = invoice.metadata?.appointmentId;
   if (invoice.metadata?.kind !== "appointment_invoice" || !appointmentId) return false;
 
   if (event.type === "invoice.paid") {
-    await prisma.appointmentInvoice.updateMany({
-      where: { appointmentId },
-      data: { status: "PAID", paidAt: new Date(), smsError: "", stripeInvoiceId: invoice.id },
-    });
+    await markPaidByAppointmentId(appointmentId, invoice.id);
     return true;
   }
 

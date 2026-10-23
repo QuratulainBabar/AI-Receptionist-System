@@ -37,8 +37,15 @@ import {
   DOCTOR_NOTIFICATIONS_UPDATED_EVENT,
   doctorNotificationsApi,
   doctorProfileApi,
+  notifyDoctorNotificationsUpdated,
   type ApiDoctorNotification,
 } from "@/lib/api";
+import {
+  isNewAppointmentNotification,
+  playNewAppointmentChime,
+  takeFreshBookingAnnouncementIds,
+  unlockNotificationAudio,
+} from "@/lib/notification-alerts";
 import { clearSession, type Session } from "@/lib/session";
 
 const SIDEBAR_COLLAPSED_KEY = "ai-receptionist-sidebar-collapsed";
@@ -126,10 +133,10 @@ export function AppShell({
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
   const [open, setOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  });
+  // Always start false on server + first client paint to avoid hydration mismatch,
+  // then restore the saved preference after mount.
+  const [collapsed, setCollapsed] = useState(false);
+  const [sidebarPrefReady, setSidebarPrefReady] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
   const [notificationOpen, setNotificationOpen] = useState(false);
   const [notifications, setNotifications] = useState<ApiDoctorNotification[]>([]);
@@ -140,8 +147,14 @@ export function AppShell({
   const groups = Array.from(new Set(nav.map((item) => item.group)));
 
   useEffect(() => {
+    setCollapsed(window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1");
+    setSidebarPrefReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!sidebarPrefReady) return;
     window.localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? "1" : "0");
-  }, [collapsed]);
+  }, [collapsed, sidebarPrefReady]);
 
   useEffect(() => {
     setOpen(false);
@@ -262,19 +275,31 @@ export function AppShell({
     if (session.role !== "doctor") return;
     let cancelled = false;
 
-    async function loadNotifications() {
+    async function loadNotifications(attempt = 0) {
       try {
         const result = await doctorNotificationsApi.list();
-        if (!cancelled) setNotifications(result.notifications);
+        if (cancelled) return;
+        setNotifications(result.notifications);
+
+        const bookingIds = result.notifications
+          .filter((note) => note.unread && isNewAppointmentNotification(note))
+          .map((note) => note.id);
+        const fresh = takeFreshBookingAnnouncementIds(bookingIds);
+        if (fresh.length > 0) playNewAppointmentChime();
       } catch {
-        // Keep the last known list if a refresh fails.
+        // Backend may still be starting — retry once shortly, then keep last known list.
+        if (!cancelled && attempt < 1) {
+          window.setTimeout(() => {
+            void loadNotifications(attempt + 1);
+          }, 1500);
+        }
       }
     }
 
     void loadNotifications();
     const timer = window.setInterval(() => {
       void loadNotifications();
-    }, 30_000);
+    }, 15_000);
     window.addEventListener("focus", loadNotifications);
     window.addEventListener(DOCTOR_NOTIFICATIONS_UPDATED_EVENT, loadNotifications);
     return () => {
@@ -288,6 +313,24 @@ export function AppShell({
   const notificationsCount =
     session.role === "doctor" ? notifications.filter((note) => note.unread).length : 0;
   const notificationBadge = notificationsCount > 99 ? "99+" : String(notificationsCount);
+  const hasUnreadNewAppointments =
+    session.role === "doctor" &&
+    notifications.some((note) => note.unread && isNewAppointmentNotification(note));
+
+  async function markNotificationRead(note: ApiDoctorNotification) {
+    if (!note.unread) return;
+    setNotifications((prev) =>
+      prev.map((item) => (item.id === note.id ? { ...item, unread: false } : item)),
+    );
+    try {
+      await doctorNotificationsApi.markOneRead(note.id);
+      notifyDoctorNotificationsUpdated();
+    } catch {
+      setNotifications((prev) =>
+        prev.map((item) => (item.id === note.id ? { ...item, unread: true } : item)),
+      );
+    }
+  }
 
   function toggleCollapsed() {
     setCollapsed((value) => {
@@ -576,10 +619,22 @@ export function AppShell({
                 type="button"
                 aria-haspopup="menu"
                 aria-expanded={notificationOpen}
-                onClick={() => setNotificationOpen((v) => !v)}
+                aria-label={
+                  notificationsCount > 0
+                    ? `Notifications, ${notificationsCount} unread`
+                    : "Notifications"
+                }
+                onClick={() => {
+                  unlockNotificationAudio();
+                  setNotificationOpen((v) => !v);
+                }}
                 className="relative grid size-11 shrink-0 place-items-center rounded-2xl border border-border/70 bg-card/60 text-muted-foreground transition-all hover:bg-secondary hover:text-foreground hover:shadow-sm"
               >
-                <Bell className="size-[19px]" strokeWidth={2} />
+                <Bell
+                  className={cn("size-[19px]", hasUnreadNewAppointments && "bell-ring")}
+                  strokeWidth={2}
+                  aria-hidden
+                />
                 {notificationsCount > 0 ? (
                   <span
                     className="absolute -right-0.5 -top-0.5 z-10 grid h-[16px] min-w-[16px] place-items-center rounded-full px-1 text-[9px] font-bold leading-none text-white ring-2 ring-background"
@@ -610,23 +665,38 @@ export function AppShell({
                       </p>
                     ) : (
                       notifications.slice(0, 6).map((note) => (
-                        <div
+                        <button
                           key={note.id}
-                          className="flex gap-3 border-b border-border/60 px-5 py-3.5 transition-colors hover:bg-muted/40 last:border-b-0"
+                          type="button"
+                          role="menuitem"
+                          onClick={() => {
+                            unlockNotificationAudio();
+                            void markNotificationRead(note);
+                          }}
+                          className={cn(
+                            "flex w-full gap-3 border-b border-border/60 px-5 py-3.5 text-left transition-colors hover:bg-muted/40 last:border-b-0",
+                            note.unread && "bg-primary/[0.03]",
+                          )}
                         >
                           <span
                             className="mt-1.5 size-2 shrink-0 rounded-full"
                             style={{
-                              backgroundColor:
-                                note.kind === "cancelled"
+                              backgroundColor: note.unread
+                                ? note.kind === "cancelled"
                                   ? "#EF4444"
                                   : note.kind === "changed"
                                     ? "#F59E0B"
-                                    : "#3B82F6",
+                                    : "#3B82F6"
+                                : "#CBD5E1",
                             }}
                           />
                           <div className="min-w-0 flex-1">
-                            <p className="text-[13px] font-semibold text-foreground truncate">
+                            <p
+                              className={cn(
+                                "text-[13px] truncate text-foreground",
+                                note.unread ? "font-semibold" : "font-medium text-foreground/80",
+                              )}
+                            >
                               {note.title}
                             </p>
                             <p className="mt-0.5 text-[12px] text-muted-foreground truncate">
@@ -636,7 +706,7 @@ export function AppShell({
                               {note.time}
                             </p>
                           </div>
-                        </div>
+                        </button>
                       ))
                     )}
                   </div>

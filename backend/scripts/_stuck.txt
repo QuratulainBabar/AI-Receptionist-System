@@ -1,0 +1,19 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+{
+  "status": "completed",
+  "model": "b05f8ab5-c7d8-48f0-bbf2-387cae58684f",
+  "type": "outbound",
+  "to": "+923708321774",
+  "from": "+14244849053",
+  "duration": 205,
+  "end": "agent_goodbye",
+  "err": "",
+  "transcript": "\nbot: Hi, you've reached Qubetech AI Receptionist Clinic. How may I help you today? \nhuman: I want to book an appointment.\nbot: Which day would you like your appointment? \nhuman: Today.\nbot: Today, the open times are one PM, one thirty PM, and two PM. Which time would you like? \nhuman: One thirty PM.\nbot: Great - whatΓÇÖs your full name? \nhuman: Then then separate.\nbot: Sorry, I didnΓÇÖt catch that clearly... could you say your full name again, nice and slowly? \nhuman: Cancel.\nbot: No problem. If you need anything else, just let me know. \nhuman: Can you let me know?\nbot: Sure - what would you like"
+}

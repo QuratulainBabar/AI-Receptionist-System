@@ -26,3 +26,14 @@ doctorSynthflowRouter.get(
 doctorSynthflowRouter.put("/", requireClinicOwner, clinicSynthflowController.updateSynthflowConfig);
 doctorSynthflowRouter.post("/agent", requireClinicOwner, clinicSynthflowController.createOrUpdateAgent);
 doctorSynthflowRouter.post("/sync", requireClinicOwner, clinicSynthflowController.syncDirectory);
+doctorSynthflowRouter.get(
+  "/call-health",
+  requireClinicPermission("callTranscriptions", "clinicSettings"),
+  clinicSynthflowController.getCallHealth,
+);
+doctorSynthflowRouter.post("/test-call", requireClinicOwner, clinicSynthflowController.startTestCall);
+doctorSynthflowRouter.get(
+  "/test-call/:callId",
+  requireClinicPermission("callTranscriptions", "clinicSettings"),
+  clinicSynthflowController.getTestCall,
+);

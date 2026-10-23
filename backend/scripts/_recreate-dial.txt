@@ -1,0 +1,27 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+detached b05f8ab5-c7d8-48f0-bbf2-387cae58684f Qubetech AI Receptionist Clinic Outbound Test
+deleted b05f8ab5-c7d8-48f0-bbf2-387cae58684f Qubetech AI Receptionist Clinic Outbound Test
+created_outbound d474b029-ebfa-4a47-83e7-843a973c7684
+Error: Synthflow PUT /assistants/d474b029-ebfa-4a47-83e7-843a973c7684/phone_numbers failed (400): Could not attach 
+phone number 14244849053 to assistant. Reason: 
+    at synthflowRequest (E:\AI-Receptionist-System\backend\src\services\synthflow.client.ts:61:17)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async main (E:\AI-Receptionist-System\backend\scripts\recreate-outbound-and-dial.ts:79:3) {
+  status: 400,
+  payload: {
+    detail: {
+      status: 'error',
+      description: 'Could not attach phone number 14244849053 to assistant. Reason: ',
+      timestamp: '2026-10-23T12:11:55.173489+00:00',
+      request_id: 'd271a4684b8e477c8cb7b6b3158da00e',
+      category: 'important'
+    }
+  }
+}

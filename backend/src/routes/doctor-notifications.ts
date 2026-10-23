@@ -11,3 +11,4 @@ doctorNotificationsRouter.use(authenticate, requireRole(Role.DOCTOR, Role.CLINIC
 
 doctorNotificationsRouter.get("/", notificationsController.listForDoctor);
 doctorNotificationsRouter.post("/read", notificationsController.markAllReadForDoctor);
+doctorNotificationsRouter.post("/:id/read", notificationsController.markOneReadForDoctor);

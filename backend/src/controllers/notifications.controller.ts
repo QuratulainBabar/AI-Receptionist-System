@@ -25,3 +25,17 @@ export async function markAllReadForDoctor(req: Request, res: Response, next: Ne
     next(error);
   }
 }
+
+export async function markOneReadForDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+    const id = typeof req.params.id === "string" ? req.params.id.trim() : "";
+    if (!id) throw new AppError(400, "Notification id is required");
+    const result = await notificationsService.markNotificationReadForDoctor(req.user.sub, id);
+    res.json({ success: true, ...result });
+  } catch (error) {
+    next(error);
+  }
+}

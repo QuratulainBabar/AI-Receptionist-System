@@ -1,0 +1,25 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+--- current pools ---
+{"id":"ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0","name":"Qubetech AI Receptionist Clinic Receptionist","type":"inbound","phone":"+14244849053","attached":[{"number":"+14244849053","sid":null,"slug":"14244849053"}]}
+{"id":"d474b029-ebfa-4a47-83e7-843a973c7684","name":"Qubetech AI Receptionist Clinic Outbound Test","type":"outbound","phone":"","attached":[]}
+detached_from_inbound
+using_existing_outbound d474b029-ebfa-4a47-83e7-843a973c7684
+attach_e164 {"status":"ok"}
+reattach_inbound {"status":"ok"}
+--- pools after ---
+{"id":"ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0","name":"Qubetech AI Receptionist Clinic Receptionist","type":"inbound","phone":"+14244849053","attached":[{"number":"+14244849053","sid":"PN9f8a02fdcdfa803995db317facb36832","slug":"14244849053"}]}
+{"id":"d474b029-ebfa-4a47-83e7-843a973c7684","name":"Qubetech AI Receptionist Clinic Outbound Test","type":"outbound","phone":"+14244849053","attached":[{"number":"+14244849053","sid":"PN9f8a02fdcdfa803995db317facb36832","slug":"14244849053"}]}
+dialing +923708321774 via d474b029-ebfa-4a47-83e7-843a973c7684
+call_id 13d880b5-5da2-422a-8266-c5c4e99f9c9b
+{"i":1,"status":"paused","to":"+923708321774","from":null,"duration":0,"end":null,"transcript":""}
+{"i":2,"status":"paused","to":"+923708321774","from":null,"duration":0,"end":null,"transcript":""}
+{"i":3,"status":"paused","to":"+923708321774","from":null,"duration":0,"end":null,"transcript":""}
+{"i":4,"status":"paused","to":"+923708321774","from":null,"duration":0,"end":null,"transcript":""}
+PAUSED_NO_RING

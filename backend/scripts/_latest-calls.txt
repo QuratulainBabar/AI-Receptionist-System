@@ -1,0 +1,219 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+{
+  "clinicPhone": "+14244849053",
+  "inboundAgent": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0"
+}
+
+--- outbound agents ---
+[
+  {
+    "id": "b05f8ab5-c7d8-48f0-bbf2-387cae58684f",
+    "name": "Qubetech AI Receptionist Clinic Outbound Test",
+    "phone_number": "+14244849053",
+    "attached_phone_numbers": [
+      {
+        "number": "+14244849053",
+        "sid": "PN9f8a02fdcdfa803995db317facb36832",
+        "slug": "14244849053"
+      }
+    ],
+    "type": "outbound",
+    "is_paused": null
+  },
+  {
+    "id": "bf9557d6-f636-41ca-afa4-d2f0a78b46db",
+    "name": "Clinic Test Call Probe (temp)",
+    "phone_number": "+14244849053",
+    "attached_phone_numbers": [
+      {
+        "number": "+14244849053",
+        "sid": "PN9f8a02fdcdfa803995db317facb36832",
+        "slug": "14244849053"
+      }
+    ],
+    "type": "outbound",
+    "is_paused": null
+  },
+  {
+    "id": "0e9fdbe9-8eba-483e-933d-e772953e89c5",
+    "name": "Ace Customer Call Center Agent",
+    "phone_number": "+16402244749",
+    "attached_phone_numbers": [
+      {
+        "number": "+16402244749",
+        "sid": null,
+        "slug": "16402244749"
+      }
+    ],
+    "type": "outbound",
+    "is_paused": null
+  }
+]
+
+--- recent calls ---
+[
+  {
+    "id": "bfab7ba7-efc0-4fd5-b648-30f444c57de2",
+    "status": "",
+    "type": "",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "0",
+    "end": "",
+    "name": "",
+    "created": "1792756497132"
+  },
+  {
+    "id": "dd944167-1719-4016-9f6e-b64424b6a285",
+    "status": "",
+    "type": "",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "0",
+    "end": "",
+    "name": "",
+    "created": "1792756433185"
+  },
+  {
+    "id": "add9ebf8-b8f0-4d89-ae8d-9fa3c0a434d5",
+    "status": "",
+    "type": "",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "0",
+    "end": "",
+    "name": "",
+    "created": "1792756084912"
+  },
+  {
+    "id": "633d4481-d426-4153-adc6-9219e0e4b078",
+    "status": "",
+    "type": "outbound",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "169",
+    "end": "human_pick_up_cut_off",
+    "name": "test97",
+    "created": "1792754451327"
+  },
+  {
+    "id": "45cd8698-e9a8-4a28-9f8a-89eb379e08a4",
+    "status": "",
+    "type": "outbound",
+    "to": "",
+    "from": "",
+    "model": "b05f8ab5-c7d8-48f0-bbf2-387cae58684f",
+    "duration": "137",
+    "end": "agent_goodbye",
+    "name": "Doctor clinic test",
+    "created": "1792754278624"
+  },
+  {
+    "id": "3157ee6b-f4db-4a4b-bb8d-69f56c7f1748",
+    "status": "",
+    "type": "outbound",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "176",
+    "end": "human_goodbye",
+    "name": "test98",
+    "created": "1792753785351"
+  },
+  {
+    "id": "724f7e83-1a0c-489f-94f9-e4c950e34a52",
+    "status": "",
+    "type": "outbound",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "67",
+    "end": "voicemail",
+    "name": "test99",
+    "created": "1792753056819"
+  },
+  {
+    "id": "6ea35b3e-96b0-4b6a-977b-3aa80d3ebc65",
+    "status": "",
+    "type": "outbound",
+    "to": "",
+    "from": "",
+    "model": "b05f8ab5-c7d8-48f0-bbf2-387cae58684f",
+    "duration": "5",
+    "end": "undefined",
+    "name": "Dial path verify",
+    "created": "1792752474882"
+  },
+  {
+    "id": "2867b341-0372-40da-9710-3688528cb60c",
+    "status": "",
+    "type": "inbound",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "37",
+    "end": "human_pick_up_cut_off",
+    "name": "",
+    "created": "1792750398609"
+  },
+  {
+    "id": "8fcdba6c-9609-433a-9c34-e2dcbe276ccf",
+    "status": "",
+    "type": "",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "0",
+    "end": "",
+    "name": "",
+    "created": "1792750085846"
+  },
+  {
+    "id": "3b00cc05-942a-407f-a4cd-37cd2368ef75",
+    "status": "",
+    "type": "",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "0",
+    "end": "",
+    "name": "",
+    "created": "1792748597886"
+  },
+  {
+    "id": "952cbc0d-826f-4a1c-b855-f1f7d6f96b49",
+    "status": "",
+    "type": "",
+    "to": "",
+    "from": "",
+    "model": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+    "duration": "0",
+    "end": "",
+    "name": "",
+    "created": "1792747874355"
+  }
+]
+
+--- latest call detail ---
+{
+  "id": "bfab7ba7-efc0-4fd5-b648-30f444c57de2",
+  "status": "paused",
+  "type_of_call": null,
+  "model_id": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+  "duration": 0,
+  "end_call_reason": null,
+  "error": "",
+  "executed_actions": [],
+  "transcript_preview": ""
+}

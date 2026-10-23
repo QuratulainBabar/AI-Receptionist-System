@@ -1,0 +1,14 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+deleted_temp_probe {"status":"ok","response":{"answer":"Model deleted."}}
+attach_out {"status":"ok"}
+attach_inbound {"status":"ok"}
+{"id":"ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0","name":"Qubetech AI Receptionist Clinic Receptionist","type":"inbound","phone":"+14244849053","attached":[{"number":"+14244849053","sid":null,"slug":"14244849053"}]}
+{"id":"b05f8ab5-c7d8-48f0-bbf2-387cae58684f","name":"Qubetech AI Receptionist Clinic Outbound Test","type":"outbound","phone":"+14244849053","attached":[{"number":"+14244849053","sid":"PN9f8a02fdcdfa803995db317facb36832","slug":"14244849053"}]}
+{"id":"414fe8c5-abc1-4d3b-baed-240c82458c18","name":"Qubetech AI Receptionist","type":"inbound","phone":"+12202205898","attached":[{"number":"+12202205898","sid":null,"slug":"12202205898"}]}

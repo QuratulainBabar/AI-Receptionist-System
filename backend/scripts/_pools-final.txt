@@ -1,0 +1,13 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+{"id":"ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0","name":"Qubetech AI Receptionist Clinic Receptionist","type":"inbound","phone_number":"+14244849053","attached_phone_numbers":[{"number":"+14244849053","sid":"PN9f8a02fdcdfa803995db317facb36832","slug":"14244849053"}]}
+{"id":"dae781ec-e734-4833-b952-0a04bb59dd7f","name":"Qubetech AI Receptionist Clinic Outbound Test","type":"outbound","phone_number":"+14244849053","attached_phone_numbers":[{"number":"+14244849053","sid":null,"slug":"14244849053"}]}
+{"id":"d474b029-ebfa-4a47-83e7-843a973c7684","name":"Qubetech AI Receptionist Clinic Outbound Test","type":"outbound","phone_number":null,"attached_phone_numbers":[]}
+{"id":"0e9fdbe9-8eba-483e-933d-e772953e89c5","name":"Ace Customer Call Center Agent","type":"outbound","phone_number":"+16402244749","attached_phone_numbers":[{"number":"+16402244749","sid":null,"slug":"16402244749"}]}
+{"id":"414fe8c5-abc1-4d3b-baed-240c82458c18","name":"Qubetech AI Receptionist","type":"inbound","phone_number":"+12202205898","attached_phone_numbers":[{"number":"+12202205898","sid":null,"slug":"12202205898"}]}

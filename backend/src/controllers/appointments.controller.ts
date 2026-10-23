@@ -20,6 +20,10 @@ const followUpBodySchema = z.object({
   mode: z.enum(["In clinic", "Video call"]).optional(),
 });
 
+const rescheduleBodySchema = z.object({
+  slotId: z.string().min(1),
+});
+
 export async function create(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.user?.sub) {
@@ -106,6 +110,22 @@ export async function updateStatusForDoctor(req: Request, res: Response, next: N
   }
 }
 
+export async function previewInvoiceForDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+    const appointmentId = String(req.params.appointmentId);
+    const preview = await appointmentInvoicesService.previewInvoiceForDoctor(
+      req.user.sub,
+      appointmentId,
+    );
+    res.json({ success: true, preview });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function sendInvoiceForDoctor(req: Request, res: Response, next: NextFunction) {
   try {
     if (!req.user?.sub) {
@@ -143,6 +163,48 @@ export async function createFollowUpForDoctor(req: Request, res: Response, next:
       success: true,
       appointment: result.appointment,
       message: result.message,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function rescheduleForDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+    const appointmentId = String(req.params.appointmentId);
+    const body = rescheduleBodySchema.parse(req.body ?? {});
+    const appointment = await appointmentsService.rescheduleAppointmentForDoctor(
+      appointmentId,
+      req.user.sub,
+      body.slotId,
+    );
+    res.json({
+      success: true,
+      appointment,
+      message: "Appointment rescheduled.",
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function deleteForDoctor(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.user?.sub) {
+      throw new AppError(401, "Authentication required");
+    }
+    const appointmentId = String(req.params.appointmentId);
+    const deleted = await appointmentsService.deleteAppointmentForDoctor(
+      appointmentId,
+      req.user.sub,
+    );
+    res.json({
+      success: true,
+      deleted,
+      message: `Appointment ${deleted.reference} deleted.`,
     });
   } catch (error) {
     next(error);

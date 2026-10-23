@@ -19,15 +19,37 @@ const SPOKEN_DIGITS: Record<string, string> = {
   oh: "0",
   o: "0",
   one: "1",
+  won: "1",
   two: "2",
+  to: "2",
+  too: "2",
   three: "3",
+  tree: "3",
   four: "4",
+  for: "4",
   five: "5",
   six: "6",
   seven: "7",
   eight: "8",
+  ate: "8",
   nine: "9",
+  niner: "9",
 };
+
+/**
+ * Temporary testing OTP. The visit is not confirmed unless the caller says this code.
+ * Replace with a random one-time code when SMS OTP testing is finished.
+ */
+export const TEMP_TEST_BOOKING_OTP = "123456";
+
+/** Common STT mangling of the demo code 123456. */
+const TEST_OTP_SPOKEN_PATTERNS = [
+  /\b1\s*2\s*3\s*4\s*5\s*6\b/,
+  /\bone[\s,.-]*two[\s,.-]*three[\s,.-]*four[\s,.-]*five[\s,.-]*six\b/,
+  /\bwun[\s,.-]*too[\s,.-]*three[\s,.-]*for[\s,.-]*five[\s,.-]*six\b/,
+  /\btwelve\s*thirty[\s-]*four\s*fifty[\s-]*six\b/,
+  /\bone\s*hundred\s*twenty[\s-]*three\s*thousand\s*four\s*hundred\s*fifty[\s-]*six\b/,
+];
 
 function hashOtp(code: string) {
   return createHmac("sha256", env.JWT_SECRET).update(code).digest("hex");
@@ -48,6 +70,11 @@ export function parseSpokenOtp(raw: string) {
   const sixRun = text.match(/(?<!\d)\d{6}(?!\d)/);
   if (sixRun?.[0]) return sixRun[0];
 
+  // Demo code spoken in many STT shapes → always map to 123456 during testing.
+  if (TEST_OTP_SPOKEN_PATTERNS.some((pattern) => pattern.test(text))) {
+    return TEMP_TEST_BOOKING_OTP;
+  }
+
   const words = text
     .replace(/[^a-z0-9]+/g, " ")
     .split(/\s+/)
@@ -58,16 +85,18 @@ export function parseSpokenOtp(raw: string) {
     else if (SPOKEN_DIGITS[word]) fromWords += SPOKEN_DIGITS[word];
   }
   if (fromWords.length >= 6) return fromWords.slice(0, 6);
+
+  // "1 2 3 4 5 6" or "12-34-56"
+  const spaced = text.match(/(?:\d[\s,.-]*){5,}\d/);
+  if (spaced?.[0]) {
+    const only = spaced[0].replace(/\D/g, "");
+    if (only.length >= 6) return only.slice(0, 6);
+  }
+
   const digits = text.replace(/\D/g, "");
   if (digits.length >= 6) return digits.slice(0, 6);
   return "";
 }
-
-/**
- * Temporary testing OTP. The visit is not confirmed unless the caller says this code.
- * Replace with a random one-time code when SMS OTP testing is finished.
- */
-export const TEMP_TEST_BOOKING_OTP = "123456";
 
 function generateCode() {
   return TEMP_TEST_BOOKING_OTP;
@@ -272,7 +301,7 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
     };
   }
 
-  // Testing OTP 123456 may be reused unlimited times for any pending hold on this phone.
+  // Testing OTP 123456 may be reused for any pending hold on this phone within the TTL window.
   if (isTestOtp) {
     const testRow = await findPendingOtpForPhones(phones, { allowUsed: true });
     if (!testRow) {
@@ -285,6 +314,16 @@ export async function verifyBookingOtp(input: { phone: string; otp: string; call
         needs_book_appointment: true,
         message:
           "No booking is waiting for a code yet. Call book_appointment first with doctor_id, slot_id, patient_name, phone, and reason. Do not say the appointment is confirmed.",
+      };
+    }
+    if (testRow.expiresAt.getTime() <= Date.now()) {
+      await prisma.appointmentOtp.update({ where: { id: testRow.id }, data: { usedAt: new Date() } });
+      await cancelOtpHold(testRow.appointmentId);
+      return {
+        success: false,
+        appointment_confirmed: false,
+        message:
+          "That code has expired. The appointment is not booked and not confirmed, and that time has been released. Please call book_appointment again for a new verification code.",
       };
     }
     return confirmOtpAppointment(testRow.appointmentId, testRow.id);

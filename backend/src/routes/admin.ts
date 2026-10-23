@@ -48,3 +48,6 @@ adminRouter.get("/synthflow", clinicSynthflowController.getSynthflowConfig);
 adminRouter.put("/synthflow", clinicSynthflowController.updateSynthflowConfig);
 adminRouter.post("/synthflow/agent", clinicSynthflowController.createOrUpdateAgent);
 adminRouter.post("/synthflow/sync", clinicSynthflowController.syncDirectory);
+adminRouter.get("/synthflow/call-health", clinicSynthflowController.getCallHealth);
+adminRouter.post("/synthflow/test-call", clinicSynthflowController.startTestCall);
+adminRouter.get("/synthflow/test-call/:callId", clinicSynthflowController.getTestCall);

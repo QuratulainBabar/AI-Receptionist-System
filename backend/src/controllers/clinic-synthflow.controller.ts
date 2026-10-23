@@ -2,7 +2,10 @@ import type { NextFunction, Request, Response } from "express";
 import { z } from "zod";
 import {
   createOrUpdateClinicSynthflowAgent,
+  getClinicCallHealth,
+  getClinicReceptionistTestCall,
   getClinicVoiceSettings,
+  startClinicReceptionistTestCall,
   syncClinicDirectoryToSynthflow,
   updateClinicVoiceSettings,
 } from "../services/clinic-synthflow.service.js";
@@ -24,6 +27,10 @@ const createAgentSchema = z.object({
   language: z.string().trim().max(20).optional(),
   voiceId: z.string().trim().max(120).optional(),
   synthflowAgentId: z.string().trim().max(120).optional(),
+});
+
+const testCallSchema = z.object({
+  phone: z.string().trim().min(7).max(40),
 });
 
 export async function getSynthflowConfig(_req: Request, res: Response, next: NextFunction) {
@@ -58,6 +65,35 @@ export async function createOrUpdateAgent(req: Request, res: Response, next: Nex
 export async function syncDirectory(_req: Request, res: Response, next: NextFunction) {
   try {
     const result = await syncClinicDirectoryToSynthflow();
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function startTestCall(req: Request, res: Response, next: NextFunction) {
+  try {
+    const body = testCallSchema.parse(req.body ?? {});
+    const result = await startClinicReceptionistTestCall(body);
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getTestCall(req: Request, res: Response, next: NextFunction) {
+  try {
+    const callId = String(req.params.callId || "").trim();
+    const result = await getClinicReceptionistTestCall(callId);
+    return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function getCallHealth(_req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = await getClinicCallHealth();
     return res.json(result);
   } catch (error) {
     return next(error);

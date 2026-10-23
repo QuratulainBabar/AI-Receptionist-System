@@ -1,0 +1,92 @@
+{
+  "type": "inbound",
+  "actions_count": 16,
+  "catalog_count": 1551,
+  "unknown_count": 0,
+  "nameCounts": {
+    "book_appointment": 1,
+    "info_extractor_patient_name": 1,
+    "info_extractor_phone": 1,
+    "info_extractor_doctor_id": 1,
+    "info_extractor_doctor_name": 1,
+    "info_extractor_slot_id": 1,
+    "info_extractor_reason": 1,
+    "info_extractor_email": 1,
+    "send_appointment_reminder": 1,
+    "check_doctor_availability": 1,
+    "deliver_records_upload_sms": 1,
+    "verify_booking_otp": 1,
+    "offer_records_upload": 1,
+    "check_existing_appointment": 1,
+    "send_booking_otp": 1,
+    "send_records_upload_link": 1
+  },
+  "bookingPresent": [
+    {
+      "name": "check_doctor_availability",
+      "count": 1,
+      "ids": [
+        "d0255f73-b81c-4efc-8cd6-ba01b08c6818"
+      ]
+    },
+    {
+      "name": "book_appointment",
+      "count": 1,
+      "ids": [
+        "61e02967-fa5e-4704-a165-2b1a16a6c49e"
+      ]
+    },
+    {
+      "name": "send_booking_otp",
+      "count": 1,
+      "ids": [
+        "002ea6d7-3b15-4124-9bf3-c229c1a83852"
+      ]
+    },
+    {
+      "name": "verify_booking_otp",
+      "count": 1,
+      "ids": [
+        "bbe7f78e-5a0f-4443-9808-26f21d937095"
+      ]
+    },
+    {
+      "name": "check_existing_appointment",
+      "count": 1,
+      "ids": [
+        "eaf1c5ea-9c6b-433f-baae-703ff4bd5474"
+      ]
+    },
+    {
+      "name": "offer_records_upload",
+      "count": 1,
+      "ids": [
+        "1fcffe8d-0388-466a-804a-356d7a07b345"
+      ]
+    },
+    {
+      "name": "send_records_upload_link",
+      "count": 1,
+      "ids": [
+        "5b08f4fe-cafb-4983-9660-0447175a6e8e"
+      ]
+    },
+    {
+      "name": "deliver_records_upload_sms",
+      "count": 1,
+      "ids": [
+        "ada3b5f4-7b3b-4c42-bd1e-310df240c2e9"
+      ]
+    }
+  ],
+  "patience": "medium",
+  "idle": 90,
+  "reminders": true,
+  "reminder_s": 6,
+  "noise": "standard",
+  "suppression": 0.4,
+  "min_words": 1,
+  "greeting_mode": "agent_static",
+  "transcriber_provider": "synthflow-stt",
+  "transcriber_speech_recognition": "faster"
+}

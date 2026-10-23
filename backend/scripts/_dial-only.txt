@@ -1,0 +1,18 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+outbound d474b029-ebfa-4a47-83e7-843a973c7684
+inbound_detached
+outbound_attached
+call_id 70756f5c-2173-4a9f-9b65-9d9bd854a140
+{"i":1,"status":"paused","from":null,"to":"+923708321774","duration":0,"end":null,"transcript":""}
+{"i":2,"status":"paused","from":null,"to":"+923708321774","duration":0,"end":null,"transcript":""}
+{"i":3,"status":"paused","from":null,"to":"+923708321774","duration":0,"end":null,"transcript":""}
+{"i":4,"status":"paused","from":null,"to":"+923708321774","duration":0,"end":null,"transcript":""}
+{"i":5,"status":"paused","from":null,"to":"+923708321774","duration":0,"end":null,"transcript":""}
+inbound_restored

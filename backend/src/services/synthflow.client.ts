@@ -97,8 +97,87 @@ export async function createInboundAgent(payload: Record<string, unknown>) {
   });
 }
 
+export async function createOutboundAgent(payload: Record<string, unknown>) {
+  return synthflowRequest("POST", "/assistants", {
+    type: "outbound",
+    voice_engine_version: "2.0",
+    is_recording: true,
+    ...payload,
+  });
+}
+
+/**
+ * Attach (or clear) phone numbers on an assistant pool.
+ * Pass an empty array to detach all numbers — required so competing outbound
+ * agents do not share the clinic caller ID (that yields paused / no-ring dials).
+ */
+export async function attachAssistantPhoneNumbers(modelId: string, phoneNumbers: string[]) {
+  const phones = [...new Set(phoneNumbers.map((p) => normalizePhone(p)).filter(Boolean))];
+  return synthflowRequest("PUT", `/assistants/${encodeURIComponent(modelId)}/phone_numbers`, {
+    phone_numbers: phones,
+  });
+}
+
 export async function updateAgent(modelId: string, payload: Record<string, unknown>) {
   return synthflowRequest("PUT", `/assistants/${encodeURIComponent(modelId)}`, payload);
+}
+
+/** Action IDs currently attached to an assistant (requires include_actions). */
+export async function listAssistantActionIds(modelId: string): Promise<string[]> {
+  const json = await synthflowRequest<SynthflowJson>(
+    "GET",
+    `/assistants/${encodeURIComponent(modelId)}?include_actions=true`,
+  );
+  const response = (json.response as SynthflowJson | undefined) ?? json;
+  const assistants = (response.assistants as unknown[]) || [];
+  const row = (Array.isArray(assistants) && assistants[0]
+    ? (assistants[0] as Record<string, unknown>)
+    : (response as Record<string, unknown>)) as Record<string, unknown>;
+  const actions = row.actions;
+  if (!Array.isArray(actions)) return [];
+  return actions.map((id) => String(id || "").trim()).filter(Boolean);
+}
+
+export async function detachActions(modelId: string, actionIds: string[]) {
+  const ids = [...new Set(actionIds.filter(Boolean))];
+  if (!ids.length) return null;
+  // Synthflow accepts a batch; chunk to stay under request size limits.
+  for (let i = 0; i < ids.length; i += 80) {
+    const chunk = ids.slice(i, i + 80);
+    await synthflowRequest("POST", "/actions/detach", {
+      model_id: modelId,
+      actions: chunk,
+    });
+  }
+  return { detached: ids.length };
+}
+
+/**
+ * Detach every action not in keepIds, then attach keepIds.
+ * Stops the agent from drowning in duplicate extractors/custom actions
+ * (we have seen 1000+ attachments, which stalls the conversation after the greeting).
+ */
+export async function reconcileAssistantActions(modelId: string, keepIds: string[]) {
+  const keep = [...new Set(keepIds.filter(Boolean))];
+  const current = await listAssistantActionIds(modelId).catch(() => [] as string[]);
+  const keepSet = new Set(keep);
+  const toDetach = current.filter((id) => !keepSet.has(id));
+  if (toDetach.length) {
+    console.log(
+      `[synthflow] Reconciling agent ${modelId}: detaching ${toDetach.length} excess action(s), keeping ${keep.length}`,
+    );
+    await detachActions(modelId, toDetach);
+  }
+  if (keep.length) {
+    await attachActions(modelId, keep);
+  }
+  const after = await listAssistantActionIds(modelId).catch(() => [] as string[]);
+  return {
+    before: current.length,
+    detached: toDetach.length,
+    keep: keep.length,
+    after: after.length,
+  };
 }
 
 export async function updateAssistantWebhooks(modelId: string) {
@@ -123,6 +202,7 @@ export async function createInformationExtractor(input: {
   if (input.kind === "OPEN_QUESTION" && input.examples?.length) inner.examples = input.examples;
   if (input.kind === "SINGLE_CHOICE" && input.choices?.length) inner.choices = input.choices;
 
+  invalidateSynthflowActionsCache();
   const json = await synthflowRequest<SynthflowJson>("POST", "/actions", {
     INFORMATION_EXTRACTOR: {
       [input.kind]: inner,
@@ -149,6 +229,7 @@ export async function createCustomAction(input: {
   prompt?: string;
   messageError?: string;
 }) {
+  invalidateSynthflowActionsCache();
   const json = await synthflowRequest<SynthflowJson>("POST", "/actions", {
     CUSTOM_ACTION: {
       http_mode: "POST",
@@ -165,7 +246,9 @@ export async function createCustomAction(input: {
       json_body_stringified: JSON.stringify(input.jsonBody),
       prompt: input.prompt,
       message_error: input.messageError,
-      agent_speak_naturally: true,
+      // Avoid "Got it… checking" filler while the HTTP tool runs (adds perceived latency).
+      agent_speak_naturally: false,
+      speech_while_using_the_tool: "",
     },
   });
 
@@ -180,35 +263,77 @@ export async function createCustomAction(input: {
   return { raw: json, action_id: actionId };
 }
 
-async function listActionsByName(name: string) {
-  const want = name.trim().toLowerCase();
-  if (!want) return [] as Array<{ id: string; assistants: string[] }>;
-  try {
-    const json = await synthflowRequest<SynthflowJson>("GET", "/actions?limit=100");
-    const response = (json.response as SynthflowJson | undefined) ?? {};
-    const actions = (response.actions as unknown[]) || (json.actions as unknown[]) || [];
-    if (!Array.isArray(actions)) return [];
+type ListedAction = {
+  id: string;
+  name: string;
+  assistants: string[];
+};
 
-    const matches: Array<{ id: string; assistants: string[] }> = [];
-    for (const raw of actions) {
-      const row = raw as Record<string, unknown>;
-      const actionName = String(row.name || row.action_name || "").trim().toLowerCase();
-      if (actionName !== want) continue;
-      const id = String(row.action_id || row.id || "").trim();
-      if (!id) continue;
-      const assistants = Array.isArray(row.assistants)
-        ? row.assistants.map((value) => String(value))
-        : [];
-      matches.push({ id, assistants });
-    }
-    return matches;
-  } catch (error) {
-    console.warn(
-      "[synthflow] list actions failed:",
-      error instanceof Error ? error.message : error,
-    );
-    return [];
+let actionsCatalogCache: { at: number; rows: ListedAction[] } | null = null;
+const ACTIONS_CATALOG_TTL_MS = 45_000;
+
+/** Invalidate cached /actions list after creates/updates/deletes. */
+export function invalidateSynthflowActionsCache() {
+  actionsCatalogCache = null;
+  workspaceActionIdsCache = null;
+}
+
+async function loadActionsCatalog(force = false): Promise<ListedAction[]> {
+  if (
+    !force &&
+    actionsCatalogCache &&
+    Date.now() - actionsCatalogCache.at < ACTIONS_CATALOG_TTL_MS
+  ) {
+    return actionsCatalogCache.rows;
   }
+
+  const rows: ListedAction[] = [];
+  for (let offset = 0; offset < 500; offset += 100) {
+    try {
+      const json = await synthflowRequest<SynthflowJson>(
+        "GET",
+        `/actions?limit=100&offset=${offset}`,
+      );
+      const response = (json.response as SynthflowJson | undefined) ?? {};
+      const actions = (response.actions as unknown[]) || (json.actions as unknown[]) || [];
+      if (!Array.isArray(actions) || !actions.length) break;
+      for (const raw of actions) {
+        const row = raw as Record<string, unknown>;
+        const id = String(row.action_id || row.id || "").trim();
+        if (!id) continue;
+        const name = String(row.name || row.action_name || row.identifier || "")
+          .trim()
+          .toLowerCase();
+        const assistants = Array.isArray(row.assistants)
+          ? row.assistants.map((value) => String(value))
+          : [];
+        rows.push({ id, name, assistants });
+      }
+      if (actions.length < 100) break;
+    } catch (error) {
+      console.warn(
+        "[synthflow] list actions failed:",
+        error instanceof Error ? error.message : error,
+      );
+      break;
+    }
+  }
+
+  actionsCatalogCache = { at: Date.now(), rows };
+  return rows;
+}
+
+async function listActionsByName(name: string): Promise<Array<{ id: string; assistants: string[]; name: string }>> {
+  const want = name.trim().toLowerCase();
+  if (!want) return [];
+  const catalog = await loadActionsCatalog();
+  // Synthflow names information extractors "info_extractor_<identifier>".
+  // Older code looked up bare identifiers (patient_name) and created a new
+  // extractor on every sync — that piled 100+ copies onto the inbound agent.
+  const aliases = new Set([want, `info_extractor_${want}`]);
+  return catalog
+    .filter((row) => aliases.has(row.name))
+    .map((row) => ({ id: row.id, assistants: row.assistants, name: row.name }));
 }
 
 export async function findActionIdByName(name: string, preferredModelId?: string) {
@@ -218,6 +343,12 @@ export async function findActionIdByName(name: string, preferredModelId?: string
     const attached = matches.find((row) => row.assistants.includes(preferredModelId));
     if (attached) return attached.id;
   }
+  // Prefer exact name, then info_extractor_*, then first match.
+  const want = name.trim().toLowerCase();
+  const exact = matches.find((row) => row.name === want);
+  if (exact) return exact.id;
+  const extractor = matches.find((row) => row.name === `info_extractor_${want}`);
+  if (extractor) return extractor.id;
   return matches[0].id;
 }
 
@@ -254,40 +385,77 @@ The greeting already includes the clinic welcome, the doctor's name, and the con
 If the greeting did not already say the doctor's name, say only opening_doctor_line, then ask how you can help.
 If the caller asks about the doctor, answer from the latest Clinic doctor profile (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about). Never invent missing details.`;
 
+const FAST_RESPONSE_RULE = `FAST RESPONSE RULE (CRITICAL — NO DEAD AIR — HIGHEST PRIORITY):
+After your greeting, WAIT silently for the caller. Do NOT say "Sorry, could you say that again?" after the greeting unless the caller already spoke and you truly could not hear them.
+When the caller speaks, reply in one short sentence. Never go silent. Never invent filler like "Got it, checking", "one moment", or "just a second" before a tool — call the tool, then speak the tool message.
+BOOKING INTENT (booking, schedule, appointment, visit, apartment/misheard book, or "I want to…"):
+- Speak IMMEDIATELY — do not call any action first.
+- Say EXACTLY: "Which day would you like your appointment?" Then STOP and WAIT.
+- Do NOT call check_doctor_availability, check_existing_appointment, book_appointment, verify_booking_otp, or any SMS action on this turn.
+Generic booking intent is NOT an availability question. Ask which day first; call tools only after they name a day or ask which days/times are open.`;
+
+const LISTENING_CAPTURE_RULE = `LISTENING & CAPTURE RULE (NAMES, PHONES, OTP — CRITICAL):
+- Let the caller finish speaking. Do not interrupt mid-name or mid-number.
+- ONE question per turn. Never ask name and phone in the same turn.
+- FULL NAME: After they answer, briefly confirm once: "I heard [name]. Is that right?" If they say no or correct it, use their correction. If still unclear, ask once: "Please say your full name slowly." Never store garbage like random words; never invent a name.
+- PHONE: Ask them to say digits one by one. Convert spoken digit words (oh/zero, double three) to digits. Confirm once by reading the digits back. Never invent or swap a number.
+- OTP: As soon as they say six digits (or one-two-three-four-five-six), call verify_booking_otp immediately with those digits. Do not say "one moment" first.
+- If you already captured a clear answer, do not ask the same question again.`;
+
 const AVAILABILITY_SPEAK_RULE = `AVAILABILITY SPEAK RULE (FOLLOW EXACTLY — NEVER REFUSE TO CHECK):
-SPEAKING: Speak clearly at a calm natural pace. Short pause after questions.
-EXCEPTION TO BREVITY: When answering availability, say the full message / spoken_summary from check_doctor_availability (word limits do not apply to that list).
-IMMEDIATE AVAILABILITY QUESTIONS (do these first — do not stall):
-- If the caller asks about TODAY's availability / open times today → immediately call check_doctor_availability with date "today". Say the returned message (or spoken_summary) exactly, then WAIT.
-- If the caller asks about the weekly schedule / this week / which days are available → immediately call check_doctor_availability with date empty. Say the returned message (or spoken_summary) exactly, then WAIT.
-BOOKING ORDER (when they want to book but have not asked for a list yet):
-1. Say ONLY: "Which day would you like your appointment?" Then STOP and WAIT. Do not list dates yet.
-2. If they name a day (for example Friday, today, or October 17), call check_doctor_availability with that date. Say message / spoken_summary exactly (open times for that date). Ask which time. Then WAIT.
-3. Only if they say they do not know, call check_doctor_availability with date empty. Say message / spoken_summary exactly (open dates for the next seven days). Ask which date. Then WAIT.
-4. Only after they pick a time, collect booking details (reason, name, phone), then follow BOOKING OTP RULE step by step (check_existing_appointment → book_appointment → OTP → verify_booking_otp).
-Never recite open slots from the doctor profile. Never invent a date or time.
-Bookable times come only from check_doctor_availability message / spoken_summary.`;
+HARD RULE — REAL DATABASE SLOTS ONLY:
+- You may speak ONLY dates and times returned by the latest check_doctor_availability message / spoken_summary.
+- NEVER invent a date or time. NEVER guess. NEVER use "Usual weekly hours", memory, or any Open slot ids list in the prompt to answer the caller.
+- Scope is ONLY today and the current seven days from the tool. If a day is not in the tool response, that day is NOT available — do not mention it.
+SPEAKING: Speak clearly at a natural pace. Brief pause only after questions or between listed times — never before your first words.
+EXCEPTION TO BREVITY: When answering availability, say the FULL message / spoken_summary from check_doctor_availability word-for-word (word limits do not apply). Then WAIT.
+- If the message says "today" or "tomorrow", speak those exact words — do not replace them with a calendar date.
+PRIORITY — AVAILABILITY QUESTIONS OVERRIDE BOOKING ORDER:
+- TODAY / open times today / what times are free today → do NOT ask which day. Immediately call check_doctor_availability with date "today". Say the returned message exactly, then WAIT.
+- This week / weekly schedule / which days available / available days / which days is the doctor in → do NOT ask which day first. Immediately call check_doctor_availability with date empty (""). Say the returned message exactly (open days this week), then WAIT.
+BOOKING ORDER (only when they want to book and have NOT already asked for today's times or the weekly list):
+1. Reply RIGHT AWAY with ONLY: "Which day would you like your appointment?" Then STOP and WAIT. Do not list dates. Do not call any action yet.
+2. If they name a day (today, tomorrow, Friday, October 22…), call check_doctor_availability with that date. Say message / spoken_summary exactly. Ask which time. Then WAIT.
+3. Only if they say they do not know, call check_doctor_availability with date empty. Say message / spoken_summary exactly. Ask which date. Then WAIT.
+4. After they pick a real open time, you MUST follow DETAILS COLLECTION RULE below (never skip; never jump to OTP).
+Never recite open slots from the doctor profile. Bookable times come only from check_doctor_availability.
+
+DETAILS COLLECTION RULE — AFTER TIME IS CHOSEN (one question per turn, then WAIT):
+A. Ask exactly: "May I have your full name?" Then STOP and WAIT.
+B. After they give their name, ask exactly: "What is the reason for your visit today?" Then STOP and WAIT. Do not ask for the phone yet.
+C. After they give the reason, ask exactly: "What phone number should we use for this booking?" Then STOP and WAIT.
+D. After they give the phone number, follow PHONE APPOINTMENT RULE (thank-you line → check_existing_appointment → book only if clear → then OTP).
+NEVER ask only for the name and then book or ask for a verification code.
+NEVER skip the reason. NEVER skip the phone number. NEVER skip the existing-appointment check.`;
 
 const PHONE_APPOINTMENT_RULE = `PHONE APPOINTMENT RULE (FOLLOW BEFORE ANY BOOKING):
-Call check_existing_appointment only after the caller says a phone number. Do not call it when they say their name.
-If has_active_appointment is true, say exactly: I did not book a new appointment. This number already has an active appointment. Please complete or cancel that one first.
+When collecting the booking phone: listen for spoken digits (including "plus", "oh", "double"), keep the exact number the caller said, and if unclear ask them to repeat slowly. Never invent or substitute a different number.
+Only after you already have: (1) chosen time, (2) full name, (3) visit reason, and (4) booking phone — say exactly: "Thank you. Let me check whether there is already an active appointment associated with this number."
+Then IMMEDIATELY call check_existing_appointment with that exact phone the caller spoke (never skip; never call book_appointment first). Do not call check_existing_appointment when they only said their name or only the reason.
+If has_active_appointment is true, say the action message exactly and STOP. Do not call book_appointment. Do not ask for a verification code.
 If the caller asks "is my appointment confirmed?", say no. The new appointment was not booked. Only the older appointment is still confirmed.
 If has_active_appointment is false, or the previous appointment is Completed or Cancelled, you MUST next call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do NOT ask for a verification code yet. Do NOT call verify_booking_otp yet.
 Never say a new appointment is booked or confirmed unless verify_booking_otp returns appointment_confirmed true.`;
 
 const BOOKING_OTP_RULE = `BOOKING OTP RULE — MANDATORY ORDER (never skip a step):
 The appointment is not booked and not confirmed until verify_booking_otp returns appointment_confirmed true.
-Required sequence after the caller picks a real open time and gives name, phone, and reason:
-1. Call check_existing_appointment with the booking phone.
-2. If has_active_appointment is true, stop. Do not book. Do not ask for a code.
-3. If has_active_appointment is false, you MUST call book_appointment with doctor_id, real slot_id from check_doctor_availability, patient_name, phone, and reason. This only holds the time.
-4. ONLY after book_appointment returns success true (and otp_required true): ask exactly "Please say the six-digit verification code." Then WAIT.
-5. Call verify_booking_otp with the booking phone and the digits they speak.
-If you did not catch the digits, say: Sorry, I did not catch that. Please say the six digits slowly. Then WAIT and call verify_booking_otp again.
+After the caller picks a real open time, collect details in this exact order (one question, then WAIT — never combine):
+1. Ask for full name. WAIT.
+2. Ask for the reason for the visit. WAIT. (Required — never skip.)
+3. Ask for the booking phone number. WAIT. (Required — never skip.)
+4. Say exactly: "Thank you. Let me check whether there is already an active appointment associated with this number."
+5. MUST call check_existing_appointment with the exact booking phone the caller spoke (never skip; pass the real digits, never invent a number).
+6. If has_active_appointment is true, say the action message exactly and STOP. Do not book. Do not ask for a code.
+7. If has_active_appointment is false, you MUST call book_appointment with doctor_id, real slot_id from check_doctor_availability, patient_name, phone, and reason. This only holds the time.
+8. ONLY after book_appointment returns success true (and otp_required true): ask exactly "Please say the six-digit verification code." Then WAIT for their reply.
+9. As soon as they reply with any digits or digit-words (for testing the code is 123456 / one two three four five six), IMMEDIATELY call verify_booking_otp. Put the digits in the otp field as 123456 when that is what they said. Do NOT say "sorry I did not catch that" before calling the action.
+10. Say the verify_booking_otp response message exactly. If appointment_confirmed is true, give the final appointment summary, then follow RECORDS UPLOAD OFFER RULE.
 If appointment_confirmed is false, say the message. If it says to call book_appointment first, do that before asking for a code again.
-NEVER ask for a verification code before book_appointment succeeds in this call.
+If the action fails or otp was empty, ask once: "Please say the six digits one by one, slowly." Then WAIT and call verify_booking_otp again with what they said.
+NEVER ask for a verification code before name, reason, phone, check_existing_appointment, and book_appointment all succeed in this call.
 NEVER call verify_booking_otp before book_appointment succeeds in this call.
-NEVER say, read, or hint any OTP digits (not 123456, not one two three…). Do not speak the otp field if present.
+NEVER call book_appointment before check_existing_appointment succeeds with has_active_appointment false in this call.
+NEVER speak OTP digits aloud to the caller. You MAY and MUST pass the digits into verify_booking_otp.otp (testing code 123456).
 Never invent a confirmation. Never say the visit is booked before verify_booking_otp returns appointment_confirmed true.`;
 
 const RECORDS_UPLOAD_OFFER_RULE = `RECORDS UPLOAD OFFER RULE:
@@ -304,7 +472,42 @@ Do not run this rule before the appointment is confirmed.`;
 
 /** Prefix rules baked into every Sync so Fine-tuner matches live calls. */
 export function synthflowPromptRulePrefix() {
-  return `${OPENING_RULE}\n\n${BOOKING_OTP_RULE}\n\n${RECORDS_UPLOAD_OFFER_RULE}\n\n${AVAILABILITY_SPEAK_RULE}\n\n${PHONE_APPOINTMENT_RULE}`;
+  return `${OPENING_RULE}\n\n${FAST_RESPONSE_RULE}\n\n${BOOKING_OTP_RULE}\n\n${RECORDS_UPLOAD_OFFER_RULE}\n\n${AVAILABILITY_SPEAK_RULE}\n\n${PHONE_APPOINTMENT_RULE}`;
+}
+
+/**
+ * Compact rules for the live phone agent. The workspace LLM is locked to
+ * `synthflow` (API cannot switch to GPT). A 24KB duplicated prompt caused the
+ * model to greet then go silent instead of following booking intent.
+ */
+export function synthflowCompactLivePrompt(input: {
+  clinicName: string;
+  clinicDoctorBlock: string;
+}) {
+  return `You are the polite, calm, concise AI phone receptionist for ${input.clinicName}. This clinic has ONE doctor. Never invent doctors, fees, dates, or times.
+
+${FAST_RESPONSE_RULE}
+
+${LISTENING_CAPTURE_RULE}
+
+${AVAILABILITY_SPEAK_RULE}
+
+${PHONE_APPOINTMENT_RULE}
+
+${BOOKING_OTP_RULE}
+
+${RECORDS_UPLOAD_OFFER_RULE}
+
+${OPENING_RULE}
+
+SPEECH RULES:
+- Keep every reply to 1–2 short sentences except when reading a full availability spoken_summary.
+- Ask only one question per turn, then WAIT.
+- Never go silent after the caller speaks.
+- Never give medical advice.
+- Never say "Got it, checking", "one moment", or "just a second" — speak the real next question or the tool message.
+
+${input.clinicDoctorBlock}`;
 }
 
 export async function syncCustomActionWebhookUrls(modelId?: string) {
@@ -314,8 +517,9 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "book_appointment",
       url: urls.bookAction,
       prompt:
-        "REQUIRED before any verification code. This does not book or confirm the appointment. If success is true, the time is only on hold — then ask the caller to say the six-digit verification code, WAIT, and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not ask for a code.",
-      message_error: "Say the response message if one is present. Otherwise say the booking could not be saved.",
+        "Only call this AFTER check_existing_appointment returned has_active_appointment false. REQUIRED before any verification code. This does not book or confirm the appointment. If success is true, the time is only on hold — then ask the caller to say the six-digit verification code, WAIT, and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not ask for a code.",
+      message_error:
+        "I could not hold that appointment time. Please say another open time from the schedule, or confirm the booking details.",
       jsonBody: {
         doctor_name: "<doctor_name>",
         doctor_id: "<doctor_id>",
@@ -327,7 +531,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       },
       create: {
         description:
-          "REQUIRED after check_existing_appointment clears. Hold a real open slot_id for OTP verification. Call this before asking for any verification code.",
+          "REQUIRED after check_existing_appointment clears (has_active_appointment false). Hold a real open slot_id for OTP verification. Call this before asking for any verification code.",
         jsonBody: {
           doctor_name: "<doctor_name>",
           doctor_id: "<doctor_id>",
@@ -360,7 +564,8 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
           },
           {
             name: "phone",
-            description: "Booking mobile number the caller provided",
+            description:
+              "Exact booking mobile the caller spoke, as digits with country code when known (convert spoken words like nine two three to 923…). Never invent a number.",
             example: "+12014799258",
           },
           {
@@ -380,18 +585,18 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "check_doctor_availability",
       url: urls.availabilityAction,
       prompt:
-        "REQUIRED: Say the response message field exactly (same text as spoken_summary), then WAIT. If mode is dates, those are open dates for the next seven days — pause between dates, ask which date. If mode is slots, those are open times for the chosen date — pause between times, ask which time. Never invent a date or time. Call this immediately when the caller asks about today's times or the weekly schedule.",
-      message_error: "Let me check the clinic schedule for open dates in the next seven days.",
+        "REQUIRED — say the response message field EXACTLY (same as spoken_summary), then WAIT. Do not add, remove, or invent any date or time. If mode is dates, those are the ONLY open days this week from the doctor dashboard database. If mode is slots, those are the ONLY open times for that day. Call for today's times (date=today), this week's days (date empty), or after they name a day — never on a plain 'I want to book' turn.",
+      message_error: "I could not load open times just now. Which day would you like instead?",
       jsonBody: { date: "<date>" },
       create: {
         description:
-          "Return live open dates for the next seven days, or open times for one day from the Doctor Dashboard. Call immediately when the caller asks about today's availability (date=today), the weekly schedule (date empty), or after they name a day.",
+          "Return live open dates for the current seven days, or open times for one day, from the Doctor Dashboard database only. Call for today's availability (date=today), this week's open days (date empty), or after they name a day. Do NOT call when the caller only says they want to book — ask which day first.",
         jsonBody: { date: "<date>" },
         variables: [
           {
             name: "date",
             description:
-              "Use empty for weekly open dates. Use today for today's open times. Or pass a chosen day (tomorrow, Wednesday, October 15).",
+              "Use empty for this week's open days. Use today for today's open times. Or pass a chosen day (tomorrow, Wednesday, October 22).",
             example: "today",
           },
         ],
@@ -401,16 +606,23 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "check_existing_appointment",
       url: urls.checkAppointmentAction,
       prompt:
-        "Call this only after the caller has said a phone number. If has_active_appointment is true, say the message exactly and stop. The new appointment is NOT booked. If the caller asks 'is my appointment confirmed?', say no, the new one was not booked, and repeat the existing appointment. If has_active_appointment is false, say we can continue, then IMMEDIATELY call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do NOT ask for a verification code until book_appointment succeeds.",
+        "REQUIRED after reason and contact number. First say exactly: Thank you. Let me check whether there is already an active appointment associated with this number. Then call this with the caller's exact booking phone. If has_active_appointment is true, say the message exactly and STOP — do not book and do not ask for a code. If has_active_appointment is false, IMMEDIATELY call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do NOT ask for a verification code until book_appointment succeeds.",
       message_error: "Please repeat the phone number so I can check existing appointments.",
+      jsonBody: { phone: "<phone>", caller_phone: "<user_phone_number>" },
       create: {
         description:
-          "Check whether this phone number already has a Pending or Confirmed appointment. Call this as soon as the caller gives a phone number, before book_appointment.",
-        jsonBody: { phone: "<phone>" },
+          "Check whether this phone number already has a Pending or Confirmed appointment. After collecting reason and phone, say the thank-you check line, then call this before book_appointment.",
+        jsonBody: { phone: "<phone>", caller_phone: "<user_phone_number>" },
         variables: [
           {
             name: "phone",
-            description: "Phone number the caller just gave",
+            description:
+              "Exact booking mobile the caller just spoke, as digits with country code when known (convert spoken digit words to numbers). Never invent or swap in another number.",
+            example: "+923129312436",
+          },
+          {
+            name: "user_phone_number",
+            description: "Inbound caller phone; always send this as caller_phone fallback",
             example: "+923129312436",
           },
         ],
@@ -420,13 +632,13 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "verify_booking_otp",
       url: urls.verifyOtpAction,
       prompt:
-        "Only call this AFTER book_appointment succeeded in this call. Say the message exactly. If appointment_confirmed is true, give the final appointment summary from the message (reference, doctor, date, time). Then ask exactly: Would you like to share your medical records or any relevant files with the doctor? Wait for yes or no, then call offer_records_upload. If appointment_confirmed is false, say the message — if it says to call book_appointment first, call book_appointment before asking for a code again. Never say OTP digits aloud. If you did not catch the digits, ask them to say the six digits slowly, then call this action again. Do not invent a confirmation.",
+        "REQUIRED after the caller says the verification code. Call this immediately with otp set to the six digits they spoke (testing code is 123456). Say the response message exactly. If appointment_confirmed is true, give the final appointment summary, then ask about medical records upload. If appointment_confirmed is false, say the message. Never speak OTP digits aloud. Do not invent a confirmation. Do not say you did not catch the code unless this action failed and you must ask them to repeat once.",
       message_error:
-        "Sorry, I did not catch that. Please say the six digits slowly.",
+        "Please say the six digits one by one, slowly, and I will check the code again.",
       jsonBody: { phone: "<phone>", otp: "<otp>", caller_phone: "<user_phone_number>" },
       create: {
         description:
-          "Verify the 6-digit testing code 123456 the caller speaks AFTER book_appointment. Confirm the appointment only when this returns appointment_confirmed true.",
+          "Verify the 6-digit testing code 123456 the caller speaks AFTER book_appointment. Always call this when they say the code. Confirm only when appointment_confirmed is true.",
         jsonBody: { phone: "<phone>", otp: "<otp>", caller_phone: "<user_phone_number>" },
         variables: [
           {
@@ -436,7 +648,8 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
           },
           {
             name: "otp",
-            description: "The six digits the caller spoke. Testing code is always 123456.",
+            description:
+              "REQUIRED. Six digits the caller spoke. For testing always pass 123456 when they said one-two-three-four-five-six or 123456. Pass digits only, no spaces.",
             example: "123456",
           },
           {
@@ -576,7 +789,12 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       (await findActionIdByName(pair.name, modelId)) || actionIds[0];
     attachIds.push(preferredId);
 
-    const body: Record<string, unknown> = { url: pair.url };
+    const body: Record<string, unknown> = {
+      url: pair.url,
+      // Silence tool-fillers ("Got it checking") that inflate perceived latency.
+      agent_speak_naturally: false,
+      speech_while_using_the_tool: "",
+    };
     if ("prompt" in pair && pair.prompt) body.prompt = pair.prompt;
     if ("message_error" in pair && pair.message_error) body.message_error = pair.message_error;
     if ("jsonBody" in pair && pair.jsonBody) body.json_body_stringified = JSON.stringify(pair.jsonBody);
@@ -612,7 +830,16 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
   if (recordsSmsActionId) attachIds.push(recordsSmsActionId);
 
   if (modelId && attachIds.length) {
-    await attachActions(modelId, attachIds).catch((error) => {
+    const currentCount = await listAssistantActionIds(modelId)
+      .then((ids) => ids.length)
+      .catch(() => 0);
+    // Never keep piling attachments — when the agent is already bloated, replace
+    // the whole set with the canonical booking tools from this sync.
+    const apply =
+      currentCount > 40
+        ? reconcileAssistantActions(modelId, attachIds)
+        : attachActions(modelId, attachIds);
+    await apply.catch((error) => {
       console.warn(
         "[synthflow] Could not attach booking actions:",
         error instanceof Error ? error.message : error,
@@ -663,6 +890,14 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
     await attachBookCallerPhone(modelId).catch((error) => {
       console.warn(
         "[synthflow] Could not map the caller phone on book_appointment:",
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }
+  if (modelId) {
+    await attachCheckExistingPhone(modelId).catch((error) => {
+      console.warn(
+        "[synthflow] Could not map the booking phone on check_existing_appointment:",
         error instanceof Error ? error.message : error,
       );
     });
@@ -720,7 +955,7 @@ function stripStaleMultiDoctorPrompt(prompt: string) {
   let next = prompt.replace(/\r\n/g, "\n");
   // Remove any leading rule-prefix block (including RECORDS / MANDATORY ORDER titles).
   next = next.replace(
-    /^(?:OPENING RULE:|BOOKING OTP RULE(?:[^\n]*):|RECORDS UPLOAD OFFER RULE:|AVAILABILITY SPEAK RULE(?:[^\n]*):|PHONE APPOINTMENT RULE(?:[^\n]*):)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
+    /^(?:OPENING RULE:|FAST RESPONSE RULE(?:[^\n]*):|BOOKING OTP RULE(?:[^\n]*):|RECORDS UPLOAD OFFER RULE:|AVAILABILITY SPEAK RULE(?:[^\n]*):|PHONE APPOINTMENT RULE(?:[^\n]*):)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
     "",
   );
   next = next.replace(
@@ -778,13 +1013,13 @@ async function ensurePhoneAppointmentRule(modelId: string) {
   if (greetingMessage !== agent.greeting_message) changed = true;
   if (agent.greeting_message_mode !== "agent_static") changed = true;
   const voiceSpeed = Number(agent.voice_speed);
-  // Calm pace — not the minimum 0.7 (that sounds too slow / stalled).
-  if (voiceSpeed !== 0.85) changed = true;
-  const calmVoicePrompt =
-    "Speak clearly at a calm, natural pace. Short pause after questions. Do not rush dates, times, or phone numbers.";
-  if (String(agent.voice_prompt || "") !== calmVoicePrompt) changed = true;
+  // Natural pace (1.0) — avoids the slow / stalled feel of sub-1.0 speeds.
+  if (voiceSpeed !== 1.0) changed = true;
+  const naturalVoicePrompt =
+    "Speak clearly at a natural pace. Start speaking immediately when you have a reply. Brief pause only after questions. Do not rush dates, times, or phone numbers.";
+  if (String(agent.voice_prompt || "") !== naturalVoicePrompt) changed = true;
   if (!changed) {
-    console.log("[synthflow] System prompt already includes the opening, phone, availability, OTP rules, and calm voice");
+    console.log("[synthflow] System prompt already includes the opening, fast-response, phone, availability, OTP rules, and natural voice");
     return;
   }
   await updateAgent(modelId, {
@@ -793,20 +1028,107 @@ async function ensurePhoneAppointmentRule(modelId: string) {
       prompt,
       greeting_message: greetingMessage,
       greeting_message_mode: "agent_static",
-      // Synthflow allows 0.7–1.2 (1.0 = natural). 0.85 is calm without dragging.
-      voice_speed: 0.85,
-      voice_prompt: calmVoicePrompt,
+      // Synthflow allows 0.7–1.2 (1.0 = natural). Prefer natural for snappy turn-taking.
+      voice_speed: 1.0,
+      voice_prompt: naturalVoicePrompt,
     },
   });
-  console.log("[synthflow] Opening, phone, availability, OTP rules, and calm voice added to the live system prompt");
+  console.log("[synthflow] Opening, fast-response, phone, availability, OTP rules, and natural voice added to the live system prompt");
+}
+
+let workspaceActionIdsCache: { at: number; ids: Set<string> } | null = null;
+
+/** All action ids currently present in the Synthflow workspace (cached briefly). */
+export async function listWorkspaceActionIds(): Promise<Set<string>> {
+  if (
+    workspaceActionIdsCache &&
+    Date.now() - workspaceActionIdsCache.at < ACTIONS_CATALOG_TTL_MS
+  ) {
+    return workspaceActionIdsCache.ids;
+  }
+  const catalog = await loadActionsCatalog();
+  const ids = new Set(catalog.map((row) => row.id));
+  workspaceActionIdsCache = { at: Date.now(), ids };
+  return ids;
+}
+
+/** Keep only action ids that still exist in Synthflow (drops deleted extractors). */
+export async function pruneStaleActionIds(actionIds: string[]): Promise<{
+  living: string[];
+  dropped: string[];
+}> {
+  const unique = [...new Set(actionIds.filter(Boolean))];
+  if (!unique.length) return { living: [], dropped: [] };
+  const workspace = await listWorkspaceActionIds();
+  const living = unique.filter((id) => workspace.has(id));
+  const dropped = unique.filter((id) => !workspace.has(id));
+  if (dropped.length) {
+    console.warn(
+      `[synthflow] Dropping ${dropped.length} stale action id(s) (deleted in Synthflow): ${dropped.join(", ")}`,
+    );
+  }
+  return { living, dropped };
 }
 
 export async function attachActions(modelId: string, actionIds: string[]) {
-  const ids = actionIds.filter(Boolean);
+  let ids = [...new Set(actionIds.filter(Boolean))];
   if (!ids.length) return null;
+
+  const pruned = await pruneStaleActionIds(ids);
+  ids = pruned.living;
+  if (!ids.length) {
+    console.warn("[synthflow] attachActions: no living action ids left after prune");
+    return null;
+  }
+
+  // Retry without any slug Synthflow still rejects (race / partial list).
+  for (let attempt = 0; attempt < 8 && ids.length; attempt += 1) {
+    try {
+      return await synthflowRequest("POST", "/actions/attach", {
+        model_id: modelId,
+        actions: ids,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const match = message.match(/Action with slug\s+([a-f0-9-]{36})\s+not found/i);
+      if (!match?.[1]) throw error;
+      const missing = match[1];
+      console.warn(`[synthflow] attachActions: skipping missing action ${missing}`);
+      ids = ids.filter((id) => id !== missing);
+      if (!ids.length) return null;
+    }
+  }
+  return null;
+}
+
+/** Fill check_existing_appointment.phone from the number the caller spoke. */
+async function attachCheckExistingPhone(modelId: string) {
+  const actionId = await findActionIdByName("check_existing_appointment");
+  if (!actionId) return null;
   return synthflowRequest("POST", "/actions/attach", {
     model_id: modelId,
-    actions: ids,
+    items: [
+      {
+        action_id: actionId,
+        attachment_type: "during",
+        input_variables_mapping: [
+          {
+            variable_name: "phone",
+            source: "llm",
+            llm_config: {
+              description:
+                "Exact booking mobile the caller just spoke for this appointment, as digits with country code when known. Convert spoken digit words (nine two three…) to numbers. Prefer the contact number they gave for booking over guessing. Never invent or substitute a different number.",
+              example: "+923129312436",
+              required: true,
+            },
+          },
+          {
+            variable_name: "user_phone_number",
+            source: "system_vars",
+          },
+        ],
+      },
+    ],
   });
 }
 
@@ -844,7 +1166,11 @@ async function attachBookCallerPhone(modelId: string) {
           {
             variable_name: "phone",
             source: "llm",
-            llm_config: { description: "Contact phone the caller gave for the appointment", example: "+923708321774" },
+            llm_config: {
+              description:
+                "Exact booking mobile the caller spoke for this appointment, as digits with country code when known. Convert spoken digit words to numbers. Never invent a number.",
+              example: "+923708321774",
+            },
           },
           {
             variable_name: "reason",
@@ -884,8 +1210,10 @@ async function attachVerifyOtpCallerPhone(modelId: string) {
             variable_name: "otp",
             source: "llm",
             llm_config: {
-              description: "The six digits the caller spoke. Testing code is always 123456.",
+              description:
+                "REQUIRED. Six digits the caller just spoke for verification. Testing code is 123456. If they said one two three four five six, pass 123456. Digits only, no spaces. Never leave empty.",
               example: "123456",
+              required: true,
             },
           },
           {
@@ -1149,8 +1477,11 @@ async function attachRecordsUploadSmsOutbound(modelId: string, actionId: string)
 }
 
 /**
- * Send a plain SMS without placing a voice call (Synthflow chat outbound).
- * Falls back gracefully when the workspace has no SMS chat channel configured.
+ * Send a plain SMS via POST /chat/outbound (chat agents only).
+ * The AI Receptionist voice agent cannot use this — Synthflow returns
+ * "Omnichannel chat is only supported for chat agents."
+ * For the live booking call, use INCALL_SMS (`send_records_upload_link`) instead.
+ * Never place an outbound voice call from this helper.
  */
 export async function sendDirectSms(input: {
   toPhone: string;
@@ -1168,6 +1499,8 @@ export async function sendDirectSms(input: {
   if (toPhone === fromNumber) return { ok: false, error: "Patient phone cannot be the clinic number" };
   if (!body) return { ok: false, error: "SMS body is empty" };
 
+  console.log(`[synthflow] Direct SMS (no call) → ${toPhone} from=${fromNumber} body_len=${body.length}`);
+
   try {
     const result = await synthflowRequest<SynthflowJson>("POST", "/chat/outbound", {
       agent_id: agentId,
@@ -1177,14 +1510,42 @@ export async function sendDirectSms(input: {
       initial_message: body,
     });
     console.log(
-      `[synthflow] Direct SMS accepted → ${toPhone} body_len=${body.length} response=${JSON.stringify(result).slice(0, 240)}`,
+      `[synthflow] Direct SMS accepted → ${toPhone} response=${JSON.stringify(result).slice(0, 320)}`,
     );
     return { ok: true, mode: "chat_outbound" };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[synthflow] Direct SMS failed → ${toPhone}:`, message);
-    return { ok: false, error: message };
+    return {
+      ok: false,
+      error: message.includes("chat") || message.includes("Omnichannel") || message.includes("404") || message.includes("400")
+        ? `SMS channel unavailable (${message}). /chat/outbound requires a Synthflow chat agent; the clinic voice agent must send SMS via INCALL_SMS on a call.`
+        : message,
+    };
   }
+}
+
+/**
+ * Deliver a prepared clinic SMS without placing an automated voice call.
+ * Tries Synthflow `/chat/outbound` first. On voice-agent workspaces that reject
+ * omnichannel chat, returns ok:false so the live-call INCALL_SMS action can send.
+ */
+export async function deliverSmsWithoutCall(input: {
+  toPhone: string;
+  body: string;
+  purpose?: "records_upload" | "other";
+}): Promise<{ ok: true; mode: "chat_outbound" } | { ok: false; error: string }> {
+  const result = await sendDirectSms({ toPhone: input.toPhone, body: input.body });
+  if (result.ok) {
+    console.log(
+      `[synthflow] SMS delivered (no call) purpose=${input.purpose || "other"} → ${normalizePhone(input.toPhone)}`,
+    );
+    return result;
+  }
+  console.warn(
+    `[synthflow] SMS not delivered via no-call channel purpose=${input.purpose || "other"} → ${normalizePhone(input.toPhone)}: ${result.error}`,
+  );
+  return result;
 }
 
 /** Map deliver_records_upload_sms: phone from what the caller said; link fields from call vars. */
@@ -1234,7 +1595,7 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function extractCallId(payload: unknown): string {
+export function extractCallId(payload: unknown): string {
   if (!payload || typeof payload !== "object") return "";
   const root = payload as SynthflowJson;
   const response = (root.response as SynthflowJson | undefined) ?? {};
@@ -1275,7 +1636,7 @@ function findExecutedActions(payload: unknown): SynthflowJson {
   return asJsonRecord(call.executed_actions || root.executed_actions || response.executed_actions);
 }
 
-function readRecordsSmsExecution(callPayload: unknown): {
+export function readRecordsUploadSmsExecution(callPayload: unknown): {
   ran: boolean;
   toPhone: string;
   error: string;
@@ -1327,12 +1688,38 @@ export type ClinicRecordsSmsPayload = {
 const recordsCallCooldownMs = 90_000;
 const recentRecordsCalls = new Map<string, { at: number; callId: string }>();
 
-function readCallStatus(callPayload: unknown): string {
+export function readCallStatus(callPayload: unknown): string {
   const callRoot = asJsonRecord(callPayload);
   const response = asJsonRecord(callRoot.response);
   const fromList = Array.isArray(response.calls) ? asJsonRecord(response.calls[0]) : {};
   const callRow = asJsonRecord(response.call || fromList || callRoot);
   return String(callRow.status || fromList.status || callRoot.status || "").toLowerCase();
+}
+
+/** Place a short outbound voice call with the clinic receptionist agent. */
+export async function startOutboundVoiceCall(input: {
+  modelId: string;
+  toPhone: string;
+  fromPhone: string;
+  name?: string;
+  greeting?: string;
+  prompt?: string;
+}) {
+  const from = input.fromPhone?.trim();
+  const started = await synthflowRequest<SynthflowJson>("POST", "/calls", {
+    model_id: input.modelId,
+    phone: input.toPhone,
+    name: input.name?.trim() || "Clinic test",
+    // Omit when empty so Synthflow uses the outbound agent's default caller ID.
+    ...(from ? { from_phone_number: from } : {}),
+    ...(input.greeting ? { greeting: input.greeting } : {}),
+    ...(input.prompt ? { prompt: input.prompt } : {}),
+  });
+  const callId = extractCallId(started);
+  if (!callId) {
+    throw new Error(`Synthflow started a call but did not return a call id: ${JSON.stringify(started).slice(0, 400)}`);
+  }
+  return { callId, raw: started };
 }
 
 /**
@@ -1466,7 +1853,7 @@ export async function sendClinicSms(payload: ClinicRecordsSmsPayload): Promise<C
           console.warn(`[synthflow] Records call ${callId} ended (${status})`);
           return;
         }
-        const execution = readRecordsSmsExecution(call);
+        const execution = readRecordsUploadSmsExecution(call);
         if (execution.ran && !execution.error) {
           console.log(
             `[synthflow] Records upload SMS completed on call ${callId} → ${execution.toPhone || toPhone}`,
@@ -1540,8 +1927,12 @@ async function ensureAppointmentReminderSmsAction(agentId: string) {
 
 /**
  * Text the booking number from the clinic voice agent.
- * This workspace agent is a voice agent, so SMS is sent with the in-call SMS action
- * on a short outbound call to that same number.
+ *
+ * The configured AI Receptionist is a voice agent. POST /chat/outbound only
+ * works for chat agents ("Omnichannel chat is only supported for chat agents"),
+ * so invoices, reminders, and confirmations all use a short outbound call +
+ * INCALL_SMS — the same Synthflow SMS path as OTP and records upload links.
+ * Success is returned only after the in-call SMS action executes without error.
  */
 export async function sendPatientReminderSms(input: {
   toPhone: string;
@@ -1559,7 +1950,7 @@ export async function sendPatientReminderSms(input: {
   if (toPhone === fromNumber) throw new Error("Patient phone cannot be the clinic number");
 
   const message = input.body.trim();
-  if (!message) throw new Error("Reminder message is empty");
+  if (!message) throw new Error("SMS message is empty");
 
   const actionId = await ensureAppointmentReminderSmsAction(agentId);
   await synthflowRequest("POST", "/actions/attach", {
@@ -1646,8 +2037,14 @@ If it succeeds, say only: "I have texted your appointment reminder. Goodbye." Th
     return { toPhone, fromNumber, callId };
   }
 
+  const label =
+    input.purpose === "invoice"
+      ? "Invoice"
+      : input.purpose === "confirmation"
+        ? "Confirmation"
+        : "Reminder";
   throw new Error(
-    `Reminder SMS action did not finish for ${toPhone}. The patient may need to answer the clinic call.`,
+    `${label} SMS action did not finish for ${toPhone}. The patient may need to answer the clinic call so the voice agent can text the message.`,
   );
 }
 

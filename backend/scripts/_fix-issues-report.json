@@ -1,0 +1,8 @@
+{
+  "inbound_actions_after": 16,
+  "turn_taking": {
+    "patience_level": "medium",
+    "allowed_idle_time_seconds": 90,
+    "send_user_idle_reminders": true
+  }
+}

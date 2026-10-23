@@ -1,9 +1,9 @@
 import { createFileRoute, Outlet, redirect, useRouter, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { AppShell, type NavItem } from "@/components/layout/AppShell";
-import { doctorSubscriptionApi, type ApiDoctorAccess } from "@/lib/api";
+import { ApiError, doctorSubscriptionApi, type ApiDoctorAccess } from "@/lib/api";
 import { DoctorAccessContext } from "@/lib/doctor-access";
-import { getSession, type Session } from "@/lib/session";
+import { clearSession, getSession, type Session } from "@/lib/session";
 
 export const Route = createFileRoute("/doctor")({
   beforeLoad: () => {
@@ -112,9 +112,13 @@ function DoctorLayout() {
           return;
         }
       } catch (err) {
-        if (!cancelled) {
-          setGateError(err instanceof Error ? err.message : "Unable to check enrollment.");
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 401) {
+          clearSession();
+          await router.navigate({ to: "/login" });
+          return;
         }
+        setGateError(err instanceof Error ? err.message : "Unable to check enrollment.");
       }
     }
 

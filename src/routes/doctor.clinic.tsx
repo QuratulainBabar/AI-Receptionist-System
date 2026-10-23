@@ -70,6 +70,13 @@ function DoctorClinicPage() {
   const [saving, setSaving] = useState(false);
   const [agentBusy, setAgentBusy] = useState(false);
   const [syncBusy, setSyncBusy] = useState(false);
+  const [testPhone, setTestPhone] = useState("");
+  const [testBusy, setTestBusy] = useState(false);
+  const [healthBusy, setHealthBusy] = useState(false);
+  const [testCallId, setTestCallId] = useState("");
+  const [testCallStatus, setTestCallStatus] = useState("");
+  const [testCallDetail, setTestCallDetail] = useState("");
+  const [healthSummary, setHealthSummary] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -127,26 +134,57 @@ function DoctorClinicPage() {
     }
   }
 
-  async function createOrUpdateAgent() {
-    setAgentBusy(true);
+  // Guard against stuck "Updating…/Syncing…" if Synthflow is slow.
+  async function withBusyTimeout<T>(
+    setBusy: (v: boolean) => void,
+    work: () => Promise<T>,
+    label: string,
+    ms = 45_000,
+  ): Promise<T | undefined> {
+    setBusy(true);
     setError("");
     setNotice("");
+    let timedOut = false;
+    const timer = window.setTimeout(() => {
+      timedOut = true;
+      setBusy(false);
+      setError(
+        `${label} is taking too long. The backend may still finish — refresh in a moment, or check that ngrok/PUBLIC_API_URL is up.`,
+      );
+    }, ms);
     try {
-      await doctorSynthflowApi.updateSynthflow({
-        clinicName,
-        phoneNumber,
-        synthflowAgentId: agentId.trim() || null,
-        agentLanguage: language,
-        agentVoiceId: voiceId,
-        agentFirstMessage: firstMessage,
-      });
-      const result = await doctorSynthflowApi.createOrUpdateSynthflowAgent({
-        firstMessage,
-        phoneNumber,
-        language,
-        voiceId: voiceId.trim() || undefined,
-        synthflowAgentId: agentId.trim() || undefined,
-      });
+      const result = await work();
+      if (timedOut) return undefined;
+      return result;
+    } catch (err) {
+      if (!timedOut) throw err;
+      return undefined;
+    } finally {
+      window.clearTimeout(timer);
+      if (!timedOut) setBusy(false);
+    }
+  }
+
+  async function createOrUpdateAgent() {
+    try {
+      const result = await withBusyTimeout(setAgentBusy, async () => {
+        await doctorSynthflowApi.updateSynthflow({
+          clinicName,
+          phoneNumber,
+          synthflowAgentId: agentId.trim() || null,
+          agentLanguage: language,
+          agentVoiceId: voiceId,
+          agentFirstMessage: firstMessage,
+        });
+        return doctorSynthflowApi.createOrUpdateSynthflowAgent({
+          firstMessage,
+          phoneNumber,
+          language,
+          voiceId: voiceId.trim() || undefined,
+          synthflowAgentId: agentId.trim() || undefined,
+        });
+      }, "Update");
+      if (!result) return;
       applySettings(result.settings);
       const doctorName = result.clinicDoctorName || result.settings.clinicDoctorName;
       const slotsNote = result.openSlotsSummary
@@ -161,17 +199,17 @@ function DoctorClinicPage() {
       );
     } catch (err) {
       setError(formatApiError(err, "Unable to update the AI receptionist."));
-    } finally {
-      setAgentBusy(false);
     }
   }
 
   async function syncDirectory() {
-    setSyncBusy(true);
-    setError("");
-    setNotice("");
     try {
-      const result = await doctorSynthflowApi.syncSynthflowDirectory();
+      const result = await withBusyTimeout(
+        setSyncBusy,
+        () => doctorSynthflowApi.syncSynthflowDirectory(),
+        "Sync",
+      );
+      if (!result) return;
       applySettings(result.settings);
       const doctorName =
         result.clinicDoctorName || result.settings.clinicDoctorName || "clinic doctor";
@@ -185,10 +223,109 @@ function DoctorClinicPage() {
       );
     } catch (err) {
       setError(formatApiError(err, "Unable to sync doctor profile and availability."));
-    } finally {
-      setSyncBusy(false);
     }
   }
+
+  async function verifyCallHealth() {
+    setHealthBusy(true);
+    setError("");
+    setHealthSummary("");
+    try {
+      const result = await doctorSynthflowApi.getCallHealth();
+      const checks = [
+        result.checks.synthflowConfigured ? "API key" : "API key missing",
+        result.checks.agentLinked ? "agent linked" : "agent missing",
+        result.checks.clinicPhoneSet ? "clinic phone" : "clinic phone missing",
+        result.checks.tunnelOk ? "tunnel OK" : `tunnel down (${result.tunnel.error || "unreachable"})`,
+        result.checks.availabilityOk
+          ? "availability OK"
+          : `availability failed (${result.availability.error || "error"})`,
+        result.checks.hasOpenSlots ? "open slots" : "no open slots",
+      ].join(" · ");
+      setHealthSummary(
+        `${result.ok ? "Healthy" : "Needs attention"} — ${result.message} [${checks}]` +
+          (result.availability.preview ? ` Availability: ${result.availability.preview}` : "") +
+          (result.recentCalls.lastStatus
+            ? ` Recent calls: ${result.recentCalls.completed} completed, last=${result.recentCalls.lastStatus}.`
+            : ""),
+      );
+      if (!result.ok) {
+        setError(result.message);
+      } else {
+        setNotice(result.message);
+      }
+    } catch (err) {
+      setError(formatApiError(err, "Unable to verify call health."));
+    } finally {
+      setHealthBusy(false);
+    }
+  }
+
+  async function startTestCall() {
+    setTestBusy(true);
+    setError("");
+    setNotice("");
+    setTestCallDetail("");
+    setTestCallStatus("starting");
+    try {
+      const result = await doctorSynthflowApi.startTestCall(testPhone.trim());
+      setTestCallId(result.callId);
+      setTestCallStatus(result.status);
+      setNotice(result.message);
+      if (result.warning) setError(result.warning);
+      setTestCallDetail(
+        `Call ${result.callId} → ${result.toPhone} (from ${result.fromPhone}, agent ${result.modelId || "outbound"})`,
+      );
+    } catch (err) {
+      setTestCallStatus("");
+      setError(formatApiError(err, "Unable to start the test call."));
+    } finally {
+      setTestBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!testCallId) return;
+    let cancelled = false;
+    let ticks = 0;
+    const timer = window.setInterval(() => {
+      void (async () => {
+        ticks += 1;
+        try {
+          const status = await doctorSynthflowApi.getTestCall(testCallId);
+          if (cancelled) return;
+          setTestCallStatus(status.status);
+          const bits = [
+            `Status: ${status.status}`,
+            status.duration != null ? `duration ${status.duration}s` : null,
+            status.endReason ? `end: ${status.endReason}` : null,
+            status.transcriptPreview ? `heard: “${status.transcriptPreview}”` : null,
+          ].filter(Boolean);
+          setTestCallDetail(bits.join(" · "));
+          if (status.finished || ticks >= 40) {
+            window.clearInterval(timer);
+            if (status.working && status.status === "completed") {
+              setNotice("Test call completed — receptionist path is working.");
+            } else if (status.finished && !status.working) {
+              const pausedHint =
+                status.status === "paused"
+                  ? " Synthflow never dialed the phone (outbound agent / caller ID issue)."
+                  : "";
+              setError(
+                `Test call ended with status “${status.status}”.${pausedHint} Try again in a minute.`,
+              );
+            }
+          }
+        } catch {
+          if (ticks >= 3) window.clearInterval(timer);
+        }
+      })();
+    }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [testCallId]);
 
   async function copyText(value: string) {
     try {
@@ -465,11 +602,19 @@ function DoctorClinicPage() {
                 {syncBusy ? "Syncing…" : "Sync availability & profile"}
               </Button>
             </div>
-            {settings?.synthflowAgentId ? (
-              <p className="rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-2 font-mono text-[11.5px] text-slate-600">
-                Agent ID: {settings.synthflowAgentId}
+            <div className="space-y-2">
+              {settings?.synthflowAgentId ? (
+                <p className="rounded-xl border border-sky-100 bg-sky-50/50 px-3 py-2 font-mono text-[11.5px] text-slate-600">
+                  Agent ID: {settings.synthflowAgentId}
+                </p>
+              ) : null}
+              <p className="rounded-xl border border-emerald-100 bg-emerald-50/60 px-3 py-2 text-[12.5px] text-slate-700">
+                <span className="font-semibold text-slate-900">Last sync: </span>
+                {settings?.synthflowSyncedAt
+                  ? new Date(settings.synthflowSyncedAt).toLocaleString()
+                  : "Never — use Sync availability & profile"}
               </p>
-            ) : null}
+            </div>
           </Panel>
 
           {/* Appointment booking */}
@@ -572,17 +717,68 @@ function DoctorClinicPage() {
             </p>
           </Panel>
 
-          {/* Testing & call history pointer */}
+          {/* Testing & call history */}
           <Panel className="space-y-4 border border-sky-100 p-5">
             <div className="flex items-center gap-2">
               <PhoneCall className="size-4 text-blue-600" />
-              <SectionLabel>Test & call records</SectionLabel>
+              <SectionLabel>Test call</SectionLabel>
             </div>
-            <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-4">
-              <p className="text-[13px] font-semibold text-slate-900">Try the receptionist</p>
-              <p className="mt-1 text-[12.5px] text-slate-500">
-                Place a real inbound call to your clinic number to verify greeting, availability, and
-                booking OTP. Outbound “call me now” testing is not exposed on this doctor page yet.
+            <div className="rounded-xl border border-sky-100 bg-sky-50/40 p-4 space-y-3">
+              <p className="text-[13px] font-semibold text-slate-900">Call my phone</p>
+              <p className="text-[12.5px] text-slate-500">
+                The clinic receptionist dials your mobile from{" "}
+                <span className="font-mono text-slate-700">
+                  {settings?.phoneNumber || "the clinic line"}
+                </span>
+                . Answer and ask to book — it should reply immediately with “Which day would you
+                like your appointment?”
+              </p>
+              <Field label="Your mobile (with country code)">
+                <Input
+                  value={testPhone}
+                  onChange={(e) => setTestPhone(e.target.value)}
+                  placeholder="+14155550123"
+                  inputMode="tel"
+                  autoComplete="tel"
+                />
+              </Field>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={testBusy || !testPhone.trim() || !settings?.synthflowAgentId}
+                  onClick={() => void startTestCall()}
+                >
+                  <PhoneCall className={cn("size-3.5", testBusy && "animate-pulse")} />
+                  {testBusy ? "Calling…" : "Call me now"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={healthBusy}
+                  onClick={() => void verifyCallHealth()}
+                >
+                  <RefreshCw className={cn("size-3.5", healthBusy && "animate-spin")} />
+                  {healthBusy ? "Checking…" : "Verify call path"}
+                </Button>
+              </div>
+              {testCallStatus ? (
+                <p className="rounded-lg border border-sky-200 bg-white px-3 py-2 text-[12.5px] text-slate-700">
+                  <span className="font-semibold capitalize">{testCallStatus}</span>
+                  {testCallDetail ? ` — ${testCallDetail}` : ""}
+                </p>
+              ) : null}
+              {healthSummary ? (
+                <p className="rounded-lg border border-emerald-100 bg-emerald-50/50 px-3 py-2 text-[12.5px] text-slate-700">
+                  {healthSummary}
+                </p>
+              ) : null}
+            </div>
+            <div className="rounded-xl border border-dashed border-sky-200 bg-white/60 p-4">
+              <p className="text-[12.5px] font-semibold text-slate-800">Or call the clinic line</p>
+              <p className="mt-1 text-[12px] text-slate-500">
+                Place a real inbound call to verify the same greeting and booking flow.
               </p>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <span className="rounded-lg border border-sky-200 bg-white px-3 py-2 font-mono text-[13px] text-slate-800">

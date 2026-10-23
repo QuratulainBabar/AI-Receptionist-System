@@ -25,3 +25,4 @@ synthflowRouter.get("/urls", synthflowController.urls);
 
 /** Local npm run dev polls this on production to print the SMS upload link */
 synthflowRouter.get("/last-records-upload", synthflowController.lastRecordsUpload);
+synthflowRouter.get("/last-invoice-payment", synthflowController.lastInvoicePayment);

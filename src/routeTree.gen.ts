@@ -42,6 +42,7 @@ import { Route as DoctorSettingsRouteImport } from './routes/doctor.settings'
 import { Route as DoctorSubscriptionRouteImport } from './routes/doctor.subscription'
 import { Route as DoctorSynthflowRouteImport } from './routes/doctor.synthflow'
 import { Route as DoctorTeamRouteImport } from './routes/doctor.team'
+import { Route as InvoiceCompleteRouteImport } from './routes/invoice.complete'
 import { Route as PatientIndexRouteImport } from './routes/patient.index'
 import { Route as PatientActivityRouteImport } from './routes/patient.activity'
 import { Route as PatientAppointmentsRouteImport } from './routes/patient.appointments'
@@ -231,6 +232,11 @@ const DoctorTeamRoute = DoctorTeamRouteImport.update({
   path: '/team',
   getParentRoute: () => DoctorRoute,
 } as any)
+const InvoiceCompleteRoute = InvoiceCompleteRouteImport.update({
+  id: '/invoice/complete',
+  path: '/invoice/complete',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const PatientIndexRoute = PatientIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -386,6 +392,7 @@ export interface FileRoutesByFullPath {
   '/doctor/subscription': typeof DoctorSubscriptionRoute
   '/doctor/synthflow': typeof DoctorSynthflowRoute
   '/doctor/team': typeof DoctorTeamRoute
+  '/invoice/complete': typeof InvoiceCompleteRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -440,6 +447,7 @@ export interface FileRoutesByTo {
   '/doctor/subscription': typeof DoctorSubscriptionRoute
   '/doctor/synthflow': typeof DoctorSynthflowRoute
   '/doctor/team': typeof DoctorTeamRoute
+  '/invoice/complete': typeof InvoiceCompleteRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -499,6 +507,7 @@ export interface FileRoutesById {
   '/doctor/subscription': typeof DoctorSubscriptionRoute
   '/doctor/synthflow': typeof DoctorSynthflowRoute
   '/doctor/team': typeof DoctorTeamRoute
+  '/invoice/complete': typeof InvoiceCompleteRoute
   '/patient/activity': typeof PatientActivityRoute
   '/patient/appointments': typeof PatientAppointmentsRouteWithChildren
   '/patient/book': typeof PatientBookRoute
@@ -559,6 +568,7 @@ export interface FileRouteTypes {
     | '/doctor/subscription'
     | '/doctor/synthflow'
     | '/doctor/team'
+    | '/invoice/complete'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -613,6 +623,7 @@ export interface FileRouteTypes {
     | '/doctor/subscription'
     | '/doctor/synthflow'
     | '/doctor/team'
+    | '/invoice/complete'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -671,6 +682,7 @@ export interface FileRouteTypes {
     | '/doctor/subscription'
     | '/doctor/synthflow'
     | '/doctor/team'
+    | '/invoice/complete'
     | '/patient/activity'
     | '/patient/appointments'
     | '/patient/book'
@@ -708,6 +720,7 @@ export interface RootRouteChildren {
   ResetPasswordRoute: typeof ResetPasswordRoute
   SignupRoute: typeof SignupRoute
   CheckoutCompleteRoute: typeof CheckoutCompleteRoute
+  InvoiceCompleteRoute: typeof InvoiceCompleteRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -942,6 +955,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/doctor/team'
       preLoaderRoute: typeof DoctorTeamRouteImport
       parentRoute: typeof DoctorRoute
+    }
+    '/invoice/complete': {
+      id: '/invoice/complete'
+      path: '/invoice/complete'
+      fullPath: '/invoice/complete'
+      preLoaderRoute: typeof InvoiceCompleteRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/patient/': {
       id: '/patient/'
@@ -1304,6 +1324,7 @@ const rootRouteChildren: RootRouteChildren = {
   ResetPasswordRoute: ResetPasswordRoute,
   SignupRoute: SignupRoute,
   CheckoutCompleteRoute: CheckoutCompleteRoute,
+  InvoiceCompleteRoute: InvoiceCompleteRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

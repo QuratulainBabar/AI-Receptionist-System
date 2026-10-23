@@ -8,16 +8,25 @@ import { AppError } from "../utils/AppError.js";
 import { normalizePhone } from "../utils/phone.js";
 import {
   attachActions,
+  attachAssistantPhoneNumbers,
   createCustomAction,
   createInboundAgent,
+  createOutboundAgent,
   createInformationExtractor,
   findActionIdByName,
   findAssistantByPhone,
   getCustomActionUrl,
+  getPhoneCall,
   isSynthflowConfigured,
+  listAssistants,
+  listAssistantActionIds,
+  pruneStaleActionIds,
+  readCallStatus,
+  reconcileAssistantActions,
+  startOutboundVoiceCall,
   synthflowRequest,
   toSynthflowLanguage,
-  synthflowPromptRulePrefix,
+  synthflowCompactLivePrompt,
   updateAgent,
   updateCustomActionUrl,
 } from "./synthflow.client.js";
@@ -43,7 +52,7 @@ const APPOINTMENT_EXTRACTORS = [
     kind: "OPEN_QUESTION" as const,
     identifier: "phone",
     description:
-      "What contact phone number did the patient give? If they said same number, use the calling number. Answer none if unknown.",
+      "What exact contact phone number did the patient speak for booking? Convert spoken digit words to digits with country code when known. If they said same number, use the calling number. Answer none if unknown. Never invent a number.",
     examples: ["+14155550148", "none"],
   },
   {
@@ -102,14 +111,15 @@ This clinic has one doctor. The greeting already says that doctor's name and the
 
 CRITICAL RULES:
 - Keep every response to 1-2 short sentences. Ask only one question per turn, then wait.
+- When they want to book, reply immediately with only "Which day would you like your appointment?" — do not call any action first.
 - Never give medical advice or diagnoses.
 - Never invent another doctor, specialty list, or time.
 - Use only the latest Clinic doctor profile block for specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, and consultation type.
 - Never invent or reuse outdated profile details that are not in the Clinic doctor block.
-- Availability and bookable times come only from open slots / check_doctor_availability — never invent times.
-- One active appointment per mobile: if active_appointment_found is true, tell the caller using active_appointment_block_message and do not book again.
+- Availability and bookable times come ONLY from check_doctor_availability (live DB slots for today / current week). Never invent times. Never speak usual weekly hours.
+- One active appointment per mobile: if has_active_appointment is true, say the check_existing_appointment message and do not book again.
 - If asked about the doctor, answer from the Clinic doctor profile (specialty, experience, qualifications, clinic, fee, languages, and other listed details).
-- Booking order is mandatory: check_existing_appointment → book_appointment → ask for code → verify_booking_otp. Never ask for a verification code before book_appointment succeeds.
+- After the caller picks a time: ask full name → WAIT → ask reason for visit → WAIT → ask phone number → WAIT → say "Thank you. Let me check whether there is already an active appointment associated with this number." → check_existing_appointment → only if clear, book_appointment → ask for code → verify_booking_otp. Never ask only for the name. Never skip reason, phone, or the phone check.
 - Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.
 
 Use the Clinic doctor profile and open slots injected on sync and on each call.`;
@@ -121,7 +131,7 @@ export function stripOutdatedDoctorLists(prompt: string) {
   let next = prompt.replace(/\r\n/g, "\n");
   // Drop boot-time rule prefixes — Sync re-adds the current one-doctor versions.
   next = next.replace(
-    /^(?:OPENING RULE:|BOOKING OTP RULE(?:[^\n]*):|RECORDS UPLOAD OFFER RULE:|AVAILABILITY SPEAK RULE(?:[^\n]*):|PHONE APPOINTMENT RULE(?:[^\n]*):)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
+    /^(?:OPENING RULE:|FAST RESPONSE RULE(?:[^\n]*):|BOOKING OTP RULE(?:[^\n]*):|RECORDS UPLOAD OFFER RULE:|AVAILABILITY SPEAK RULE(?:[^\n]*):|PHONE APPOINTMENT RULE(?:[^\n]*):)[\s\S]*?(?=\nYou are |\nPRIMARY MISSION:)/,
     "",
   );
   next = next.replace(/\n## Specialties[\s\S]*?(?=\n## Fast Booking Protocol|\n## Current roster|\n## Live doctor directory|\n## Clinic doctor|$)/, "\n");
@@ -209,16 +219,18 @@ export async function buildDoctorsDirectoryKnowledge() {
       `Areas of expertise: ${list(profile.areasOfExpertise)}`,
       `Languages: ${list(profile.languages)}`,
       `About: ${profile.bio}`,
-      `Usual weekly hours (for context only — never book from these hours): ${profile.weeklyHoursSummary}`,
-      // Keep slot ids for book_appointment after availability — never speak this list unprompted.
-      `Open slot ids for actions only (NEVER read aloud; NEVER list unless check_doctor_availability returned them): ${openSlotsSummary}`,
+      // Do NOT put usual weekly hours here — the model invents Mondays/extra days from them.
+      "Usual weekly hours: DO NOT SPEAK. DO NOT use for availability. Bookable times come only from check_doctor_availability (live database slots the doctor added).",
+      `Action slot ids (INTERNAL ONLY — NEVER read aloud, NEVER list to the caller): ${openSlotsSummary}`,
       "",
       "## How to use this profile",
       "- On the opening, say the doctor name and the consultation fee when one is set.",
       "- If the caller asks about the doctor, answer from this block (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about).",
-      "- Availability: if they ask about today, call check_doctor_availability with date today and say the message exactly. If they ask about the weekly schedule / available days, call with date empty and say the message exactly. When booking without a list request: ask which day → WAIT → then call with that date and say times → WAIT. Never invent times.",
-      "- After phone number: call check_existing_appointment. If clear, call book_appointment with a real slot_id. Only then ask for the six-digit verification code and call verify_booking_otp.",
-      "- Never say OTP digits aloud. Never ask for a verification code before book_appointment succeeds. Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
+      "- When they say they want to book: reply immediately with only \"Which day would you like your appointment?\" Do not call any action yet.",
+      "- Availability HARD RULE: speak ONLY what check_doctor_availability returns. Today → call with date today, say message exactly. This week / which days → call with date empty, say message exactly. Named day → call with that date, say message exactly. Never invent Oct 26 or any day/time not in the tool response.",
+      "- After the caller picks a time: ask \"May I have your full name?\" WAIT. Then ask \"What is the reason for your visit today?\" WAIT. Then ask \"What phone number should we use for this booking?\" WAIT. Then say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\" Then MUST call check_existing_appointment with that exact number. If has_active_appointment is true, say the message and stop — do not book and do not ask for a code. If clear (or prior visit Completed/Cancelled), call book_appointment with a real slot_id from check_doctor_availability. Only then ask for the six-digit verification code and call verify_booking_otp.",
+      "- Order after an open time: full name → visit reason → phone → check_existing_appointment → book_appointment → OTP. Never skip. Never go silent after the greeting when they say they want to book — say exactly \"Which day would you like your appointment?\"",
+      "- Never ask only for the name and skip reason/phone/check. Never say OTP digits aloud. Never ask for a verification code before book_appointment succeeds. Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
     ].join("\n"),
   };
 }
@@ -229,21 +241,57 @@ function normalizeActionIds(raw: unknown): string[] {
 }
 
 async function ensureAppointmentExtractors(existingIds: string[]) {
-  if (existingIds.length >= 4) return existingIds;
-  const ids: string[] = [...existingIds];
+  // DB may still hold extractor ids that were deleted in Synthflow → attach 404.
+  const { living } = await pruneStaleActionIds(existingIds);
+  const ids: string[] = [...living];
+
   for (const spec of APPOINTMENT_EXTRACTORS) {
     try {
-      const created = await createInformationExtractor(spec);
-      if (created.action_id) ids.push(created.action_id);
+      // Prefer an existing workspace extractor with this identifier/name.
+      // findActionIdByName also matches info_extractor_<identifier>.
+      let actionId = await findActionIdByName(spec.identifier);
+      if (!actionId) {
+        const created = await createInformationExtractor(spec);
+        actionId = created.action_id;
+      }
+      if (actionId && !ids.includes(actionId)) ids.push(actionId);
     } catch (error) {
       console.warn(
-        "[synthflow] extractor create failed:",
+        "[synthflow] extractor ensure failed:",
         spec.identifier,
         error instanceof Error ? error.message : error,
       );
     }
   }
   return [...new Set(ids)];
+}
+
+/**
+ * Conversational booking tools only. Do NOT attach information extractors or
+ * send_appointment_reminder to the live inbound agent — extractors run at call
+ * end and reminder SMS is outbound-only; keeping them on the inbound agent
+ * distracts the LLM after the greeting (observed: greeting → silence).
+ */
+async function buildCanonicalActionKeepList(preferredIds: string[]): Promise<string[]> {
+  const names = [
+    AVAILABILITY_ACTION_NAME,
+    BOOK_ACTION_NAME,
+    "check_existing_appointment",
+    "verify_booking_otp",
+    "send_booking_otp",
+    "offer_records_upload",
+    "send_records_upload_link",
+    // deliver_records_upload_sms is outbound-records only; keep off inbound.
+  ];
+  const preferred = new Set(preferredIds.filter(Boolean));
+  const keep: string[] = [];
+  for (const name of names) {
+    const found = await findActionIdByName(name);
+    if (!found) continue;
+    const preferredHit = preferredIds.find((id) => preferred.has(id) && id === found) || found;
+    if (!keep.includes(preferredHit)) keep.push(preferredHit);
+  }
+  return keep;
 }
 
 const AVAILABILITY_ACTION_NAME = "check_doctor_availability";
@@ -254,14 +302,14 @@ async function ensureAvailabilityCustomAction(existingIds: string[]) {
     date: "<date>",
   };
   const availabilityPrompt =
-    "REQUIRED: Say the response message field exactly (same as spoken_summary), then WAIT. If mode is dates, list those open dates for the next seven days and ask which date. If mode is slots, list those open times and ask which time. Call immediately for today's availability (date=today) or weekly schedule (date empty). Never invent a date or time.";
+    "REQUIRED: Say the response message field exactly (same as spoken_summary), then WAIT. If mode is dates, list those open dates for the next seven days and ask which date. If mode is slots, list those open times and ask which time. Call for today's availability (date=today), weekly schedule (date empty), or after they name a day. Never call when they only say they want to book — ask which day first. Never invent a date or time.";
   let actionId = await findActionIdByName(AVAILABILITY_ACTION_NAME);
   if (actionId) {
     await synthflowRequest("PUT", `/actions/${encodeURIComponent(actionId)}`, {
       CUSTOM_ACTION: {
         url: urls.availabilityAction,
         description:
-          "Live Doctor Dashboard availability. Call immediately when the caller asks about today's times (date=today), the weekly schedule (date empty), or after they name a day.",
+          "Live Doctor Dashboard availability. Call when the caller asks about today's times (date=today), the weekly schedule (date empty), or after they name a day. Do NOT call for plain 'I want to book' — ask which day first.",
         json_body_stringified: JSON.stringify(availabilityBody),
         variables_during_the_call: [
           {
@@ -273,7 +321,7 @@ async function ensureAvailabilityCustomAction(existingIds: string[]) {
           },
         ],
         prompt: availabilityPrompt,
-        message_error: "Let me check the clinic schedule for open dates this week.",
+        message_error: "I could not load open times just now. Which day would you like instead?",
       },
     }).catch((error) => {
       console.warn(
@@ -287,7 +335,7 @@ async function ensureAvailabilityCustomAction(existingIds: string[]) {
       const created = await createCustomAction({
         name: AVAILABILITY_ACTION_NAME,
         description:
-          "Live Doctor Dashboard availability. Call immediately for today's times (date=today), weekly schedule (date empty), or a named day.",
+          "Live Doctor Dashboard availability. Call for today's times (date=today), weekly schedule (date empty), or a named day. Do NOT call for plain 'I want to book' — ask which day first.",
         url: urls.availabilityAction,
         jsonBody: availabilityBody,
         variables: [
@@ -299,7 +347,7 @@ async function ensureAvailabilityCustomAction(existingIds: string[]) {
           },
         ],
         prompt: availabilityPrompt,
-        messageError: "Let me check the clinic schedule for open dates this week.",
+        messageError: "I could not load open times just now. Which day would you like instead?",
       });
       actionId = created.action_id;
     } catch (error) {
@@ -399,7 +447,7 @@ async function ensureBookCustomAction(existingIds: string[]) {
         prompt:
           "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Never say OTP digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. If you did not catch the digits, ask them to repeat slowly. Confirm only when appointment_confirmed is true. If success is false, speak the response message and do not say the appointment is booked.",
         messageError:
-          "Booking could not be completed. If you already have an active appointment, please complete or cancel it first.",
+          "I could not hold that appointment time. Please say another open time from the schedule, or confirm the booking details.",
       });
       actionId = created.action_id;
     } catch (error) {
@@ -509,6 +557,12 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
   language?: string;
   voiceId?: string;
   synthflowAgentId?: string;
+  /**
+   * When true (default for Sync availability & profile), only push the live
+   * prompt/greeting/slots. Skips slow extractor/action create+attach loops.
+   * Pass false for first-time Create / full Update AI receptionist.
+   */
+  promptOnly?: boolean;
 }) {
   if (!isSynthflowConfigured()) {
     throw new AppError(400, "SYNTHFLOW_API_KEY is not configured in backend/.env");
@@ -519,24 +573,20 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
   const greeting = greetingWithOpeningLine(
     input?.firstMessage?.trim() || settings.agentFirstMessage.trim() || defaultGreeting(clinicName),
   );
-  // Always rebuild from the template + live clinic doctor/slots.
-  // Never reuse a stored system prompt — it can keep yesterday's open times.
-  const filePrompt = loadDefaultPromptFromFile();
-  const basePrompt = filePrompt || fallbackPrompt(clinicName);
-
   const { knowledge, doctorsCount, clinicDoctorName, clinicDoctorId, openSlotsSummary } =
     await buildDoctorsDirectoryKnowledge();
   console.log(
     `[synthflow] Syncing clinic doctor → ${clinicDoctorName || "none"} (${clinicDoctorId || "n/a"})`,
   );
   console.log(`[synthflow] Open slots pushed to prompt → ${openSlotsSummary}`);
-  const bodyPrompt = mergeDirectoryIntoPrompt(
-    stripOutdatedDoctorLists(basePrompt) || filePrompt || fallbackPrompt(clinicName),
-    knowledge,
-  );
-  // Always push OTP/availability/phone rules with the one-doctor body so Fine-tuner
-  // never keeps an old multi-doctor prompt that only had rules prepended on boot.
-  const fullPrompt = `${synthflowPromptRulePrefix()}\n\n${bodyPrompt}`;
+  // Compact live prompt: workspace LLM is locked to `synthflow` and previously
+  // failed (greet → silence) under a ~24KB duplicated rule+template prompt.
+  // Keep canonical booking rules + live Clinic doctor block only.
+  const fullPrompt = synthflowCompactLivePrompt({
+    clinicName,
+    clinicDoctorBlock: knowledge,
+  });
+  console.log(`[synthflow] Live prompt length → ${fullPrompt.length} chars`);
 
   const phone = normalizePhone(
     input?.phoneNumber || settings.phoneNumber || env.SYNTHFLOW_PHONE_NUMBER || "",
@@ -549,12 +599,51 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     prompt: fullPrompt,
     greeting_message: greeting,
     greeting_message_mode: "agent_static",
-    llm: "gpt-4.1-Mini",
+    // Enum is lowercase `gpt-4.1-mini`. `gpt-4.1-Mini` was rejected and the live
+    // agent silently fell back to weak `synthflow`, which stayed silent after the greeting.
+    llm: "gpt-4.1-mini",
     language: lang,
-    // Synthflow allows 0.7–1.2 (1.0 = natural). 0.85 = calm, not dragged.
-    voice_speed: 0.85,
+    // Synthflow allows 0.7–1.2 (1.0 = natural). Natural pace keeps turn-taking snappy.
+    voice_speed: 1.0,
     voice_prompt:
-      "Speak clearly at a calm, natural pace. Short pause after questions. Never rush dates, times, or phone numbers.",
+      "Speak clearly at a natural pace. Start speaking immediately when you have a reply. Brief pause only after questions. Never rush dates, times, or phone numbers. After the greeting, always answer the caller's next utterance — never go silent.",
+    // medium = snappier replies than high; still enough wait for international audio.
+    patience_level: "medium",
+    allowed_idle_time_seconds: 90,
+    send_user_idle_reminders: true,
+    reminder_after_idle_time_seconds: 8,
+    reminder_after_idle_message:
+      "I'm still here. Would you like to book an appointment, or something else?",
+    // 1 caused cutting off names/numbers mid-speech (transcript: bot overlaps human).
+    min_words_to_interrupt: 3,
+    noise_cancellation: "standard",
+    suppression_level: 0.2,
+    // deepgram-nova-3 + high_accuracy: better for names/digits than synthflow-stt/faster.
+    transcriber_provider: "deepgram-nova-3",
+    transcriber_speech_recognition: "high_accuracy",
+    transcriber_keywords: [
+      "appointment",
+      "book",
+      "booking",
+      "schedule",
+      "availability",
+      "today",
+      "tomorrow",
+      "doctor",
+      "verification",
+      "code",
+      "OTP",
+      "zero",
+      "one",
+      "two",
+      "three",
+      "four",
+      "five",
+      "six",
+      "seven",
+      "eight",
+      "nine",
+    ],
     ...(voiceId ? { voice_id: voiceId } : {}),
   };
 
@@ -563,6 +652,8 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
     ...(phone ? { phone_number: phone } : {}),
     inbound_call_webhook_url: urls.inbound,
     external_webhook_url: urls.data,
+    // Top-level: disable leave-voicemail so answered inbound calls are not ended as voicemail.
+    voicemail_message: { enabled: false },
     agent: agentConfig,
   };
 
@@ -642,21 +733,81 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
   }
 
   let actionIds = normalizeActionIds(settings.synthflowActionIds);
-  try {
-    actionIds = await ensureAppointmentExtractors(actionIds);
-    actionIds = await ensureAvailabilityCustomAction(actionIds);
-    actionIds = await ensureBookCustomAction(actionIds);
+  // Fast by default when the agent already has actions — Sync/Update only need the
+  // live prompt + open slots. Full extractor/action ensure runs on first create
+  // or when promptOnly is explicitly false.
+  // EXCEPTION: if the live agent has a bloated attachment list (duplicate extractors),
+  // force a reconcile even on prompt-only sync — otherwise inbound calls hang after greeting.
+  let attachedCount = 0;
+  if (modelId) {
+    attachedCount = await listAssistantActionIds(modelId)
+      .then((ids) => ids.length)
+      .catch(() => 0);
+  }
+  const actionsBloated = attachedCount > 40;
+  const promptOnly =
+    !actionsBloated &&
+    (input?.promptOnly === true ||
+      (input?.promptOnly !== false && action === "updated" && actionIds.length > 0));
+
+  if (promptOnly) {
+    console.log(
+      `[synthflow] Fast prompt sync (skipped action ensure/attach) → ${clinicDoctorName || "clinic"} (${attachedCount} actions attached)`,
+    );
+  } else {
     try {
-      await attachActions(modelId, actionIds);
+      if (actionsBloated) {
+        console.warn(
+          `[synthflow] Agent has ${attachedCount} attached actions (expected <40) — forcing reconcile so the receptionist can speak after the greeting`,
+        );
+        warnings.push(
+          `Cleared ${attachedCount} duplicate Synthflow tools from the receptionist (they were blocking conversation after the greeting).`,
+        );
+      }
+      // Drop deleted Synthflow actions first so Availability sync does not 404.
+      const pruned = await pruneStaleActionIds(actionIds);
+      actionIds = pruned.living;
+      if (pruned.dropped.length) {
+        console.warn(
+          `[synthflow] Cleared ${pruned.dropped.length} stale synthflowActionIds from clinic settings`,
+        );
+      }
+
+      // Do NOT ensure/attach information extractors on the inbound agent — they
+      // inflate the tool list, slow the LLM turn, and are not needed mid-call
+      // (fields come from custom-action JSON bodies). Keep list stays booking tools only.
+      actionIds = await ensureAvailabilityCustomAction(actionIds);
+      actionIds = await ensureBookCustomAction(actionIds);
+      // Final prune in case create/find returned a bad id.
+      actionIds = (await pruneStaleActionIds(actionIds)).living;
+
+      // Keep ONE of each booking tool (+ one of each extractor). Never attach every
+      // historical duplicate — that is what produced 1000+ tools on the live agent.
+      const keepIds = await buildCanonicalActionKeepList(actionIds);
+      actionIds = keepIds;
+
+      try {
+        const reconciled = await reconcileAssistantActions(modelId!, keepIds);
+        console.log(
+          `[synthflow] Action reconcile → before=${reconciled.before} detached=${reconciled.detached} after=${reconciled.after}`,
+        );
+      } catch (error) {
+        warnings.push(
+          `Agent saved but reconciling actions failed: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        try {
+          await attachActions(modelId!, keepIds);
+        } catch (attachError) {
+          warnings.push(
+            `Attaching actions also failed: ${attachError instanceof Error ? attachError.message : String(attachError)}`,
+          );
+        }
+      }
     } catch (error) {
       warnings.push(
-        `Agent saved but attaching extractors failed: ${error instanceof Error ? error.message : String(error)}`,
+        `Agent saved but extractors failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
-  } catch (error) {
-    warnings.push(
-      `Agent saved but extractors failed: ${error instanceof Error ? error.message : String(error)}`,
-    );
   }
 
   await prisma.clinicVoiceSettings.update({
@@ -668,6 +819,7 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
       agentLanguage: input?.language || settings.agentLanguage || "en",
       agentVoiceId: voiceId || settings.agentVoiceId,
       agentFirstMessage: greeting,
+      // Store the compact live prompt that was actually pushed to Synthflow.
       agentSystemPrompt: fullPrompt,
       voiceProvider: "synthflow",
       synthflowSyncedAt: new Date(),
@@ -689,7 +841,7 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
   };
 }
 
-export async function syncClinicDirectoryToSynthflow() {
+export async function syncClinicDirectoryToSynthflow(opts?: { promptOnly?: boolean }) {
   const settings = await getOrCreateSettings();
   if (!settings.synthflowAgentId) {
     throw new AppError(400, "Create a Synthflow agent first");
@@ -697,12 +849,14 @@ export async function syncClinicDirectoryToSynthflow() {
   // Do not pass the previous full prompt (it may still name an old doctor).
   // createOrUpdateClinicSynthflowAgent reloads agent-prompt.md + live Clinic doctor.
   // Never reuse a stored systemPrompt — it can keep yesterday's open slots.
+  // Default promptOnly=true so Sync buttons stay fast (prompt + open slots only).
   return createOrUpdateClinicSynthflowAgent({
     firstMessage: settings.agentFirstMessage,
     phoneNumber: settings.phoneNumber,
     language: settings.agentLanguage,
     voiceId: settings.agentVoiceId,
     synthflowAgentId: settings.synthflowAgentId,
+    promptOnly: opts?.promptOnly !== false,
   });
 }
 
@@ -742,4 +896,520 @@ export function queueDirectorySync(reason: string) {
 export async function resolveBootAgentId() {
   const settings = await prisma.clinicVoiceSettings.findUnique({ where: { id: SETTINGS_ID } });
   return settings?.synthflowAgentId || env.SYNTHFLOW_AGENT_ID || null;
+}
+
+const testCallCooldownMs = 120_000;
+const recentTestCalls = new Map<string, { at: number; callId: string }>();
+
+/**
+ * Synthflow only places real outbound dials from type=outbound agents.
+ * The clinic inbound receptionist cannot dial — POST /calls returns a call id that
+ * stays "paused" forever and the destination never rings.
+ */
+async function ensureClinicOutboundTestAgent(input: {
+  clinicName: string;
+  fromPhone: string;
+  greeting: string;
+  prompt: string;
+  language: string;
+  voiceId?: string;
+}): Promise<string> {
+  const agentName = `${input.clinicName} Outbound Test`.slice(0, 80);
+  const listed = await listAssistants({ limit: 50 });
+  const listResp =
+    ((listed as { response?: Record<string, unknown> }).response as Record<string, unknown> | undefined) ??
+    (listed as Record<string, unknown>);
+  const rows = (listResp.assistants as Record<string, unknown>[] | undefined) ?? [];
+  const fromDigits = input.fromPhone.replace(/\D/g, "");
+
+  // Prefer the dedicated clinic outbound test agent by name. Sharing the clinic
+  // number across multiple outbound agents causes Synthflow ghost "paused" dials.
+  let existingId: string | null = null;
+  const outboundRows: Array<{
+    id: string;
+    name: string;
+    phone: string;
+    poolHasFrom: boolean;
+  }> = [];
+  for (const row of rows) {
+    if (String(row.type || "").toLowerCase() !== "outbound") continue;
+    const id = String(row.model_id || row.id || "").trim();
+    if (!id) continue;
+    const name = String(row.name || "");
+    const phone = normalizePhone(String(row.phone_number || ""));
+    const attached = Array.isArray(row.attached_phone_numbers)
+      ? (row.attached_phone_numbers as Record<string, unknown>[])
+      : [];
+    const poolHasFrom = attached.some((p) => {
+      const n = normalizePhone(String(p.number || ""));
+      return n === input.fromPhone || n.replace(/\D/g, "") === fromDigits;
+    });
+    outboundRows.push({ id, name, phone, poolHasFrom });
+  }
+  existingId =
+    outboundRows.find((r) => r.name === agentName)?.id ||
+    outboundRows.find((r) => r.phone === input.fromPhone || r.poolHasFrom)?.id ||
+    null;
+
+  const agentConfig: Record<string, unknown> = {
+    prompt: input.prompt,
+    greeting_message: input.greeting,
+    greeting_message_mode: "agent_static",
+    llm: "gpt-4.1-mini",
+    language: input.language,
+    voice_speed: 1.0,
+    patience_level: "medium",
+    allowed_idle_time_seconds: 90,
+    send_user_idle_reminders: true,
+    reminder_after_idle_time_seconds: 8,
+    reminder_after_idle_message:
+      "I'm still here. Would you like to book an appointment, or something else?",
+    min_words_to_interrupt: 3,
+    transcriber_provider: "deepgram-nova-3",
+    transcriber_speech_recognition: "high_accuracy",
+    noise_cancellation: "standard",
+    suppression_level: 0.2,
+    ...(input.voiceId ? { voice_id: input.voiceId } : {}),
+  };
+
+  let outboundId = existingId;
+  if (!outboundId) {
+    const created = await createOutboundAgent({
+      name: agentName,
+      agent: agentConfig,
+    });
+    const response = (created as { response?: Record<string, unknown> }).response || {};
+    outboundId = String(
+      response.model_id ||
+        (created as { model_id?: string }).model_id ||
+        response.id ||
+        (created as { id?: string }).id ||
+        "",
+    );
+    if (!outboundId) {
+      throw new AppError(502, `Synthflow did not return an outbound agent id: ${JSON.stringify(created)}`);
+    }
+    console.log(`[synthflow] Created outbound test agent ${outboundId}`);
+  } else {
+    await updateAgent(outboundId, { name: agentName, agent: agentConfig });
+  }
+
+  // Competing disposable outbound agents that share the clinic Twilio number
+  // cause ghost dials (UI "Calling…", status paused, phone never rings).
+  const fromSlug = fromDigits;
+  for (const row of outboundRows) {
+    if (row.id === outboundId) continue;
+    if (!row.poolHasFrom && row.phone !== input.fromPhone) continue;
+    const disposable = /probe|temp|test call probe/i.test(row.name);
+    if (!disposable) {
+      console.warn(
+        `[synthflow] Competing outbound ${row.id} (${row.name}) also has ${input.fromPhone} — dials may fail until it is removed in Synthflow.`,
+      );
+      continue;
+    }
+    try {
+      await synthflowRequest(
+        "DELETE",
+        `/assistants/${encodeURIComponent(row.id)}/phone_numbers/${encodeURIComponent(fromSlug)}`,
+      );
+    } catch {
+      /* already detached */
+    }
+    try {
+      await synthflowRequest("DELETE", `/assistants/${encodeURIComponent(row.id)}`);
+      console.log(`[synthflow] Deleted competing outbound probe ${row.id} (${row.name})`);
+    } catch (error) {
+      console.warn(
+        `[synthflow] Could not delete outbound probe ${row.id}:`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  // Same clinic number can sit on inbound (for answering) and this outbound pool (for dialing).
+  await attachAssistantPhoneNumbers(outboundId, [input.fromPhone]);
+  console.log(
+    `[synthflow] Outbound test agent ready ${outboundId} with from_phone ${input.fromPhone}`,
+  );
+  return outboundId;
+}
+
+/**
+ * Doctor-initiated outbound test call. Uses a dedicated outbound Synthflow agent
+ * (inbound agents cannot place ringing outbound dials).
+ */
+export async function startClinicReceptionistTestCall(input: { phone: string }) {
+  if (!isSynthflowConfigured()) {
+    throw new AppError(400, "SYNTHFLOW_API_KEY is not configured in backend/.env");
+  }
+
+  const settings = await getOrCreateSettings();
+  const inboundModelId =
+    settings.synthflowAgentId?.trim() || env.SYNTHFLOW_AGENT_ID.trim() || "";
+  if (!inboundModelId) {
+    throw new AppError(400, "Create / link a Synthflow agent before placing a test call.");
+  }
+
+  const toPhone = normalizePhone(input.phone);
+  if (!toPhone || toPhone.replace(/\D/g, "").length < 10) {
+    throw new AppError(400, "Enter a valid mobile number with country code (e.g. +14155550123).");
+  }
+
+  const fromPhone = normalizePhone(
+    settings.phoneNumber || env.SYNTHFLOW_PHONE_NUMBER || "",
+  );
+  if (!fromPhone) {
+    throw new AppError(400, "Set the clinic inbound phone number before placing a test call.");
+  }
+  if (fromPhone === toPhone) {
+    throw new AppError(
+      400,
+      "Enter your personal mobile — not the clinic inbound number. The receptionist will call you from the clinic line.",
+    );
+  }
+
+  const cooldownKey = `${fromPhone}:${toPhone}`;
+  const recent = recentTestCalls.get(cooldownKey);
+  if (recent && Date.now() - recent.at < testCallCooldownMs) {
+    // If the prior call already finished, allow a new dial sooner.
+    const prior = await getPhoneCall(recent.callId).catch(() => null);
+    const priorStatus = prior ? readCallStatus(prior) : "";
+    const priorLive = ["queued", "pending", "registered", "ringing", "in-progress", "paused"].includes(
+      priorStatus,
+    );
+    if (priorLive || !priorStatus) {
+      const waitSec = Math.ceil((testCallCooldownMs - (Date.now() - recent.at)) / 1000);
+      throw new AppError(
+        429,
+        priorLive
+          ? `A test call to ${toPhone} is still ${priorStatus || "in progress"} (call ${recent.callId}). Wait for it to finish before retrying.`
+          : `A test call to ${toPhone} was just started. Wait ${waitSec}s before retrying (avoids carrier spam blocks).`,
+      );
+    }
+  }
+
+  const clinic = await getClinicDoctor().catch(() => null);
+  const doctorName =
+    clinic?.user?.fullName?.trim() ||
+    (clinic as { name?: string } | null)?.name?.trim() ||
+    "the clinic doctor";
+  const clinicName = settings.clinicName?.trim() || "the clinic";
+  const lang = toSynthflowLanguage(settings.agentLanguage || "en");
+  const voiceId = (settings.agentVoiceId || "").trim() || undefined;
+
+  const greeting =
+    settings.agentFirstMessage?.trim() ||
+    `Thank you for calling ${clinicName}. You've reached the AI receptionist for ${doctorName}. How can I help you today?`;
+
+  const prompt = `You are the live AI receptionist for ${clinicName} (doctor: ${doctorName}) on a short TEST call started by the clinic doctor.
+Follow the normal clinic booking rules (FAST RESPONSE, availability, OTP).
+Keep every reply under two short sentences.
+When the caller wants to book, speak immediately: "Which day would you like your appointment?" Then wait.
+Use check_doctor_availability for dates/times — never invent open slots.
+Do not complete a real booking unless they provide a phone number and a valid OTP.
+If they only want a quick check, confirm you can hear them, then ask if they need anything else.
+Never go silent. Never say "let me check" or "one moment" before speaking.`;
+
+  const outboundModelId = await ensureClinicOutboundTestAgent({
+    clinicName,
+    fromPhone,
+    greeting,
+    prompt,
+    language: lang,
+    voiceId,
+  });
+
+  // Attach the same booking tools (reconciled set) so availability can be tested on the call.
+  const keepIds = await buildCanonicalActionKeepList(
+    normalizeActionIds(settings.synthflowActionIds),
+  ).catch(() => [] as string[]);
+  if (keepIds.length) {
+    await reconcileAssistantActions(outboundModelId, keepIds).catch((error) => {
+      console.warn(
+        "[synthflow] Could not attach booking actions to outbound test agent:",
+        error instanceof Error ? error.message : error,
+      );
+    });
+  }
+
+  if (outboundModelId === inboundModelId) {
+    throw new AppError(
+      502,
+      "Outbound test agent resolved to the inbound receptionist id. Inbound agents cannot place ringing dials.",
+    );
+  }
+
+  console.log(
+    `[synthflow] Doctor test call → ${toPhone} from ${fromPhone} (outbound agent ${outboundModelId}; inbound ${inboundModelId})`,
+  );
+
+  const { callId, raw: startRaw } = await startOutboundVoiceCall({
+    modelId: outboundModelId,
+    toPhone,
+    fromPhone,
+    name: "Doctor clinic test",
+    greeting,
+    prompt,
+  });
+  console.log(
+    `[synthflow] Doctor test call accepted call_id=${callId} raw=${JSON.stringify(startRaw).slice(0, 400)}`,
+  );
+
+  recentTestCalls.set(cooldownKey, { at: Date.now(), callId });
+
+  // Wait long enough to distinguish real ringing from Synthflow "paused" ghost calls.
+  let status = "queued";
+  let dialedModelId = "";
+  let dialedTo = "";
+  for (let i = 0; i < 4; i += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    const early = await getPhoneCall(callId).catch(() => null);
+    if (!early) continue;
+    status = readCallStatus(early);
+    const root = early as Record<string, unknown>;
+    const response = (root.response as Record<string, unknown> | undefined) ?? {};
+    const fromList = Array.isArray(response.calls)
+      ? (response.calls[0] as Record<string, unknown> | undefined)
+      : undefined;
+    const call =
+      (response.call as Record<string, unknown> | undefined) || fromList || root;
+    dialedModelId = String(call.model_id || "").trim();
+    dialedTo = String(
+      call.phone_number_to || call.lead_phone_number || call.phone_number || "",
+    ).trim();
+    console.log(
+      `[synthflow] Doctor test call poll ${i + 1}: status=${status} model=${dialedModelId || "?"} to=${dialedTo || "?"}`,
+    );
+    if (
+      ["ringing", "in-progress", "completed", "spam", "failed", "busy", "canceled", "no-answer"].includes(
+        status,
+      )
+    ) {
+      break;
+    }
+  }
+
+  // Never treat an inbound-agent dial as success — those stay "paused" and never ring.
+  if (dialedModelId && dialedModelId === inboundModelId) {
+    recentTestCalls.delete(cooldownKey);
+    throw new AppError(
+      502,
+      `Test call ${callId} was routed to the inbound agent (never rings). Outbound agent ${outboundModelId} must place the dial.`,
+    );
+  }
+
+  if (status === "paused" || status === "queued" || status === "pending" || status === "registered") {
+    recentTestCalls.delete(cooldownKey);
+    throw new AppError(
+      502,
+      `Synthflow accepted the call (${callId}) but it never started ringing (status "${status}"). ` +
+        `Usually this means another outbound agent still shares ${fromPhone}, or a prior dial is still live. ` +
+        `Wait ~60s and try once more.`,
+    );
+  }
+
+  let warning: string | null = null;
+  if (["spam", "failed", "canceled", "user-canceled", "busy", "no-answer"].includes(status)) {
+    recentTestCalls.delete(cooldownKey);
+    warning =
+      status === "spam"
+        ? `Carrier marked the call as spam. Wait 1–2 minutes, then try again.`
+        : status === "busy"
+          ? `Line was busy. Try again in a moment.`
+          : status === "no-answer"
+            ? `No answer at ${toPhone}.`
+            : `Call ended early with status "${status}".`;
+  }
+
+  return {
+    success: true as const,
+    callId,
+    status: status || "queued",
+    toPhone,
+    fromPhone,
+    modelId: outboundModelId,
+    inboundModelId,
+    warning,
+    message: warning
+      ? `Call to ${toPhone} ended with status "${status}".`
+      : `Calling ${toPhone} from ${fromPhone}. Answer to test the receptionist.`,
+  };
+}
+
+export async function getClinicReceptionistTestCall(callId: string) {
+  const id = callId.trim();
+  if (!id) throw new AppError(400, "callId is required");
+  if (!isSynthflowConfigured()) {
+    throw new AppError(400, "SYNTHFLOW_API_KEY is not configured in backend/.env");
+  }
+
+  const payload = await getPhoneCall(id);
+  if (!payload) throw new AppError(404, "Call not found");
+
+  const root = payload as Record<string, unknown>;
+  const response = (root.response as Record<string, unknown> | undefined) ?? {};
+  const fromList = Array.isArray(response.calls)
+    ? (response.calls[0] as Record<string, unknown> | undefined)
+    : undefined;
+  const call =
+    (response.call as Record<string, unknown> | undefined) ||
+    fromList ||
+    root;
+
+  const status = readCallStatus(payload);
+  const duration = call.duration ?? call.call_duration ?? null;
+  const transcript = String(call.transcript ?? call.transcript_text ?? "").trim();
+  const endReason = String(
+    call.end_reason ?? call.hangup_reason ?? call.termination_reason ?? "",
+  ).trim();
+
+  const healthyStatuses = new Set([
+    "ringing",
+    "in-progress",
+    "completed",
+  ]);
+  // "paused" means Synthflow accepted the request but never dialed (common when
+  // an inbound agent is used for outbound). Treat it as a finished failure.
+  const terminalFailure = new Set([
+    "paused",
+    "failed",
+    "spam",
+    "busy",
+    "canceled",
+    "user-canceled",
+    "no-answer",
+    "voicemail",
+  ]);
+
+  return {
+    success: true as const,
+    callId: id,
+    status,
+    duration,
+    endReason: endReason || null,
+    transcriptPreview: transcript.slice(0, 280) || null,
+    working: healthyStatuses.has(status),
+    finished:
+      terminalFailure.has(status) ||
+      !["queued", "pending", "registered", "ringing", "in-progress"].includes(status),
+  };
+}
+
+/** Non-dialing health check for the doctor clinic page. */
+export async function getClinicCallHealth() {
+  const settings = await getOrCreateSettings();
+  const modelId =
+    settings.synthflowAgentId?.trim() || env.SYNTHFLOW_AGENT_ID.trim() || "";
+  const publicRoot = env.PUBLIC_API_URL.replace(/\/$/, "");
+  const urls = synthflowWebhookUrls();
+
+  let tunnelOk = false;
+  let tunnelError: string | null = null;
+  try {
+    const res = await fetch(`${publicRoot}/api/health`, {
+      headers: { "ngrok-skip-browser-warning": "true" },
+      signal: AbortSignal.timeout(8_000),
+    });
+    tunnelOk = res.ok;
+    if (!res.ok) tunnelError = `HTTP ${res.status}`;
+  } catch (error) {
+    tunnelError = error instanceof Error ? error.message : String(error);
+  }
+
+  let availabilityOk = false;
+  let availabilityPreview: string | null = null;
+  let availabilityError: string | null = null;
+  try {
+    const res = await fetch(urls.availabilityAction, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+      },
+      body: JSON.stringify({ date: "today" }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const text = await res.text();
+    availabilityOk = res.ok;
+    if (res.ok) {
+      try {
+        const json = JSON.parse(text) as { spoken_summary?: string; message?: string };
+        availabilityPreview = String(json.spoken_summary || json.message || "").slice(0, 160);
+      } catch {
+        availabilityPreview = text.slice(0, 160);
+      }
+    } else {
+      availabilityError = `HTTP ${res.status}: ${text.slice(0, 120)}`;
+    }
+  } catch (error) {
+    availabilityError = error instanceof Error ? error.message : String(error);
+  }
+
+  let recentCompleted = 0;
+  let recentFailed = 0;
+  let lastStatus: string | null = null;
+  if (modelId && isSynthflowConfigured()) {
+    try {
+      const callsJson = await synthflowRequest<Record<string, unknown>>(
+        "GET",
+        `/calls?model_id=${encodeURIComponent(modelId)}&limit=10`,
+      );
+      const response = (callsJson.response as Record<string, unknown> | undefined) ?? callsJson;
+      const calls = (response.calls as Record<string, unknown>[] | undefined) ?? [];
+      for (const call of calls) {
+        const status = String(call.status ?? call.call_status ?? "").toLowerCase();
+        if (!lastStatus) lastStatus = status || null;
+        if (status === "completed") recentCompleted += 1;
+        if (["failed", "spam", "busy", "hangup_on_voicemail"].includes(status)) recentFailed += 1;
+      }
+    } catch (error) {
+      console.warn(
+        "[synthflow] call health list failed:",
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+
+  const { openSlotsSummary } = await buildDoctorsDirectoryKnowledge().catch(() => ({
+    openSlotsSummary: "none",
+  }));
+
+  const checks = {
+    synthflowConfigured: isSynthflowConfigured(),
+    agentLinked: Boolean(modelId),
+    clinicPhoneSet: Boolean(normalizePhone(settings.phoneNumber || env.SYNTHFLOW_PHONE_NUMBER)),
+    tunnelOk,
+    availabilityOk,
+    hasOpenSlots: Boolean(openSlotsSummary && openSlotsSummary !== "none"),
+  };
+
+  const ok =
+    checks.synthflowConfigured &&
+    checks.agentLinked &&
+    checks.clinicPhoneSet &&
+    checks.tunnelOk &&
+    checks.availabilityOk;
+
+  return {
+    success: true as const,
+    ok,
+    modelId: modelId || null,
+    clinicPhone: normalizePhone(settings.phoneNumber || env.SYNTHFLOW_PHONE_NUMBER) || null,
+    openSlotsSummary,
+    tunnel: { ok: tunnelOk, url: publicRoot, error: tunnelError },
+    availability: {
+      ok: availabilityOk,
+      preview: availabilityPreview,
+      error: availabilityError,
+    },
+    recentCalls: {
+      completed: recentCompleted,
+      failed: recentFailed,
+      lastStatus,
+    },
+    checks,
+    message: ok
+      ? "Call path looks healthy. Place a test call to your mobile to verify the live receptionist."
+      : "Call path needs attention — fix the failed checks below before testing.",
+  };
 }

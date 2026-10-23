@@ -33,9 +33,24 @@ doctorAppointmentsRouter.patch(
   appointmentsController.updateStatusForDoctor,
 );
 doctorAppointmentsRouter.post(
+  "/:appointmentId/reschedule",
+  requireClinicPermission("appointments"),
+  appointmentsController.rescheduleForDoctor,
+);
+doctorAppointmentsRouter.delete(
+  "/:appointmentId",
+  requireClinicPermission("appointments"),
+  appointmentsController.deleteForDoctor,
+);
+doctorAppointmentsRouter.post(
   "/:appointmentId/follow-up",
   requireClinicPermission("followUps", "appointments"),
   appointmentsController.createFollowUpForDoctor,
+);
+doctorAppointmentsRouter.get(
+  "/:appointmentId/invoice/preview",
+  requireClinicPermission("invoices"),
+  appointmentsController.previewInvoiceForDoctor,
 );
 doctorAppointmentsRouter.post(
   "/:appointmentId/invoice",

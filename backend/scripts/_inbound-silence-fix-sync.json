@@ -1,0 +1,28 @@
+{
+  "sync_warning": null,
+  "synthflowAgentId": "ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0",
+  "actions_count": 7,
+  "action_names": [
+    "book_appointment",
+    "check_doctor_availability",
+    "verify_booking_otp",
+    "offer_records_upload",
+    "check_existing_appointment",
+    "send_booking_otp",
+    "send_records_upload_link"
+  ],
+  "llm": "synthflow",
+  "transcriber_provider": "deepgram-nova-3",
+  "transcriber_speech_recognition": "high_accuracy",
+  "patience_level": "medium",
+  "min_words_to_interrupt": 3,
+  "allowed_idle_time_seconds": 90,
+  "noise_cancellation": "standard",
+  "suppression_level": 0.2,
+  "greeting_message_mode": "agent_static",
+  "prompt_len": 14236,
+  "prompt_has_fast_response": true,
+  "prompt_has_listening_capture": true,
+  "prompt_has_exact_which_day": true,
+  "list_count_check": 7
+}

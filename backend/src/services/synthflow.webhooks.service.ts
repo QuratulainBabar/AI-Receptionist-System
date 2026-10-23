@@ -19,15 +19,18 @@ import { findActiveAppointmentForMobile, type PublicAppointment } from "./appoin
 import { processVoiceBooking } from "./voice-booking.service.js";
 import { verifyBookingOtp } from "./booking-otp.service.js";
 import {
+  deliverSmsWithoutCall,
   fetchCallRecordingUrl,
-  sendDirectSms,
-  sendPatientReminderSms,
+  readRecordsUploadSmsExecution,
 } from "./synthflow.client.js";
 import {
   createUploadLinkForVoiceBooking,
   markRecordRequestSmsResult,
 } from "./record-requests.service.js";
-import { rememberRecordsUploadLink } from "./records-link-mirror.service.js";
+import {
+  getLastRecordsUploadLink,
+  rememberRecordsUploadLink,
+} from "./records-link-mirror.service.js";
 import {
   clinicDoctorProfileBlock,
   consultationFeeToSpeak,
@@ -115,7 +118,7 @@ async function buildClinicContext() {
       opening_doctor_line: "",
       availability_summary: "No open slots. Do not invent a time.",
       booking_instructions:
-        "This clinic has one doctor. When the caller wants to book, ask only which day they want, then WAIT — do not list dates yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say only open dates for the next seven days (speak slowly). After they pick a date, call again with that date and say only that day's times. Then collect booking details. After the caller gives a phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, you MUST call book_appointment with a real slot_id before asking for any code. Never say OTP digits aloud. Only after book_appointment succeeds, ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true. After the final appointment summary, ask exactly: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes, then immediately call send_records_upload_link with the fields from that response on the same call. If no, call offer_records_upload with consent no.",
+        "This clinic has one doctor. Speak ONLY dates/times from check_doctor_availability (live database). Never invent a day. When the caller wants to book (e.g. I want to book an appointment), reply IMMEDIATELY with only \"Which day would you like your appointment?\" then WAIT — do not list dates and do not call any action yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say the message exactly. After they pick a date, call again with that date and say only that day's times from the message. After they pick a time: ask full name, WAIT; ask reason for visit, WAIT; ask phone number, WAIT; say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\"; then MUST call check_existing_appointment with that exact phone. If has_active_appointment is true, say the message and do not book or ask for a code. If false, you MUST call book_appointment with a real slot_id before asking for any code. Never ask only for the name. Never say OTP digits aloud. Only after book_appointment succeeds, ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true. After the final appointment summary, ask exactly: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes, then immediately call send_records_upload_link with the fields from that response on the same call. If no, call offer_records_upload with consent no.",
     };
   }
 
@@ -136,10 +139,10 @@ async function buildClinicContext() {
     clinic_doctor_fee: feeSpoken,
     opening_doctor_line: openingDoctorLine(profile.doctorName, feeSpoken || fee),
     availability_summary: openLabels.length
-      ? "Do not read this aloud. Use check_doctor_availability: date today for today's times; date empty for weekly open dates; or the chosen day for that day's times. Always speak the action message exactly."
+      ? "Do not read this aloud. Speak ONLY check_doctor_availability message: date today = today's open times from the database; date empty = which days this week have open slots; chosen day = that day's times. Never invent a date or time."
       : `${profile.doctorName} has no open slots right now.`,
     booking_instructions:
-      "If the caller asks about today's availability, call check_doctor_availability with date today and say the message. If they ask about the weekly schedule, call with date empty and say the message. When booking: ask which day, WAIT, then call with that date and say times. After phone number, call check_existing_appointment. If has_active_appointment is true, do not book. If false, MUST call book_appointment with a real slot_id — do not ask for a code yet. Only after book_appointment succeeds, ask for the six-digit code and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. After the final appointment summary, ask exactly in English: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes and the booking phone, then immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from that response (same call). If no, call offer_records_upload with consent no.",
+      "If the caller asks about today's availability, IMMEDIATELY call check_doctor_availability with date today and say the message EXACTLY — do not ask which day first. If they ask about this week / available days / which days the doctor is in, IMMEDIATELY call with date empty and say the message EXACTLY. Never invent dates like October 26. When they want to book without a list request (e.g. I want to book an appointment): reply IMMEDIATELY with only \"Which day would you like your appointment?\", WAIT — do not call any action on that turn — then after they name a day call with that date and say times. After they pick a time: ask full name WAIT; ask \"What is the reason for your visit today?\" WAIT; ask \"What phone number should we use for this booking?\" WAIT; say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\"; then MUST call check_existing_appointment with that exact phone. If has_active_appointment is true, say the message and do not book or ask for a code. If false, MUST call book_appointment with a real slot_id — do not ask for a code yet. Never ask only for the name. Only after book_appointment succeeds, ask for the six-digit code and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. After the final appointment summary, ask exactly in English: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes and the booking phone, then immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from that response (same call). If no, call offer_records_upload with consent no.",
   };
 }
 
@@ -285,6 +288,67 @@ async function maybeBookFromDataWebhook(
   // The live call sends the OTP and confirms only after verify_booking_otp.
   // Post-call payloads must not confirm the visit or text another code.
   return null;
+}
+
+/**
+ * After a booking call ends, if Synthflow ran `send_records_upload_link` (INCALL_SMS)
+ * without error, mark the matching record request as SMS-delivered.
+ * Terminal DEBUG PREVIEW alone never counts as delivery.
+ */
+async function maybeMarkRecordsUploadSmsFromCall(payload: unknown) {
+  const execution = readRecordsUploadSmsExecution(payload);
+  if (!execution.ran) return;
+
+  const last = getLastRecordsUploadLink();
+  const toPhone = normalizePhone(execution.toPhone) || normalizePhone(last?.phone || "");
+  const reference = last?.appointmentReference || "";
+
+  if (execution.error) {
+    console.warn(
+      `[synthflow] records INCALL SMS failed action=${execution.actionName} phone=${toPhone || "(none)"}: ${execution.error}`,
+    );
+    if (last?.id && reference) {
+      const row = await prisma.recordRequest.findFirst({
+        where: {
+          appointment: { reference: { equals: reference, mode: "insensitive" } },
+        },
+        orderBy: { createdAt: "desc" },
+      });
+      if (row) {
+        await markRecordRequestSmsResult({
+          requestId: row.id,
+          smsSent: false,
+          smsError: execution.error,
+        }).catch(() => undefined);
+      }
+    }
+    return;
+  }
+
+  console.log(
+    `[synthflow] records INCALL SMS verified action=${execution.actionName} phone=${toPhone || "(none)"} ref=${reference || "(none)"}`,
+  );
+
+  const row = reference
+    ? await prisma.recordRequest.findFirst({
+        where: {
+          appointment: { reference: { equals: reference, mode: "insensitive" } },
+        },
+        orderBy: { createdAt: "desc" },
+      })
+    : toPhone
+      ? await prisma.recordRequest.findFirst({
+          where: { phone: toPhone },
+          orderBy: { createdAt: "desc" },
+        })
+      : null;
+
+  if (row) {
+    await markRecordRequestSmsResult({
+      requestId: row.id,
+      smsSent: true,
+    }).catch(() => undefined);
+  }
 }
 
 export async function handleDataWebhook(payload: unknown) {
@@ -447,6 +511,14 @@ export async function handleDataWebhook(payload: unknown) {
     }).catch(() => undefined);
   }
 
+  // Verify live-call INCALL_SMS delivery for records upload (preview alone is not success).
+  await maybeMarkRecordsUploadSmsFromCall(payload).catch((error) => {
+    console.warn(
+      "[synthflow] records SMS delivery check failed:",
+      error instanceof Error ? error.message : error,
+    );
+  });
+
   return {
     ok: true,
     voiceCallId: voiceCall.id,
@@ -499,7 +571,24 @@ const WEEKDAY_ALIASES: Record<string, number> = {
   sat: 6,
 };
 
-/** Resolve a spoken/typed date to YYYY-MM-DD in the clinic zone (next 7 days only). */
+/**
+ * Remaining days of the current clinic calendar week (Monday–Sunday), inclusive.
+ * Never includes next week — e.g. on Thursday, Monday resolves only if it is still this week.
+ */
+function remainingCalendarWeekKeys(now = new Date()): string[] {
+  const todayKey = civilDateKey(now);
+  const weekday = weekdayNameForCivilDate(todayKey).toLowerCase();
+  const dow = WEEKDAY_ALIASES[weekday] ?? 0;
+  const daysFromMonday = (dow + 6) % 7;
+  const weekEnd = addCivilDays(todayKey, 6 - daysFromMonday);
+  const keys: string[] = [];
+  for (let key = todayKey; key <= weekEnd; key = addCivilDays(key, 1)) {
+    keys.push(key);
+  }
+  return keys;
+}
+
+/** Resolve a spoken/typed date to YYYY-MM-DD in the clinic zone (remaining Mon–Sun week only). */
 function resolveAvailabilityDateKey(raw: string, now = new Date()): string | null {
   const text = raw.toLowerCase().trim();
   if (!text || emptyish(text) || text === "none" || text === "null") return null;
@@ -510,11 +599,15 @@ function resolveAvailabilityDateKey(raw: string, now = new Date()): string | nul
     return null;
   }
 
-  const todayKey = civilDateKey(now);
-  const weekEnd = addCivilDays(todayKey, 6);
+  const weekKeys = remainingCalendarWeekKeys(now);
+  const todayKey = weekKeys[0]!;
+  const weekEnd = weekKeys[weekKeys.length - 1]!;
 
   if (/\btoday\b/.test(text)) return todayKey;
-  if (/\btomorrow\b/.test(text)) return addCivilDays(todayKey, 1);
+  if (/\btomorrow\b/.test(text)) {
+    const tomorrow = addCivilDays(todayKey, 1);
+    return tomorrow <= weekEnd ? tomorrow : null;
+  }
 
   const iso = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
   if (iso) {
@@ -555,9 +648,8 @@ function resolveAvailabilityDateKey(raw: string, now = new Date()): string | nul
         ? monthNames.findIndex((name) => name.startsWith(monthToken.slice(0, 3)))
         : monthShort.indexOf(monthToken.slice(0, 3));
     if (monthIdx >= 0 && dayNum >= 1 && dayNum <= 31) {
-      for (let offset = 0; offset < 7; offset += 1) {
-        const key = addCivilDays(todayKey, offset);
-        const [y, m, d] = key.split("-").map(Number);
+      for (const key of weekKeys) {
+        const [, m, d] = key.split("-").map(Number);
         if (m === monthIdx + 1 && d === dayNum) return key;
       }
     }
@@ -565,8 +657,7 @@ function resolveAvailabilityDateKey(raw: string, now = new Date()): string | nul
 
   for (const [alias, wantDow] of Object.entries(WEEKDAY_ALIASES)) {
     if (!new RegExp(`\\b${alias}\\b`).test(text)) continue;
-    for (let offset = 0; offset < 7; offset += 1) {
-      const key = addCivilDays(todayKey, offset);
+    for (const key of weekKeys) {
       const weekday = weekdayNameForCivilDate(key).toLowerCase();
       if (WEEKDAY_ALIASES[weekday] === wantDow) return key;
     }
@@ -593,9 +684,27 @@ function speakableDateLabel(dateKey: string) {
   });
 }
 
-function slotsWithinWeek(slots: Array<{ id: string; startsAt: Date }>, now = new Date()) {
+/** Prefer "today" / "tomorrow" in clinic timezone so the agent does not say the calendar date. */
+function relativeSpeakableDateLabel(dateKey: string, now = new Date()) {
   const todayKey = civilDateKey(now);
-  const weekEnd = addCivilDays(todayKey, 6);
+  if (dateKey === todayKey) return "today";
+  if (dateKey === addCivilDays(todayKey, 1)) return "tomorrow";
+  return speakableDateLabel(dateKey);
+}
+
+/** Opening phrase for slot lists: "Today, the open times…" / "On Monday, October 19, …" */
+function speakableDayOpener(dateKey: string, now = new Date()) {
+  const todayKey = civilDateKey(now);
+  if (dateKey === todayKey) return "Today";
+  if (dateKey === addCivilDays(todayKey, 1)) return "Tomorrow";
+  return `On ${speakableDateLabel(dateKey)}`;
+}
+
+function slotsWithinWeek(slots: Array<{ id: string; startsAt: Date }>, now = new Date()) {
+  // Current calendar week only (Mon–Sun): remaining open slots from today through Sunday.
+  const weekKeys = remainingCalendarWeekKeys(now);
+  const todayKey = weekKeys[0]!;
+  const weekEnd = weekKeys[weekKeys.length - 1]!;
   return slots.filter((slot) => {
     const key = civilDateKey(slot.startsAt);
     return key >= todayKey && key <= weekEnd;
@@ -643,19 +752,19 @@ export async function handleAvailabilityAction(body: unknown) {
     }
     const dates = [...byDate.keys()].sort().map((key) => ({
       date: key,
-      label: speakableDateLabel(key),
+      label: relativeSpeakableDateLabel(key),
       open_count: byDate.get(key) || 0,
     }));
     const dateLabels = dates.map((row) => row.label);
     let spoken_summary: string;
     if (dateLabels.length === 0) {
-      spoken_summary = "There are no open dates in the next seven days.";
+      spoken_summary = "There are no open dates this week.";
     } else if (dateLabels.length === 1) {
-      spoken_summary = `Over the next seven days, the open date is ${dateLabels[0]}. Which date would you like?`;
+      spoken_summary = `This week, the open date is ${dateLabels[0]}. Which date would you like?`;
     } else {
       const head = dateLabels.slice(0, -1).join(", ");
       const last = dateLabels[dateLabels.length - 1];
-      spoken_summary = `Over the next seven days, the open dates are ${head}, and ${last}. Which date would you like?`;
+      spoken_summary = `This week, the open dates are ${head}, and ${last}. Which date would you like?`;
     }
 
     return {
@@ -678,7 +787,8 @@ export async function handleAvailabilityAction(body: unknown) {
     datetime_label: formatClinicDateTime(slot.startsAt),
     date: dateKey,
   }));
-  const dayLabel = speakableDateLabel(dateKey);
+  const dayLabel = relativeSpeakableDateLabel(dateKey);
+  const dayOpener = speakableDayOpener(dateKey);
   const timeLabels = slots.map((slot) => slot.label);
   const todayKey = civilDateKey(new Date());
   let spoken_summary: string;
@@ -689,21 +799,24 @@ export async function handleAvailabilityAction(body: unknown) {
       const nextTimes = weekSlots
         .filter((slot) => civilDateKey(slot.startsAt) === nextKey)
         .map((slot) => formatClinicTime(slot.startsAt));
-      const nextLabel = speakableDateLabel(nextKey);
+      const nextLabel = relativeSpeakableDateLabel(nextKey);
       const timesSpoken =
         nextTimes.length === 1
           ? nextTimes[0]
           : `${nextTimes.slice(0, -1).join(", ")}, and ${nextTimes[nextTimes.length - 1]}`;
       spoken_summary = `There are no remaining open times today. The next open day is ${nextLabel}, with times ${timesSpoken}. Which time would you like, or would you prefer another day this week?`;
+    } else if (dateKey === todayKey) {
+      spoken_summary =
+        "There are no remaining open times today. Please choose another date this week.";
     } else {
-      spoken_summary = `There are no open times on ${dayLabel}. Please choose another date from the next seven days.`;
+      spoken_summary = `There are no open times ${dayLabel === "tomorrow" ? "tomorrow" : `on ${speakableDateLabel(dateKey)}`}. Please choose another date this week.`;
     }
   } else if (timeLabels.length === 1) {
-    spoken_summary = `On ${dayLabel}, the open time is ${timeLabels[0]}. Which time would you like?`;
+    spoken_summary = `${dayOpener}, the open time is ${timeLabels[0]}. Which time would you like?`;
   } else {
     const head = timeLabels.slice(0, -1).join(", ");
     const last = timeLabels[timeLabels.length - 1];
-    spoken_summary = `On ${dayLabel}, the open times are ${head}, and ${last}. Which time would you like?`;
+    spoken_summary = `${dayOpener}, the open times are ${head}, and ${last}. Which time would you like?`;
   }
 
   return {
@@ -723,9 +836,14 @@ export async function handleAvailabilityAction(body: unknown) {
 export async function handleCheckAppointmentAction(body: unknown) {
   const root = asRecord(body);
   const fields = extractVoiceBookingFields(body);
-  const phone = normalizePhone(
-    pickString(root, ["phone", "phone_number", "caller_phone", "from_number"]) || fields.phone,
+  const spokenPhone = normalizePhone(
+    pickString(root, ["phone", "phone_number"]) || fields.phone,
   );
+  const callerPhone = normalizePhone(
+    pickString(root, ["caller_phone", "user_phone_number", "from_number"]) || "",
+  );
+  // Prefer the contact number the caller gave for booking; fall back to the inbound line.
+  const phone = spokenPhone || callerPhone;
 
   if (!phone) {
     return {
@@ -736,8 +854,15 @@ export async function handleCheckAppointmentAction(body: unknown) {
     };
   }
 
+  console.log(
+    `[synthflow] check_existing_appointment phone=${phone} spoken=${spokenPhone || "(none)"} caller=${callerPhone || "(none)"}`,
+  );
+
   const active = await findActiveAppointmentForMobile({ phone, ignoreOpenOtpHolds: true });
   if (active) {
+    console.log(
+      `[synthflow] check_existing_appointment BLOCK phone=${phone} ref=${active.reference} status=${active.status}`,
+    );
     return {
       success: true,
       has_active_appointment: true,
@@ -747,17 +872,19 @@ export async function handleCheckAppointmentAction(body: unknown) {
       status: active.status,
       doctor: active.doctorName,
       when: `${active.date} at ${active.time}`,
-      message: `I did not book a new appointment. This number already has an active appointment: ${active.spokenSummary}. Please complete or cancel that one first. After it is completed or cancelled, this number can book a new appointment. If the caller asks whether today's request is confirmed, say no, the new appointment was not booked.`,
+      message:
+        "It looks like you already have an active appointment associated with this number. Please complete your existing appointment before booking another one.",
     };
   }
 
+  console.log(`[synthflow] check_existing_appointment CLEAR phone=${phone} (no Pending/Confirmed)`);
   return {
     success: true,
     has_active_appointment: false,
     can_book: true,
     next_action: "book_appointment",
     message:
-      "This number has no active appointment. Next call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do not ask for a verification code until book_appointment succeeds.",
+      "This number has no Pending or Confirmed appointment. Completed or Cancelled visits do not block booking. Next call book_appointment with doctor_id, slot_id, patient_name, phone, and reason. Do not ask for a verification code until book_appointment succeeds.",
   };
 }
 
@@ -872,7 +999,7 @@ export async function handleBookAction(body: unknown) {
     date: appointment.date,
     time: appointment.time,
     message:
-      "The appointment is not booked yet. Do not say any code digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp with the booking phone and the digits they speak. If you did not catch the digits, ask them to say the six digits slowly again. Confirm only when appointment_confirmed is true. If the code is wrong, say the appointment is not booked and that time was released.",
+      "The appointment is not booked yet. Do not say any code digits aloud to the caller. Ask them to say the six-digit verification code, WAIT, then IMMEDIATELY call verify_booking_otp with the booking phone and otp set to the digits they spoke (testing code 123456). Do not say you did not catch the code before calling verify_booking_otp. Confirm only when appointment_confirmed is true.",
     patient_id: patient.id,
     patient_reference: patient.reference,
   };
@@ -888,6 +1015,10 @@ export async function handleVerifyOtpAction(body: unknown) {
     pickString(root, ["caller_phone", "user_phone_number", "from_number"]) || "",
   );
   const otp = pickString(root, ["otp", "code", "verification_code", "pin"]) || fields.otp;
+
+  console.log(
+    `[synthflow] verify_booking_otp phone=${phone || "(none)"} caller=${callerPhone || "(none)"} otp_raw=${JSON.stringify(otp)}`,
+  );
 
   try {
     return await verifyBookingOtp({ phone, otp, callerPhone });
@@ -1099,6 +1230,7 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
     const cleanDoctor = link.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
     const smsBody = `Qubetech clinic: Secure upload link for your appointment ${link.appointmentReference} with Dr. ${cleanDoctor}. Share medical records here (expires in 7 days): ${link.uploadUrl}`;
 
+    // DEBUG PREVIEW only — never treat this terminal block as SMS delivery proof.
     rememberRecordsUploadLink({
       phone: link.phone,
       appointmentReference: link.appointmentReference,
@@ -1107,31 +1239,52 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
       smsBody,
     });
 
-    // Never dial a second outbound call for this (missed call = no SMS).
-    // Primary delivery: agent calls send_records_upload_link on THIS live call.
-    // Bonus: try chat SMS in the background (needs a chat-capable agent; may fail).
-    void (async () => {
-      const direct = await sendDirectSms({
-        toPhone: link.phone,
-        body: smsBody,
-      });
-      if (direct.ok) {
-        await markRecordRequestSmsResult({
-          requestId: link.requestId,
-          smsSent: true,
-        }).catch(() => undefined);
-        console.log(
-          `[synthflow] records-offer bonus direct SMS ok phone=${link.phone} ref=${link.appointmentReference}`,
-        );
-        return;
-      }
-      console.warn(
-        `[synthflow] records-offer direct SMS skipped (${direct.error}). Relying on in-call send_records_upload_link.`,
-      );
-    })();
+    // Actual delivery (no automated outbound call):
+    // 1) Try Synthflow no-call SMS (/chat/outbound) with the prepared body.
+    // 2) If that channel is unavailable on this voice agent, require INCALL_SMS
+    //    `send_records_upload_link` on THIS live call (same path as OTP).
+    const delivery = await deliverSmsWithoutCall({
+      toPhone: link.phone,
+      body: smsBody,
+      purpose: "records_upload",
+    });
 
+    if (delivery.ok) {
+      await markRecordRequestSmsResult({
+        requestId: link.requestId,
+        smsSent: true,
+      }).catch(() => undefined);
+      console.log(
+        `[synthflow] records-offer SMS DELIVERED (no call) → ${link.phone} ref=${link.appointmentReference}`,
+      );
+      return {
+        success: true,
+        records_consent: "yes",
+        records_sms_sent: true,
+        sms_mode: "direct",
+        phone: link.phone,
+        to_phone_number: link.phone,
+        doctor_name: cleanDoctor,
+        appointment_reference: link.appointmentReference,
+        upload_url: link.uploadUrl,
+        records_sms_body: smsBody,
+        next_action: "none",
+        message:
+          "Thank you. I have texted the secure upload link to the booking mobile. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
+      };
+    }
+
+    await markRecordRequestSmsResult({
+      requestId: link.requestId,
+      smsSent: false,
+      smsError: delivery.error,
+    }).catch(() => undefined);
+
+    console.warn(
+      `[synthflow] records-offer no-call SMS unavailable → ${link.phone} ref=${link.appointmentReference}: ${delivery.error}`,
+    );
     console.log(
-      `[synthflow] records-offer ready for INCALL SMS → to=${link.phone} ref=${link.appointmentReference}`,
+      `[synthflow] records-offer link ready → to=${link.phone} ref=${link.appointmentReference} (require INCALL send_records_upload_link on this live call — preview is not delivery)`,
     );
 
     return {
@@ -1144,7 +1297,7 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
       doctor_name: cleanDoctor,
       appointment_reference: link.appointmentReference,
       upload_url: link.uploadUrl,
-      // Exact SMS text + destination for send_records_upload_link (action_results mapping).
+      // Exact SMS text + destination for send_records_upload_link (INCALL_SMS on this call).
       records_sms_body: smsBody,
       next_action: "send_records_upload_link",
       message:
@@ -1232,6 +1385,7 @@ export async function handleRecordsSmsAction(body: unknown) {
   const cleanDoctor = doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
   const smsBody = `Qubetech clinic: Dr. ${cleanDoctor} requested your medical records for appointment ${appointmentReference}. Upload securely here (expires in 7 days): ${uploadUrl}`;
 
+  // DEBUG PREVIEW only — not proof of delivery.
   rememberRecordsUploadLink({
     phone,
     appointmentReference,
@@ -1241,29 +1395,33 @@ export async function handleRecordsSmsAction(body: unknown) {
   });
   console.log(`[synthflow] records-sms accepted phone=${phone} ref=${appointmentReference}`);
 
-  // Deliver after a short delay so this call can end before the SMS delivery call starts.
-  void (async () => {
-    await new Promise((resolve) => setTimeout(resolve, 5000));
-    try {
-      await sendPatientReminderSms({
-        toPhone: phone,
-        body: smsBody,
-        purpose: "confirmation",
-      });
-      console.log(`[synthflow] Records upload SMS queued/delivered to ${phone}`);
-    } catch (error) {
-      console.warn(
-        `[synthflow] Records upload SMS failed for ${phone}:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
-  })();
+  // Deliver the same prepared body without placing an automated outbound call.
+  const delivery = await deliverSmsWithoutCall({
+    toPhone: phone,
+    body: smsBody,
+    purpose: "records_upload",
+  });
 
+  if (delivery.ok) {
+    console.log(`[synthflow] Records upload SMS DELIVERED (no call) → ${phone}`);
+    return {
+      success: true,
+      records_sms_sent: true,
+      phone,
+      message:
+        "I have texted your secure upload link. Please open it to attach your files. Goodbye.",
+    };
+  }
+
+  console.warn(
+    `[synthflow] Records upload SMS failed (no call) → ${phone}: ${delivery.error}`,
+  );
   return {
-    success: true,
+    success: false,
+    records_sms_sent: false,
     phone,
     message:
-      "I have texted your secure upload link. Please open it to attach your files. Goodbye.",
+      "I could not text the upload link just now. Please confirm the mobile number as digits, or ask me to send the link again on this call with send_records_upload_link.",
   };
 }
 

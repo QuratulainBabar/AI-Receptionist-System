@@ -11,6 +11,8 @@ export type PublicDoctorNotification = {
   detail: string;
   time: string;
   kind: NotificationKind;
+  /** booking | cancellation | reschedule | report */
+  eventType: string;
   unread: boolean;
 };
 
@@ -51,6 +53,7 @@ function toPublic(row: DoctorNotification): PublicDoctorNotification {
     detail: row.detail,
     time: formatRelativeTime(row.occurredAt),
     kind: row.kind as NotificationKind,
+    eventType: row.eventType,
     unread: row.readAt == null,
   };
 }
@@ -78,7 +81,7 @@ async function upsertNotification(input: {
   relatedId: string;
   occurredAt: Date;
 }) {
-  return prisma.doctorNotification.upsert({
+  const existing = await prisma.doctorNotification.findUnique({
     where: {
       doctorUserId_eventType_relatedId: {
         doctorUserId: input.doctorUserId,
@@ -86,25 +89,55 @@ async function upsertNotification(input: {
         relatedId: input.relatedId,
       },
     },
-    update: {
+  });
+
+  if (!existing) {
+    return prisma.doctorNotification.create({
+      data: {
+        doctorUserId: input.doctorUserId,
+        kind: input.kind,
+        eventType: input.eventType,
+        title: input.title,
+        detail: input.detail,
+        relatedId: input.relatedId,
+        occurredAt: input.occurredAt,
+      },
+    });
+  }
+
+  // Preserve readAt when content is unchanged (list/ensure must not revive badges).
+  // Re-open as unread only when the event meaningfully changes (e.g. pending → confirmed).
+  const contentChanged =
+    existing.kind !== input.kind ||
+    existing.title !== input.title ||
+    existing.detail !== input.detail;
+
+  return prisma.doctorNotification.update({
+    where: { id: existing.id },
+    data: {
       kind: input.kind,
       title: input.title,
       detail: input.detail,
       occurredAt: input.occurredAt,
-    },
-    create: {
-      doctorUserId: input.doctorUserId,
-      kind: input.kind,
-      eventType: input.eventType,
-      title: input.title,
-      detail: input.detail,
-      relatedId: input.relatedId,
-      occurredAt: input.occurredAt,
+      ...(contentChanged ? { readAt: null } : {}),
     },
   });
 }
 
+/**
+ * Doctor "new booking" alert — only after the appointment is CONFIRMED.
+ * PENDING voice OTP holds must not create or upgrade a dashboard notification.
+ */
 export async function logAppointmentBookedForDoctor(appointment: AppointmentWithPatient) {
+  if (appointment.status === "PENDING") {
+    console.log(
+      `[notifications] Skipping doctor alert for PENDING OTP hold ${appointment.id} (${appointment.reference})`,
+    );
+    return null;
+  }
+  if (appointment.status !== "CONFIRMED") {
+    return null;
+  }
   return upsertNotification({
     doctorUserId: appointment.doctorUserId,
     kind: "new",
@@ -112,7 +145,7 @@ export async function logAppointmentBookedForDoctor(appointment: AppointmentWith
     relatedId: appointment.id,
     title: `New booking — ${appointment.patient.fullName}`,
     detail: bookingDetail(appointment),
-    occurredAt: appointment.createdAt,
+    occurredAt: appointment.updatedAt,
   });
 }
 
@@ -175,18 +208,36 @@ export async function logReportUploadedForDoctors(
 }
 
 async function ensureNotificationsForDoctor(doctorUserId: string) {
+  // Only backfill missing rows — never rewrite existing notifications on every list poll.
+  const existing = await prisma.doctorNotification.findMany({
+    where: { doctorUserId },
+    select: { eventType: true, relatedId: true },
+  });
+  const known = new Set(
+    existing.map((row) => `${row.eventType}:${row.relatedId ?? ""}`),
+  );
+
   const appointments = await prisma.appointment.findMany({
     where: { doctorUserId },
     include: { patient: true },
     orderBy: { createdAt: "desc" },
+    take: 200,
   });
 
   for (const appointment of appointments) {
-    if (appointment.status === "PENDING") continue;
-    await logAppointmentBookedForDoctor(appointment);
+    // Only confirmed bookings — never backfill PENDING OTP holds onto the doctor feed.
+    if (appointment.status === "CONFIRMED") {
+      if (!known.has(`booking:${appointment.id}`)) {
+        await logAppointmentBookedForDoctor(appointment);
+        known.add(`booking:${appointment.id}`);
+      }
+    }
 
     if (appointment.status === "CANCELLED") {
-      await logAppointmentCancelledForDoctor(appointment);
+      if (!known.has(`cancellation:${appointment.id}`)) {
+        await logAppointmentCancelledForDoctor(appointment);
+        known.add(`cancellation:${appointment.id}`);
+      }
     }
   }
 
@@ -197,10 +248,13 @@ async function ensureNotificationsForDoctor(doctorUserId: string) {
     where: { userId: { in: patientIds } },
     include: { user: true },
     orderBy: { createdAt: "desc" },
+    take: 100,
   });
 
   for (const record of records) {
+    if (known.has(`report:${record.id}`)) continue;
     await logReportUploadedForDoctors(record);
+    known.add(`report:${record.id}`);
   }
 }
 
@@ -226,4 +280,21 @@ export async function markAllNotificationsReadForDoctor(doctorUserId: string) {
   });
 
   return { marked: result.count };
+}
+
+/** Mark a single notification as read when the doctor opens/views it. */
+export async function markNotificationReadForDoctor(doctorUserId: string, notificationId: string) {
+  await assertActiveDoctor(doctorUserId);
+
+  const row = await prisma.doctorNotification.findFirst({
+    where: { id: notificationId, doctorUserId },
+  });
+  if (!row) throw new AppError(404, "Notification not found");
+  if (row.readAt) return { marked: 0, id: row.id };
+
+  await prisma.doctorNotification.update({
+    where: { id: row.id },
+    data: { readAt: new Date() },
+  });
+  return { marked: 1, id: row.id };
 }
