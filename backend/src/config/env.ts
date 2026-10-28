@@ -24,6 +24,12 @@ const envSchema = z.object({
   STRIPE_SECRET_KEY: z.string().optional().default("").transform((v) => v.trim()),
   STRIPE_PUBLISHABLE_KEY: z.string().optional().default("").transform((v) => v.trim()),
   STRIPE_WEBHOOK_SECRET: z.string().optional().default("").transform((v) => v.trim()),
+  /** Outbound email (medical-records upload links). */
+  SMTP_HOST: z.string().optional().default("").transform((v) => v.trim()),
+  SMTP_PORT: z.coerce.number().int().default(587),
+  SMTP_USER: z.string().optional().default("").transform((v) => v.trim()),
+  SMTP_PASS: z.string().optional().default(""),
+  SMTP_FROM: z.string().optional().default("").transform((v) => v.trim()),
   CLINIC_TIMEZONE: z
     .string()
     .default("America/Los_Angeles")

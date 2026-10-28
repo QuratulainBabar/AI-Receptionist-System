@@ -1,0 +1,30 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[verify] PUBLIC_API_URL = https://wicked-bars-flash.loca.lt
+[verify] expected availability = https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/availability
+[verify] tunnel health 502 Bad Gateway
+[synthflow] Action book_appointment synced ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/book (6 copies)
+[synthflow] Action check_doctor_availability synced ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/availability (5 copies)
+[synthflow] Action check_existing_appointment synced ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/check-appointment (8 copies)
+[synthflow] Action verify_booking_otp synced ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/verify-otp (7 copies)
+[synthflow] Action offer_records_upload synced ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/offer-records-upload (7 copies)
+[synthflow] Action deliver_records_upload_sms synced ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/records-sms (6 copies)
+[synthflow] In-call SMS action send_booking_otp updated for inbound caller (7 copies)
+[synthflow] In-call SMS action send_records_upload_link updated for +14244849053 (1 copies)
+[verify] Synthflow action d0255f73-b81c-4efc-8cd6-ba01b08c6818 ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/availability
+[verify] Synthflow action 9017f2ce-7590-45e4-9617-a0a1d1df35b0 ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/availability
+[verify] Synthflow action 300823d8-32c4-4edc-ba8d-47fed510cbf2 ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/availability
+[verify] Synthflow action 299d092f-7ae4-45a5-a9df-a3ddfd00f27e ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/availability
+[verify] Synthflow action e67c439a-2088-4fd4-b20e-4563a6441b39 ΓåÆ https://wicked-bars-flash.loca.lt/api/webhooks/synthflow/actions/availability
+SyntaxError: Unexpected non-whitespace character after JSON at position 4 (line 1 column 5)
+    at JSON.parse (<anonymous>)
+    at parseJSONFromBytes (node:internal/deps/undici/undici:4394:19)
+    at successSteps (node:internal/deps/undici/undici:7048:27)
+    at readAllBytes (node:internal/deps/undici/undici:5965:13)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

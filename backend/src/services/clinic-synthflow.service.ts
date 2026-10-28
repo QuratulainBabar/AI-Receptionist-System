@@ -38,6 +38,7 @@ import {
   greetingWithOpeningLine,
 } from "./clinic-doctor.service.js";
 import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
+import { buildLiveAvailabilityPromptBlock } from "./synthflow.webhooks.service.js";
 
 const SETTINGS_ID = "default";
 
@@ -280,8 +281,8 @@ async function buildCanonicalActionKeepList(preferredIds: string[]): Promise<str
     "verify_booking_otp",
     "send_booking_otp",
     "offer_records_upload",
-    "send_records_upload_link",
-    // deliver_records_upload_sms is outbound-records only; keep off inbound.
+    // Records links are emailed via offer_records_upload; send_records_upload_link and
+    // deliver_records_upload_sms are outbound-records only — keep off inbound.
   ];
   const preferred = new Set(preferredIds.filter(Boolean));
   const keep: string[] = [];
@@ -676,14 +677,13 @@ export async function createOrUpdateClinicSynthflowAgent(input?: {
       return "";
     }
   })();
-  if (
-    env.NODE_ENV === "development" &&
-    publicHost &&
-    publicHost !== "localhost" &&
-    publicHost !== "127.0.0.1" &&
-    !publicHost.endsWith(".trycloudflare.com") &&
-    !publicHost.includes("ngrok")
-  ) {
+  const looksLikeLocalTunnel =
+    publicHost === "localhost" ||
+    publicHost === "127.0.0.1" ||
+    publicHost.endsWith(".trycloudflare.com") ||
+    publicHost.endsWith(".loca.lt") ||
+    publicHost.includes("ngrok");
+  if (env.NODE_ENV === "development" && publicHost && !looksLikeLocalTunnel) {
     warnings.push(
       `Live phone availability reads ${publicHost}, not this local database. Set PUBLIC_API_URL to a tunnel of localhost:4000 (or add the same open slots on that host) so check_doctor_availability can list your calendar times.`,
     );
@@ -901,11 +901,9 @@ export async function resolveBootAgentId() {
 const testCallCooldownMs = 120_000;
 const recentTestCalls = new Map<string, { at: number; callId: string }>();
 
-/**
- * Synthflow only places real outbound dials from type=outbound agents.
- * The clinic inbound receptionist cannot dial — POST /calls returns a call id that
- * stays "paused" forever and the destination never rings.
- */
+/** Synthflow call_status values that mean "not dialed / not answered yet". */
+const TEST_CALL_PENDING_STATUSES = new Set(["queue", "queued", "pending", "registered", "initiated"]);
+
 async function ensureClinicOutboundTestAgent(input: {
   clinicName: string;
   fromPhone: string;
@@ -921,16 +919,13 @@ async function ensureClinicOutboundTestAgent(input: {
     (listed as Record<string, unknown>);
   const rows = (listResp.assistants as Record<string, unknown>[] | undefined) ?? [];
   const fromDigits = input.fromPhone.replace(/\D/g, "");
-
-  // Prefer the dedicated clinic outbound test agent by name. Sharing the clinic
-  // number across multiple outbound agents causes Synthflow ghost "paused" dials.
-  let existingId: string | null = null;
   const outboundRows: Array<{
     id: string;
     name: string;
     phone: string;
     poolHasFrom: boolean;
   }> = [];
+
   for (const row of rows) {
     if (String(row.type || "").toLowerCase() !== "outbound") continue;
     const id = String(row.model_id || row.id || "").trim();
@@ -940,17 +935,17 @@ async function ensureClinicOutboundTestAgent(input: {
     const attached = Array.isArray(row.attached_phone_numbers)
       ? (row.attached_phone_numbers as Record<string, unknown>[])
       : [];
-    const poolHasFrom = attached.some((p) => {
-      const n = normalizePhone(String(p.number || ""));
-      return n === input.fromPhone || n.replace(/\D/g, "") === fromDigits;
+    const poolHasFrom = attached.some((item) => {
+      const number = normalizePhone(String(item.number || ""));
+      return number === input.fromPhone || number.replace(/\D/g, "") === fromDigits;
     });
     outboundRows.push({ id, name, phone, poolHasFrom });
   }
-  existingId =
-    outboundRows.find((r) => r.name === agentName)?.id ||
-    outboundRows.find((r) => r.phone === input.fromPhone || r.poolHasFrom)?.id ||
-    null;
 
+  const existingId =
+    outboundRows.find((row) => row.name === agentName)?.id ||
+    outboundRows.find((row) => row.phone === input.fromPhone || row.poolHasFrom)?.id ||
+    null;
   const agentConfig: Record<string, unknown> = {
     prompt: input.prompt,
     greeting_message: input.greeting,
@@ -994,44 +989,76 @@ async function ensureClinicOutboundTestAgent(input: {
     await updateAgent(outboundId, { name: agentName, agent: agentConfig });
   }
 
-  // Competing disposable outbound agents that share the clinic Twilio number
-  // cause ghost dials (UI "Calling…", status paused, phone never rings).
   const fromSlug = fromDigits;
   for (const row of outboundRows) {
     if (row.id === outboundId) continue;
     if (!row.poolHasFrom && row.phone !== input.fromPhone) continue;
-    const disposable = /probe|temp|test call probe/i.test(row.name);
-    if (!disposable) {
-      console.warn(
-        `[synthflow] Competing outbound ${row.id} (${row.name}) also has ${input.fromPhone} — dials may fail until it is removed in Synthflow.`,
+    if (!/probe|temp|test call probe/i.test(row.name)) {
+      throw new AppError(
+        409,
+        `Outbound agent ${row.name} (${row.id}) also has the clinic caller ID. Remove that number from the competing agent before placing test calls.`,
       );
-      continue;
     }
-    try {
-      await synthflowRequest(
-        "DELETE",
-        `/assistants/${encodeURIComponent(row.id)}/phone_numbers/${encodeURIComponent(fromSlug)}`,
-      );
-    } catch {
-      /* already detached */
-    }
+
+    await synthflowRequest(
+      "DELETE",
+      `/assistants/${encodeURIComponent(row.id)}/phone_numbers/${encodeURIComponent(fromSlug)}`,
+    );
+    console.log(
+      `[synthflow] Detached clinic caller ID from competing outbound test agent ${row.id} (${row.name})`,
+    );
     try {
       await synthflowRequest("DELETE", `/assistants/${encodeURIComponent(row.id)}`);
       console.log(`[synthflow] Deleted competing outbound probe ${row.id} (${row.name})`);
     } catch (error) {
       console.warn(
-        `[synthflow] Could not delete outbound probe ${row.id}:`,
+        `[synthflow] Could not delete detached outbound probe ${row.id}:`,
         error instanceof Error ? error.message : error,
       );
     }
   }
 
-  // Same clinic number can sit on inbound (for answering) and this outbound pool (for dialing).
   await attachAssistantPhoneNumbers(outboundId, [input.fromPhone]);
   console.log(
     `[synthflow] Outbound test agent ready ${outboundId} with from_phone ${input.fromPhone}`,
   );
   return outboundId;
+}
+
+/**
+ * Live Synthflow custom actions hit PUBLIC_API_URL, not localhost.
+ * Returns why the tunnel cannot serve check_doctor_availability (the test call
+ * then answers from a dial-time DB snapshot), or null when it is healthy.
+ */
+async function checkPublicAvailabilityReachable(): Promise<string | null> {
+  const publicRoot = env.PUBLIC_API_URL.replace(/\/$/, "");
+  if (!publicRoot || publicRoot.includes("localhost") || publicRoot.includes("127.0.0.1")) {
+    return "PUBLIC_API_URL is not a public HTTPS tunnel, so Synthflow cannot reach this database mid-call.";
+  }
+
+  try {
+    const res = await fetch(synthflowWebhookUrls().availabilityAction, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "ngrok-skip-browser-warning": "true",
+        "bypass-tunnel-reminder": "true",
+      },
+      body: JSON.stringify({ date: "today" }),
+      signal: AbortSignal.timeout(12_000),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      return `check_doctor_availability via ${publicRoot} failed (HTTP ${res.status}: ${text.slice(0, 80)}).`;
+    }
+    const json = JSON.parse(text) as { success?: boolean; message?: string };
+    if (json.success === false) {
+      return `check_doctor_availability returned failure: ${String(json.message || text).slice(0, 120)}`;
+    }
+    return null;
+  } catch (error) {
+    return `PUBLIC_API_URL ${publicRoot} unreachable (${error instanceof Error ? error.message : error}).`;
+  }
 }
 
 /**
@@ -1074,9 +1101,9 @@ export async function startClinicReceptionistTestCall(input: { phone: string }) 
     // If the prior call already finished, allow a new dial sooner.
     const prior = await getPhoneCall(recent.callId).catch(() => null);
     const priorStatus = prior ? readCallStatus(prior) : "";
-    const priorLive = ["queued", "pending", "registered", "ringing", "in-progress", "paused"].includes(
-      priorStatus,
-    );
+    const priorLive =
+      TEST_CALL_PENDING_STATUSES.has(priorStatus) ||
+      ["ringing", "in-progress"].includes(priorStatus);
     if (priorLive || !priorStatus) {
       const waitSec = Math.ceil((testCallCooldownMs - (Date.now() - recent.at)) / 1000);
       throw new AppError(
@@ -1094,49 +1121,51 @@ export async function startClinicReceptionistTestCall(input: { phone: string }) 
     (clinic as { name?: string } | null)?.name?.trim() ||
     "the clinic doctor";
   const clinicName = settings.clinicName?.trim() || "the clinic";
-  const lang = toSynthflowLanguage(settings.agentLanguage || "en");
-  const voiceId = (settings.agentVoiceId || "").trim() || undefined;
 
   const greeting =
     settings.agentFirstMessage?.trim() ||
     `Thank you for calling ${clinicName}. You've reached the AI receptionist for ${doctorName}. How can I help you today?`;
 
-  const prompt = `You are the live AI receptionist for ${clinicName} (doctor: ${doctorName}) on a short TEST call started by the clinic doctor.
-Follow the normal clinic booking rules (FAST RESPONSE, availability, OTP).
-Keep every reply under two short sentences.
-When the caller wants to book, speak immediately: "Which day would you like your appointment?" Then wait.
-Use check_doctor_availability for dates/times — never invent open slots.
-Do not complete a real booking unless they provide a phone number and a valid OTP.
+  // Outbound calls never hit the inbound webhook, so the agent gets no live clinic
+  // context. Send the same prompt as the inbound receptionist plus a dial-time
+  // snapshot of today's slots and this week's schedule from the local database.
+  const tunnelProblem = await checkPublicAvailabilityReachable();
+  if (tunnelProblem) {
+    console.warn(`[synthflow] Test call availability tools offline: ${tunnelProblem}`);
+  }
+  const { knowledge } = await buildDoctorsDirectoryKnowledge();
+  const availabilityBlock = await buildLiveAvailabilityPromptBlock({
+    toolsOnline: !tunnelProblem,
+  });
+  const prompt = `${synthflowCompactLivePrompt({ clinicName, clinicDoctorBlock: knowledge })}
+
+## Test call
+This is a short TEST call started by the clinic doctor (${doctorName}). Follow every rule above.
 If they only want a quick check, confirm you can hear them, then ask if they need anything else.
-Never go silent. Never say "let me check" or "one moment" before speaking.`;
+
+${availabilityBlock}`;
 
   const outboundModelId = await ensureClinicOutboundTestAgent({
     clinicName,
     fromPhone,
     greeting,
     prompt,
-    language: lang,
-    voiceId,
+    language: toSynthflowLanguage(settings.agentLanguage || "en"),
+    voiceId: settings.agentVoiceId?.trim() || undefined,
   });
-
-  // Attach the same booking tools (reconciled set) so availability can be tested on the call.
-  const keepIds = await buildCanonicalActionKeepList(
+  const actionIds = await buildCanonicalActionKeepList(
     normalizeActionIds(settings.synthflowActionIds),
   ).catch(() => [] as string[]);
-  if (keepIds.length) {
-    await reconcileAssistantActions(outboundModelId, keepIds).catch((error) => {
+  if (actionIds.length) {
+    await reconcileAssistantActions(outboundModelId, actionIds).catch((error) => {
       console.warn(
         "[synthflow] Could not attach booking actions to outbound test agent:",
         error instanceof Error ? error.message : error,
       );
     });
   }
-
   if (outboundModelId === inboundModelId) {
-    throw new AppError(
-      502,
-      "Outbound test agent resolved to the inbound receptionist id. Inbound agents cannot place ringing dials.",
-    );
+    throw new AppError(502, "Outbound test agent resolved to the inbound receptionist id.");
   }
 
   console.log(
@@ -1159,53 +1188,25 @@ Never go silent. Never say "let me check" or "one moment" before speaking.`;
 
   // Wait long enough to distinguish real ringing from Synthflow "paused" ghost calls.
   let status = "queued";
-  let dialedModelId = "";
-  let dialedTo = "";
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 6; i += 1) {
     await new Promise((resolve) => setTimeout(resolve, 2000));
     const early = await getPhoneCall(callId).catch(() => null);
     if (!early) continue;
     status = readCallStatus(early);
-    const root = early as Record<string, unknown>;
-    const response = (root.response as Record<string, unknown> | undefined) ?? {};
-    const fromList = Array.isArray(response.calls)
-      ? (response.calls[0] as Record<string, unknown> | undefined)
-      : undefined;
-    const call =
-      (response.call as Record<string, unknown> | undefined) || fromList || root;
-    dialedModelId = String(call.model_id || "").trim();
-    dialedTo = String(
-      call.phone_number_to || call.lead_phone_number || call.phone_number || "",
-    ).trim();
-    console.log(
-      `[synthflow] Doctor test call poll ${i + 1}: status=${status} model=${dialedModelId || "?"} to=${dialedTo || "?"}`,
-    );
-    if (
-      ["ringing", "in-progress", "completed", "spam", "failed", "busy", "canceled", "no-answer"].includes(
-        status,
-      )
-    ) {
-      break;
-    }
+    console.log(`[synthflow] Doctor test call poll ${i + 1}: status=${status || "?"}`);
+    if (status && !TEST_CALL_PENDING_STATUSES.has(status) && status !== "paused") break;
   }
 
-  // Never treat an inbound-agent dial as success — those stay "paused" and never ring.
-  if (dialedModelId && dialedModelId === inboundModelId) {
+  if (status === "paused") {
     recentTestCalls.delete(cooldownKey);
-    throw new AppError(
-      502,
-      `Test call ${callId} was routed to the inbound agent (never rings). Outbound agent ${outboundModelId} must place the dial.`,
+    const message =
+      `Synthflow accepted the call (${callId}) but returned status "paused"; no dial started. ` +
+      `Synthflow did not include a provider error message. Check the outbound agent's caller-ID assignment; ` +
+      `if it is correct, contact Synthflow support with this call ID.`;
+    console.error(
+      `[synthflow] Doctor test call failed: ${message} (outbound agent ${outboundModelId})`,
     );
-  }
-
-  if (status === "paused" || status === "queued" || status === "pending" || status === "registered") {
-    recentTestCalls.delete(cooldownKey);
-    throw new AppError(
-      502,
-      `Synthflow accepted the call (${callId}) but it never started ringing (status "${status}"). ` +
-        `Usually this means another outbound agent still shares ${fromPhone}, or a prior dial is still live. ` +
-        `Wait ~60s and try once more.`,
-    );
+    throw new AppError(502, message);
   }
 
   let warning: string | null = null;
@@ -1221,6 +1222,10 @@ Never go silent. Never say "let me check" or "one moment" before speaking.`;
             : `Call ended early with status "${status}".`;
   }
 
+  const toolsWarning = tunnelProblem
+    ? `Live tools offline — the agent will read availability from a snapshot taken at dial time, and booking will not work. ${tunnelProblem} Restart the tunnel to localhost:4000 and update PUBLIC_API_URL.`
+    : null;
+
   return {
     success: true as const,
     callId,
@@ -1229,7 +1234,7 @@ Never go silent. Never say "let me check" or "one moment" before speaking.`;
     fromPhone,
     modelId: outboundModelId,
     inboundModelId,
-    warning,
+    warning: [warning, toolsWarning].filter(Boolean).join(" ") || null,
     message: warning
       ? `Call to ${toPhone} ended with status "${status}".`
       : `Calling ${toPhone} from ${fromPhone}. Answer to test the receptionist.`,
@@ -1260,7 +1265,7 @@ export async function getClinicReceptionistTestCall(callId: string) {
   const duration = call.duration ?? call.call_duration ?? null;
   const transcript = String(call.transcript ?? call.transcript_text ?? "").trim();
   const endReason = String(
-    call.end_reason ?? call.hangup_reason ?? call.termination_reason ?? "",
+    call.end_call_reason ?? call.end_reason ?? call.hangup_reason ?? call.termination_reason ?? "",
   ).trim();
 
   const healthyStatuses = new Set([
@@ -1268,8 +1273,8 @@ export async function getClinicReceptionistTestCall(callId: string) {
     "in-progress",
     "completed",
   ]);
-  // "paused" means Synthflow accepted the request but never dialed (common when
-  // an inbound agent is used for outbound). Treat it as a finished failure.
+  // "paused" means Synthflow accepted the request but never dialed. Treat it as
+  // a finished failure.
   const terminalFailure = new Set([
     "paused",
     "failed",
@@ -1279,7 +1284,9 @@ export async function getClinicReceptionistTestCall(callId: string) {
     "user-canceled",
     "no-answer",
     "voicemail",
+    "hangup_on_voicemail",
   ]);
+  const live = status === "" || TEST_CALL_PENDING_STATUSES.has(status) || status === "ringing" || status === "in-progress";
 
   return {
     success: true as const,
@@ -1289,9 +1296,7 @@ export async function getClinicReceptionistTestCall(callId: string) {
     endReason: endReason || null,
     transcriptPreview: transcript.slice(0, 280) || null,
     working: healthyStatuses.has(status),
-    finished:
-      terminalFailure.has(status) ||
-      !["queued", "pending", "registered", "ringing", "in-progress"].includes(status),
+    finished: terminalFailure.has(status) || !live,
   };
 }
 

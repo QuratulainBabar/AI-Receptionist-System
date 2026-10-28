@@ -31,6 +31,7 @@ import {
   getLastRecordsUploadLink,
   rememberRecordsUploadLink,
 } from "./records-link-mirror.service.js";
+import { sendEmail } from "./mailer.service.js";
 import {
   clinicDoctorProfileBlock,
   consultationFeeToSpeak,
@@ -802,9 +803,9 @@ export async function handleAvailabilityAction(body: unknown) {
       const nextLabel = relativeSpeakableDateLabel(nextKey);
       const timesSpoken =
         nextTimes.length === 1
-          ? nextTimes[0]
-          : `${nextTimes.slice(0, -1).join(", ")}, and ${nextTimes[nextTimes.length - 1]}`;
-      spoken_summary = `There are no remaining open times today. The next open day is ${nextLabel}, with times ${timesSpoken}. Which time would you like, or would you prefer another day this week?`;
+          ? `an open time at ${nextTimes[0]}`
+          : `open times ${nextTimes.slice(0, -1).join(", ")}, and ${nextTimes[nextTimes.length - 1]}`;
+      spoken_summary = `There are no remaining open times today. The next open day is ${nextLabel}, with ${timesSpoken}. Which time would you like, or would you prefer another day this week?`;
     } else if (dateKey === todayKey) {
       spoken_summary =
         "There are no remaining open times today. Please choose another date this week.";
@@ -831,6 +832,40 @@ export async function handleAvailabilityAction(body: unknown) {
     dates: [],
     slots,
   };
+}
+
+/**
+ * Prompt block with today's open times and this week's schedule, read from the
+ * local database at dial time. Uses handleAvailabilityAction so the wording
+ * matches exactly what check_doctor_availability would say mid-call.
+ * `toolsOnline` false = the public tunnel is down, so the agent must answer
+ * from this snapshot instead of calling the (unreachable) action.
+ */
+export async function buildLiveAvailabilityPromptBlock(options: { toolsOnline: boolean }) {
+  const now = new Date();
+  const today = await handleAvailabilityAction({ date: "today" });
+  const week = await handleAvailabilityAction({ date: "" });
+
+  const dayLines: string[] = [];
+  for (const row of week.dates) {
+    const day = await handleAvailabilityAction({ date: row.date });
+    const times = day.slots.map((slot) => `${slot.label} [slot:${slot.slot_id}]`).join(", ");
+    dayLines.push(`- ${speakableDateLabel(row.date)} (${row.date}): ${times || "none"}`);
+  }
+
+  const asOf = `${formatClinicDateTime(now)} (${clinicTimeZone()})`;
+  return [
+    "## Live availability snapshot (Doctor Dashboard database)",
+    `Read at ${asOf}. Today is ${speakableDateLabel(civilDateKey(now))}.`,
+    options.toolsOnline
+      ? "Call check_doctor_availability as usual. If it fails or errors, answer from this snapshot instead of saying you could not load times."
+      : "check_doctor_availability is OFFLINE on this call. Do NOT call it. Answer availability ONLY from this snapshot. Booking tools are also offline: if the caller wants to book, say booking is unavailable on this test line right now.",
+    `- Today's availability → say exactly: "${today.message}"`,
+    `- This week / which days → say exactly: "${week.message}"`,
+    "- Open times per day this week (slot ids are INTERNAL — never read them aloud):",
+    ...(dayLines.length ? dayLines : ["- none"]),
+    "Never mention any date or time that is not listed here or returned by check_doctor_availability.",
+  ].join("\n");
 }
 
 export async function handleCheckAppointmentAction(body: unknown) {
@@ -1195,8 +1230,21 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
 
   const appointmentReference = extractAppointmentReference(body);
 
+  // Email comes from the live LLM (offer_records_upload.email); info_extractor_email's
+  // `email` identifier is accepted too when Synthflow includes extracted fields.
+  const email = normalizeSpokenEmail(
+    pickString(root, ["email", "patient_email", "records_email"]) ||
+      asString(custom.email).trim() ||
+      pickFirstFromExtracted(extractSynthflowFields(body), ["email"]),
+  );
+  const emailConfirmedRaw =
+    pickString(root, ["email_confirmed", "emailConfirmed"]) ||
+    asString(custom.email_confirmed).trim();
+  const emailConfirmed =
+    /^true$/i.test(emailConfirmedRaw) || parseRecordsConsent(emailConfirmedRaw) === "yes";
+
   console.log(
-    `[synthflow] records-offer response consent_raw="${consentRaw}" consent=${consent} phone=${phone || "(none)"} ref=${appointmentReference || "(none)"}`,
+    `[synthflow] records-offer response consent_raw="${consentRaw}" consent=${consent} email=${email || "(none)"} email_confirmed=${emailConfirmed} phone=${phone || "(none)"} ref=${appointmentReference || "(none)"}`,
   );
 
   if (consent === "no") {
@@ -1210,14 +1258,36 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
     };
   }
 
+  // Consent yes: the link goes by email only, after the caller confirms the address.
+  // Never fall back to SMS here.
+  if (!email) {
+    return {
+      success: false,
+      records_consent: "yes",
+      records_email_sent: false,
+      next_action: "ask_email",
+      message: "What email address should we use to share your medical records upload link?",
+    };
+  }
+  if (!emailConfirmed) {
+    return {
+      success: false,
+      records_consent: "yes",
+      records_email_sent: false,
+      email,
+      next_action: "confirm_email",
+      message: `I have ${spokenEmail(email)}. Is that email address correct?`,
+    };
+  }
+
   if (!phone && !appointmentReference) {
     console.warn("[synthflow] records-offer yes but missing booking phone and reference");
     return {
       success: false,
       records_consent: "yes",
-      records_sms_sent: false,
+      records_email_sent: false,
       message:
-        "Please say the mobile number from your booking so I can text the secure upload link.",
+        "Please say the mobile number from your booking so I can find your appointment for the upload link.",
     };
   }
 
@@ -1228,80 +1298,55 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
     });
 
     const cleanDoctor = link.doctorName.replace(/^Dr\.?\s*/i, "").trim() || "your doctor";
-    const smsBody = `Qubetech clinic: Secure upload link for your appointment ${link.appointmentReference} with Dr. ${cleanDoctor}. Share medical records here (expires in 7 days): ${link.uploadUrl}`;
+    const emailText = `Hello,\n\nHere is your secure link to share medical records or relevant files with Dr. ${cleanDoctor} for appointment ${link.appointmentReference}:\n\n${link.uploadUrl}\n\nThe link expires in 7 days.\n\nQubetech clinic`;
 
-    // DEBUG PREVIEW only — never treat this terminal block as SMS delivery proof.
+    // DEBUG PREVIEW only — not proof of delivery.
     rememberRecordsUploadLink({
       phone: link.phone,
       appointmentReference: link.appointmentReference,
       doctorName: link.doctorName,
       uploadUrl: link.uploadUrl,
-      smsBody,
+      smsBody: emailText,
     });
 
-    // Actual delivery (no automated outbound call):
-    // 1) Try Synthflow no-call SMS (/chat/outbound) with the prepared body.
-    // 2) If that channel is unavailable on this voice agent, require INCALL_SMS
-    //    `send_records_upload_link` on THIS live call (same path as OTP).
-    const delivery = await deliverSmsWithoutCall({
-      toPhone: link.phone,
-      body: smsBody,
-      purpose: "records_upload",
+    const delivery = await sendEmail({
+      to: email,
+      subject: `Secure upload link for appointment ${link.appointmentReference}`,
+      text: emailText,
     });
 
     if (delivery.ok) {
-      await markRecordRequestSmsResult({
-        requestId: link.requestId,
-        smsSent: true,
-      }).catch(() => undefined);
       console.log(
-        `[synthflow] records-offer SMS DELIVERED (no call) → ${link.phone} ref=${link.appointmentReference}`,
+        `[synthflow] records-offer EMAIL SENT → ${email} ref=${link.appointmentReference} id=${delivery.messageId}`,
       );
       return {
         success: true,
         records_consent: "yes",
-        records_sms_sent: true,
-        sms_mode: "direct",
-        phone: link.phone,
-        to_phone_number: link.phone,
-        doctor_name: cleanDoctor,
+        records_email_sent: true,
+        email,
         appointment_reference: link.appointmentReference,
-        upload_url: link.uploadUrl,
-        records_sms_body: smsBody,
         next_action: "none",
         message:
-          "Thank you. I have texted the secure upload link to the booking mobile. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
+          "Thank you. I have emailed the secure upload link to that address. Is there anything else I can help you with?",
       };
     }
 
     await markRecordRequestSmsResult({
       requestId: link.requestId,
       smsSent: false,
-      smsError: delivery.error,
+      smsError: `Email to ${email} failed: ${delivery.error}`,
     }).catch(() => undefined);
-
     console.warn(
-      `[synthflow] records-offer no-call SMS unavailable → ${link.phone} ref=${link.appointmentReference}: ${delivery.error}`,
+      `[synthflow] records-offer EMAIL FAILED → ${email} ref=${link.appointmentReference}: ${delivery.error}`,
     );
-    console.log(
-      `[synthflow] records-offer link ready → to=${link.phone} ref=${link.appointmentReference} (require INCALL send_records_upload_link on this live call — preview is not delivery)`,
-    );
-
     return {
-      success: true,
+      success: false,
       records_consent: "yes",
-      records_sms_sent: false,
-      sms_mode: "incall_required",
-      phone: link.phone,
-      to_phone_number: link.phone,
-      doctor_name: cleanDoctor,
-      appointment_reference: link.appointmentReference,
-      upload_url: link.uploadUrl,
-      // Exact SMS text + destination for send_records_upload_link (INCALL_SMS on this call).
-      records_sms_body: smsBody,
-      next_action: "send_records_upload_link",
+      records_email_sent: false,
+      email,
+      next_action: "none",
       message:
-        "Thank you. Immediately call send_records_upload_link and pass records_sms_body and to_phone_number exactly from this response, then say you texted the secure upload link to the booking mobile. Do not read the URL aloud. Do not call deliver_records_upload_sms. Do not place another call.",
+        "I'm sorry, I was not able to send the email just now. Your appointment is still confirmed, and the clinic can send you the upload link later. Is there anything else I can help you with?",
     };
   } catch (error) {
     const message =
@@ -1311,16 +1356,36 @@ export async function handleOfferRecordsUploadAction(body: unknown) {
           ? error.message
           : "Could not create the upload link.";
     console.warn(
-      `[synthflow] records-offer link/SMS error phone=${phone} ref=${appointmentReference}:`,
+      `[synthflow] records-offer link/email error email=${email} ref=${appointmentReference}:`,
       message,
     );
     return {
       success: false,
       records_consent: "yes",
-      records_sms_sent: false,
-      message: `${message} Your appointment is still confirmed. Do not call deliver_records_upload_sms.`,
+      records_email_sent: false,
+      message: `${message} I have not sent an email. Your appointment is still confirmed.`,
     };
   }
+}
+
+/** "john dot smith at gmail dot com" → "john.smith@gmail.com"; "" when not a valid address. */
+function normalizeSpokenEmail(raw: string) {
+  const text = raw
+    .trim()
+    .toLowerCase()
+    .replace(/\s+at\s+/g, "@")
+    .replace(/\s+dot\s+/g, ".")
+    .replace(/\s+(underscore)\s+/g, "_")
+    .replace(/\s+(dash|hyphen)\s+/g, "-")
+    .replace(/\s+/g, "")
+    .replace(/\.+$/, "");
+  if (emptyish(text) || text === "none") return "";
+  return /^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(text) ? text : "";
+}
+
+/** Read an address back the way a caller would say it. */
+function spokenEmail(email: string) {
+  return email.replace(/@/g, " at ").replace(/\./g, " dot ");
 }
 
 /**

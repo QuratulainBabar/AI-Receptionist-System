@@ -1,0 +1,92 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+node:internal/process/promises:394
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+Error: Transform failed with 3 errors:
+/eval.ts:1:334: ERROR: Top-level await is currently not supported with the "cjs" output format
+/eval.ts:1:383: ERROR: Top-level await is currently not supported with the "cjs" output format
+/eval.ts:1:498: ERROR: Top-level await is currently not supported with the "cjs" output format
+    at failureErrorWithLog (E:\AI-Receptionist-System\backend\node_modules\esbuild\lib\main.js:1752:15)
+    at E:\AI-Receptionist-System\backend\node_modules\esbuild\lib\main.js:1019:50
+    at responseCallbacks.<computed> (E:\AI-Receptionist-System\backend\node_modules\esbuild\lib\main.js:886:9)
+    at handleIncomingPacket (E:\AI-Receptionist-System\backend\node_modules\esbuild\lib\main.js:941:12)
+    at Socket.readFromStdout (E:\AI-Receptionist-System\backend\node_modules\esbuild\lib\main.js:864:7)
+    at Socket.emit (node:events:509:28)
+    at addChunk (node:internal/streams/readable:563:12)
+    at readableAddChunkPushByteMode (node:internal/streams/readable:514:3)
+    at Readable.push (node:internal/streams/readable:394:5)
+    at Pipe.onStreamRead (node:internal/stream_base_commons:189:23) {
+  errors: [
+    {
+      detail: undefined,
+      id: '',
+      location: {
+        column: 334,
+        file: '/eval.ts',
+        length: 5,
+        line: 1,
+        lineText: "import 'dotenv/config'; import { env, synthflowWebhookUrls } from './src/config/env.ts'; import { 
+syncCustomActionWebhookUrls, findAllActionIdsByName, getCustomActionUrl } from './src/services/synthflow.client.ts'; 
+console.log('PUBLIC_API_URL', env.PUBLIC_API_URL); console.log('expected', synthflowWebhookUrls().availabilityAction); 
+await syncCustomActionWebhookUrls(); const ids = await findAllActionIdsByName('check_doctor_availability'); for (const 
+id of ids) { console.log('action', id, '->', await getCustomActionUrl(id)); }",
+        namespace: '',
+        suggestion: ''
+      },
+      notes: [],
+      pluginName: '',
+      text: 'Top-level await is currently not supported with the "cjs" output format'
+    },
+    {
+      detail: undefined,
+      id: '',
+      location: {
+        column: 383,
+        file: '/eval.ts',
+        length: 5,
+        line: 1,
+        lineText: "import 'dotenv/config'; import { env, synthflowWebhookUrls } from './src/config/env.ts'; import { 
+syncCustomActionWebhookUrls, findAllActionIdsByName, getCustomActionUrl } from './src/services/synthflow.client.ts'; 
+console.log('PUBLIC_API_URL', env.PUBLIC_API_URL); console.log('expected', synthflowWebhookUrls().availabilityAction); 
+await syncCustomActionWebhookUrls(); const ids = await findAllActionIdsByName('check_doctor_availability'); for (const 
+id of ids) { console.log('action', id, '->', await getCustomActionUrl(id)); }",
+        namespace: '',
+        suggestion: ''
+      },
+      notes: [],
+      pluginName: '',
+      text: 'Top-level await is currently not supported with the "cjs" output format'
+    },
+    {
+      detail: undefined,
+      id: '',
+      location: {
+        column: 498,
+        file: '/eval.ts',
+        length: 5,
+        line: 1,
+        lineText: "import 'dotenv/config'; import { env, synthflowWebhookUrls } from './src/config/env.ts'; import { 
+syncCustomActionWebhookUrls, findAllActionIdsByName, getCustomActionUrl } from './src/services/synthflow.client.ts'; 
+console.log('PUBLIC_API_URL', env.PUBLIC_API_URL); console.log('expected', synthflowWebhookUrls().availabilityAction); 
+await syncCustomActionWebhookUrls(); const ids = await findAllActionIdsByName('check_doctor_availability'); for (const 
+id of ids) { console.log('action', id, '->', await getCustomActionUrl(id)); }",
+        namespace: '',
+        suggestion: ''
+      },
+      notes: [],
+      pluginName: '',
+      text: 'Top-level await is currently not supported with the "cjs" output format'
+    }
+  ],
+  warnings: []
+}
+
+Node.js v24.18.1

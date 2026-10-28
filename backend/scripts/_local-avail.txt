@@ -1,0 +1,48 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+{
+  "status": 200,
+  "body": {
+    "success": true,
+    "mode": "slots",
+    "spoken_summary": "Today, the open times are 1:00 PM, 1:30 PM, 2:00 PM, and 2:30 PM. Which time would you like?",
+    "message": "Today, the open times are 1:00 PM, 1:30 PM, 2:00 PM, and 2:30 PM. Which time would you like?",
+    "doctor_id": "cmu16ksa00001vgis6s1oq1m9",
+    "doctor_name": "Dr. Daniel Osei",
+    "date": "2026-10-23",
+    "date_label": "today",
+    "dates": [],
+    "slots": [
+      {
+        "slot_id": "cmvj5uo72000bvge4whwyup52",
+        "label": "1:00 PM",
+        "datetime_label": "Fri, Oct 23, 1:00 PM",
+        "date": "2026-10-23"
+      },
+      {
+        "slot_id": "cmvj5uo72000cvge48ee8n6vw",
+        "label": "1:30 PM",
+        "datetime_label": "Fri, Oct 23, 1:30 PM",
+        "date": "2026-10-23"
+      },
+      {
+        "slot_id": "cmvj5uo72000dvge4yhz7rnl0",
+        "label": "2:00 PM",
+        "datetime_label": "Fri, Oct 23, 2:00 PM",
+        "date": "2026-10-23"
+      },
+      {
+        "slot_id": "cmvj5uo72000evge4no0m2q5b",
+        "label": "2:30 PM",
+        "datetime_label": "Fri, Oct 23, 2:30 PM",
+        "date": "2026-10-23"
+      }
+    ]
+  }
+}

@@ -1,0 +1,7 @@
+﻿The variable '$disconnect' cannot be retrieved because it has not been set.
+At line:1 char:604
++ ... serId:s.doctor?.userId})),null,2)); await prisma.\$disconnect(); } m( ...
++                                                       ~~~~~~~~~~~
+    + CategoryInfo          : InvalidOperation: (disconnect:String) [], RuntimeException
+    + FullyQualifiedErrorId : VariableIsUndefined
+ 

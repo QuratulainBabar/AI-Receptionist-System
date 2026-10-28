@@ -1,0 +1,124 @@
+﻿node.exe : npm warn Unknown env config "devdir". This will stop working in the next major version of npm. See `npm 
+help npmrc` for supported config options.
+At line:1 char:1
++ & "E:\NodeJS\nodeJS_Install/node.exe" "E:\NodeJS\nodeJS_Install/node_ ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (npm warn Unknow...config options.:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+db_open_slots [
+  {
+    "id": "cmvj5uo72000bvge4whwyup52",
+    "startsAt": "2026-10-23T20:00:00.000Z",
+    "doctor": "Dr. Daniel Osei",
+    "doctorUserId": "cmu16ksa00001vgis6s1oq1m9"
+  },
+  {
+    "id": "cmvj5uo72000cvge48ee8n6vw",
+    "startsAt": "2026-10-23T20:30:00.000Z",
+    "doctor": "Dr. Daniel Osei",
+    "doctorUserId": "cmu16ksa00001vgis6s1oq1m9"
+  },
+  {
+    "id": "cmvj5uo72000dvge4yhz7rnl0",
+    "startsAt": "2026-10-23T21:00:00.000Z",
+    "doctor": "Dr. Daniel Osei",
+    "doctorUserId": "cmu16ksa00001vgis6s1oq1m9"
+  },
+  {
+    "id": "cmvj5uo72000evge4no0m2q5b",
+    "startsAt": "2026-10-23T21:30:00.000Z",
+    "doctor": "Dr. Daniel Osei",
+    "doctorUserId": "cmu16ksa00001vgis6s1oq1m9"
+  }
+]
+api_empty_date {
+  "success": true,
+  "mode": "dates",
+  "week_only": true,
+  "spoken_summary": "This week, the open date is today. Which date would you like?",
+  "message": "This week, the open date is today. Which date would you like?",
+  "doctor_id": "cmu16ksa00001vgis6s1oq1m9",
+  "doctor_name": "Dr. Daniel Osei",
+  "dates": [
+    {
+      "date": "2026-10-23",
+      "label": "today",
+      "open_count": 4
+    }
+  ],
+  "slots": []
+}
+api_today {
+  "success": true,
+  "mode": "slots",
+  "spoken_summary": "Today, the open times are 1:00 PM, 1:30 PM, 2:00 PM, and 2:30 PM. Which time would you like?",
+  "message": "Today, the open times are 1:00 PM, 1:30 PM, 2:00 PM, and 2:30 PM. Which time would you like?",
+  "doctor_id": "cmu16ksa00001vgis6s1oq1m9",
+  "doctor_name": "Dr. Daniel Osei",
+  "date": "2026-10-23",
+  "date_label": "today",
+  "dates": [],
+  "slots": [
+    {
+      "slot_id": "cmvj5uo72000bvge4whwyup52",
+      "label": "1:00 PM",
+      "datetime_label": "Fri, Oct 23, 1:00 PM",
+      "date": "2026-10-23"
+    },
+    {
+      "slot_id": "cmvj5uo72000cvge48ee8n6vw",
+      "label": "1:30 PM",
+      "datetime_label": "Fri, Oct 23, 1:30 PM",
+      "date": "2026-10-23"
+    },
+    {
+      "slot_id": "cmvj5uo72000dvge4yhz7rnl0",
+      "label": "2:00 PM",
+      "datetime_label": "Fri, Oct 23, 2:00 PM",
+      "date": "2026-10-23"
+    },
+    {
+      "slot_id": "cmvj5uo72000evge4no0m2q5b",
+      "label": "2:30 PM",
+      "datetime_label": "Fri, Oct 23, 2:30 PM",
+      "date": "2026-10-23"
+    }
+  ]
+}
+webhook_urls {
+  "inbound": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/inbound",
+  "data": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/data",
+  "bookAction": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/actions/book",
+  "availabilityAction": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/actions/availability",
+  "checkAppointmentAction": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/actions/check-appointment",
+  "verifyOtpAction": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/actions/verify-otp",
+  "recordsSmsAction": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/actions/records-sms",
+  "offerRecordsUploadAction": "https://proactive-taste-unexposed.ngrok-free.dev/api/webhooks/synthflow/actions/offer-records-upload"
+}
+PUBLIC_API_URL https://proactive-taste-unexposed.ngrok-free.dev
+tunnel_today_status 404
+tunnel_today_body <!DOCTYPE html>
+<html class="h-full" lang="en-US" dir="ltr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preload" href="https://assets.ngrok.com/fonts/euclid-square/EuclidSquare-Regular-WebS.woff" as="font" type="font/woff" crossorigin="anonymous" />
+    <link rel="preload" href="https://assets.ngrok.com/fonts/euclid-square/EuclidSquare-RegularItalic-WebS.woff" as="font" type="font/woff" crossorigin="anonymous" />
+    <link rel="preload" href="https://assets.ngrok.com/fonts/euclid-square/EuclidSquare-Medium-WebS.woff" as="font" type="font/woff" crossorigin="anonymous" />
+    <link rel="preload" href="https://assets.ngrok.com/fonts/euclid-square/EuclidSquare-MediumItalic-WebS.woff" as="font" type="font/woff" crossorigin="anonymous" />
+    <link rel="preload" href="https://assets.ngrok.com/fonts/ibm-plex-mono/IBMPlexMono-Text.woff" as="font" type="font/woff" crossorigin="anonymous" />
+    <link rel="preload" href="https://assets.ngrok.com/fonts/ibm-plex-mono/IBMPlexMono-TextItalic.woff" as="font" type="font/woff" crossorigin="anonymous" />
+    <link rel="preload" href="https://assets.ngrok.com/fonts/ibm-p
+action_id d0255f73-b81c-4efc-8cd6-ba01b08c6818
+action_detail {
+  "name": "check_doctor_availability",
+  "assistants": []
+}
+{"id":"ae627ca8-b2c2-42d8-9513-0ee5a3bd4ce0","name":"Qubetech AI Receptionist Clinic Receptionist","type":"inbound","actions_count":9,"has_availability":true,"action_ids_sample":["61e02967","ada3b5f4","db4225bc","check_doctor_availability","bbe7f78e","1fcffe8d","eaf1c5ea","002ea6d7","5b08f4fe"]}
+{"id":"dae781ec-e734-4833-b952-0a04bb59dd7f","name":"Qubetech AI Receptionist Clinic Outbound Test","type":"outbound","actions_count":7,"has_availability":true,"action_ids_sample":["check_doctor_availability","61e02967","eaf1c5ea","bbe7f78e","002ea6d7","1fcffe8d","5b08f4fe"]}
+npm notice
+npm notice New major version of npm available! 11.16.0 -> 12.2.1
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.1
+npm notice To update run: npm install -g npm@12.2.1
+npm notice

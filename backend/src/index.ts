@@ -125,7 +125,10 @@ async function warnIfPublicApiUnreachable() {
     const timer = setTimeout(() => controller.abort(), 8000);
     const res = await fetch(`${root}/api/health`, {
       signal: controller.signal,
-      headers: { "ngrok-skip-browser-warning": "true" },
+      headers: {
+        "ngrok-skip-browser-warning": "true",
+        "bypass-tunnel-reminder": "true",
+      },
     });
     clearTimeout(timer);
     if (!res.ok) {

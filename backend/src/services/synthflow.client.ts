@@ -30,6 +30,8 @@ export async function synthflowRequest<T = SynthflowJson>(
       Accept: "application/json",
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    // Without a cap, one stalled Synthflow request hangs the dashboard ("Calling…" forever).
+    signal: AbortSignal.timeout(30_000),
   });
 
   const text = await response.text();
@@ -462,12 +464,14 @@ const RECORDS_UPLOAD_OFFER_RULE = `RECORDS UPLOAD OFFER RULE:
 After verify_booking_otp returns appointment_confirmed true, first say the confirmation message (final appointment summary) exactly.
 Then ask exactly in English: Would you like to share your medical records or any relevant files with the doctor?
 WAIT for the caller to answer.
-If they say yes (or clearly agree), call offer_records_upload with consent yes, the booking phone (any mobile they gave for the booking — e.g. +12014799258), and appointment_reference.
-Then IMMEDIATELY call send_records_upload_link on the same live call. Pass records_sms_body and to_phone_number exactly from the offer_records_upload response (same pattern as OTP uses the code from book_appointment). Then say you texted the secure upload link to the booking mobile.
-If send_records_upload_link errors, call it once more with the same two fields.
-If they say no (or decline), call offer_records_upload with consent no. Say the action message and continue normally.
-NEVER call deliver_records_upload_sms on an inbound booking call. NEVER place a second outbound call for the upload link. NEVER read the URL aloud.
-Do not require an upload. Do not invent an upload link or phone number.
+If they say yes (or clearly agree), do NOT call any action yet. Ask exactly: "What email address should we use to share your medical records upload link?" WAIT.
+Repeat the email back clearly (say "at" for @ and "dot" for .), then ask exactly: "Is that email address correct?" WAIT.
+If they say it is wrong, ask for the corrected email, repeat it, and ask "Is that email address correct?" again. Repeat until they confirm.
+Only after they confirm, call offer_records_upload with consent yes, email set to the confirmed address (example patient@example.com), email_confirmed yes, the booking phone, and appointment_reference. Say the action message exactly.
+Only say the email was sent if offer_records_upload returns records_email_sent true. If records_email_sent is false, say the action message exactly — never claim it was sent.
+If they say no (or decline), do not ask for an email. Call offer_records_upload with consent no. Say the action message and continue normally.
+NEVER text the upload link: do not call send_records_upload_link or deliver_records_upload_sms for records on an inbound booking call. NEVER place a second outbound call for the upload link. NEVER read the URL aloud.
+Do not require an upload. Do not invent an upload link, email address, or phone number.
 Do not run this rule before the appointment is confirmed.`;
 
 /** Prefix rules baked into every Sync so Fine-tuner matches live calls. */
@@ -664,20 +668,24 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "offer_records_upload",
       url: urls.offerRecordsUploadAction,
       prompt:
-        "If next_action is send_records_upload_link (or consent was yes with records_sms_body), immediately call send_records_upload_link and pass records_sms_body and to_phone_number exactly from this response (same as OTP uses the book_appointment code). Then say you texted the secure upload link to the booking mobile. If send_records_upload_link fails, call it one more time with the same values. If they said no, continue normally. Never invent a URL or phone. Never call deliver_records_upload_sms. Never start another outbound call.",
+        "Say the response message exactly. If next_action is ask_email, ask for the email and WAIT. If next_action is confirm_email, read the email back and ask if it is correct, then call again with email_confirmed yes only after they confirm. Only say the link was emailed when records_email_sent is true. Never call send_records_upload_link or deliver_records_upload_sms for records. Never invent a URL, email, or phone. Never start another outbound call.",
       message_error:
-        "Would you like to share your medical records or any relevant files with the doctor?",
+        "I could not send the upload link just now. Your appointment is still confirmed. Is there anything else I can help you with?",
       jsonBody: {
         consent: "<consent>",
+        email: "<email>",
+        email_confirmed: "<email_confirmed>",
         phone: "<phone>",
         appointment_reference: "<appointment_reference>",
         caller_phone: "<user_phone_number>",
       },
       create: {
         description:
-          "After the confirmed appointment summary, log whether the caller wants to share medical records. If yes, text a secure upload link to the booking phone. If no, continue without upload.",
+          "After the confirmed appointment summary, log whether the caller wants to share medical records. If yes, email a secure upload link to the address the caller confirmed. If no, continue without upload.",
         jsonBody: {
           consent: "<consent>",
+          email: "<email>",
+          email_confirmed: "<email_confirmed>",
           phone: "<phone>",
           appointment_reference: "<appointment_reference>",
           caller_phone: "<user_phone_number>",
@@ -686,6 +694,16 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
           {
             name: "consent",
             description: "Caller answer: yes or no",
+            example: "yes",
+          },
+          {
+            name: "email",
+            description: "Email address the caller confirmed for the upload link (empty when consent is no)",
+            example: "patient@example.com",
+          },
+          {
+            name: "email_confirmed",
+            description: "yes only after the caller confirmed the email read back to them",
             example: "yes",
           },
           {
@@ -820,14 +838,8 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
   });
   if (smsActionId) attachIds.push(smsActionId);
 
-  const recordsSmsActionId = await ensureRecordsUploadSmsAction(modelId).catch((error) => {
-    console.warn(
-      "[synthflow] Could not prepare records upload SMS:",
-      error instanceof Error ? error.message : error,
-    );
-    return null;
-  });
-  if (recordsSmsActionId) attachIds.push(recordsSmsActionId);
+  // Records upload links go by email on the inbound agent (offer_records_upload);
+  // send_records_upload_link stays outbound-records only and is not attached here.
 
   if (modelId && attachIds.length) {
     const currentCount = await listAssistantActionIds(modelId)
@@ -850,14 +862,6 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
     await attachBookingOtpSms(modelId, smsActionId).catch((error) => {
       console.warn(
         "[synthflow] Could not map the OTP SMS recipient:",
-        error instanceof Error ? error.message : error,
-      );
-    });
-  }
-  if (modelId && recordsSmsActionId) {
-    await attachRecordsUploadSms(modelId, recordsSmsActionId).catch((error) => {
-      console.warn(
-        "[synthflow] Could not map the records upload SMS action:",
         error instanceof Error ? error.message : error,
       );
     });
@@ -1247,11 +1251,31 @@ async function attachOfferRecordsUpload(modelId: string) {
             },
           },
           {
+            variable_name: "email",
+            source: "llm",
+            llm_config: {
+              description:
+                "Email address the caller gave and confirmed for the records upload link, written as an address (patient@example.com). Leave empty when consent is no. Never invent one.",
+              example: "patient@example.com",
+              required: false,
+            },
+          },
+          {
+            variable_name: "email_confirmed",
+            source: "llm",
+            llm_config: {
+              description:
+                "yes only after you read the email back and the caller said it is correct; otherwise no",
+              example: "yes",
+              required: false,
+            },
+          },
+          {
             variable_name: "phone",
             source: "llm",
             llm_config: {
               description:
-                "Mobile number used for the booking (SMS destination). Can be any E.164 patient number such as +12014799258 — not only the inbound caller line, and never the clinic line.",
+                "Mobile number used for the booking (used to find the appointment). Can be any E.164 patient number such as +12014799258 — not only the inbound caller line, and never the clinic line.",
               example: "+12014799258",
               required: true,
             },
@@ -1410,48 +1434,6 @@ export async function ensureRecordsUploadSmsAction(preferredModelId?: string) {
   }
 
   return actionId;
-}
-
-/**
- * Inbound booking: same pattern as OTP SMS — LLM copies values from the previous
- * custom action response. action_results cannot be used until Synthflow has
- * initialized offer_records_upload outputs (api_response is null today).
- */
-async function attachRecordsUploadSms(modelId: string, actionId: string) {
-  return synthflowRequest("POST", "/actions/attach", {
-    model_id: modelId,
-    items: [
-      {
-        action_id: actionId,
-        attachment_type: "during",
-        trigger_condition:
-          "Call this immediately after offer_records_upload returns success true with records_consent yes (or next_action send_records_upload_link). Pass records_sms_body and to_phone_number exactly from that response. Never invent a URL or phone. Never call this before offer_records_upload succeeds.",
-        input_variables_mapping: [
-          {
-            variable_name: "records_sms_body",
-            source: "llm",
-            llm_config: {
-              description:
-                "Exact records_sms_body string returned by offer_records_upload. Copy it character-for-character. Never invent a link.",
-              example:
-                "Qubetech clinic: Secure upload link for your appointment APT-9609 with Dr. Daniel Osei. Share medical records here (expires in 7 days): https://aidoctor.toolkitpro.cloud/backend/upload/token",
-              required: true,
-            },
-          },
-          {
-            variable_name: "to_phone_number",
-            source: "llm",
-            llm_config: {
-              description:
-                "Exact to_phone_number (or phone) returned by offer_records_upload — the booking mobile in E.164 (example +12014799258). Never use the clinic line.",
-              example: "+12014799258",
-              required: true,
-            },
-          },
-        ],
-      },
-    ],
-  });
 }
 
 /** Doctor outbound / reminder-style dial: body from pre-call variables; SMS goes to dialed party. */
