@@ -54,6 +54,28 @@ jobs:
           cp backend/package-lock.json deploy-backend/package-lock.json
           cp backend/ecosystem.config.cjs deploy-backend/ecosystem.config.cjs
 
+      - name: Repair remote nvm npm prefix
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -eu
+            export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
+            if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+              echo "nvm was not found at $NVM_DIR/nvm.sh"
+              exit 1
+            fi
+            . "$NVM_DIR/nvm.sh"
+            CURRENT_NODE="$(nvm current)"
+            if [ "$CURRENT_NODE" = "none" ]; then
+              echo "nvm has no active Node.js version; install/select one before deploying"
+              exit 1
+            fi
+            nvm use --delete-prefix "$CURRENT_NODE" --silent
+
       - name: Deploy frontend
         uses: appleboy/scp-action@v0.1.7
         with:

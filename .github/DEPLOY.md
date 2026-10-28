@@ -37,10 +37,17 @@ mkdir -p /home/limiria/public_html/aidoctor
 
 ```bash
 node -v   # need v20+
-mkdir -p ~/.npm-global && npm config set prefix ~/.npm-global
-export PATH="$HOME/.npm-global/bin:$PATH"
 npm i -g pm2
 pm2 startup   # follow the printed command once
+```
+
+When Node is managed by nvm, do not set a custom npm `prefix` or `globalconfig`
+in `~/.npmrc`; nvm rejects those settings. The deploy workflow runs
+`nvm use --delete-prefix` before SCP to remove conflicting prefix settings from
+the active Node version. If repairing the server manually, run:
+
+```bash
+nvm use --delete-prefix "$(nvm current)" --silent
 ```
 
 ### 3. Create PostgreSQL database
