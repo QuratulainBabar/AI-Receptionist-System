@@ -42,11 +42,12 @@ pm2 startup   # follow the printed command once
 ```
 
 When Node is managed by nvm, do not set a custom npm `prefix` or `globalconfig`
-in `~/.npmrc`; nvm rejects those settings. The deploy workflow runs
-`nvm use --delete-prefix` before SCP to remove conflicting prefix settings from
-the active Node version. If repairing the server manually, run:
+in `~/.npmrc`; nvm rejects those settings. The deploy workflow removes only
+those conflicting entries before SCP, then selects the current nvm version. If
+repairing the server manually, run:
 
 ```bash
+sed -i -E '/^[[:space:]]*(globalconfig|prefix)[[:space:]]*=/Id' "$HOME/.npmrc"
 nvm use --delete-prefix "$(nvm current)" --silent
 ```
 
