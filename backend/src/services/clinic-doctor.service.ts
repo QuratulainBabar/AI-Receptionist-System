@@ -1,6 +1,7 @@
 import { prisma } from "../lib/prisma.js";
 import { formatWeeklyHoursSummary, parseWeeklyHours } from "../utils/doctor-profile.js";
 import { formatClinicDateTime } from "../utils/clinic-time.js";
+import { DEMO_DOCTOR_EMAIL } from "./ensure-demo-accounts.service.js";
 
 export type ClinicDoctorRow = Awaited<ReturnType<typeof getClinicDoctor>>;
 
@@ -22,19 +23,35 @@ function doctorInclude(openSlotsTake: number, now: Date) {
  * One-to-one clinic doctor for the phone AI.
  * Uses the most recently updated active doctor who finished practice details
  * (specialty + hospital + fee) — not seed/verified ranking — so a new signup
- * that saves their profile becomes the clinic doctor after Sync.
+ * that saves their profile becomes the clinic doctor after Sync. The demo
+ * doctor is only used when no real doctor has completed their profile.
  */
 export async function getClinicDoctor(options?: { openSlotsTake?: number }) {
   const now = new Date();
   const take = options?.openSlotsTake ?? 8;
   const include = doctorInclude(take, now);
 
+  const completedWhere = {
+    clinic: { not: "" },
+    fee: { not: "" },
+    specialtyId: { not: UNSPECIFIED_SPECIALTY_ID },
+  };
+
+  // The demo doctor is re-saved on every boot (fresh updatedAt), so prefer a real doctor first.
+  const completedReal = await prisma.doctorProfile.findFirst({
+    where: {
+      user: { isActive: true, role: "DOCTOR", email: { not: DEMO_DOCTOR_EMAIL } },
+      ...completedWhere,
+    },
+    include,
+    orderBy: { updatedAt: "desc" },
+  });
+  if (completedReal) return completedReal;
+
   const completed = await prisma.doctorProfile.findFirst({
     where: {
       user: { isActive: true, role: "DOCTOR" },
-      clinic: { not: "" },
-      fee: { not: "" },
-      specialtyId: { not: UNSPECIFIED_SPECIALTY_ID },
+      ...completedWhere,
     },
     include,
     orderBy: { updatedAt: "desc" },

@@ -2,8 +2,10 @@ import { Role } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { hashPassword } from "./auth.helpers.js";
 
+export const DEMO_DOCTOR_EMAIL = "doctor@example.com";
+
 const DEMO_DOCTOR = {
-  email: "doctor@example.com",
+  email: DEMO_DOCTOR_EMAIL,
   password: "Doctor123",
   fullName: "Dr. Daniel Osei",
   reference: "DR-1042",
@@ -21,7 +23,7 @@ const REMOVE_DEMO_EMAILS = ["patient@example.com"] as const;
 
 /**
  * Keep the published demo doctor + super admin logins working on every boot.
- * Removes the paused patient demo and any extra doctor users.
+ * Removes the paused patient demo. Real doctor accounts are left untouched.
  */
 export async function ensureDemoAccounts() {
   const doctorHash = await hashPassword(DEMO_DOCTOR.password);
@@ -103,15 +105,8 @@ export async function ensureDemoAccounts() {
     where: { email: { in: [...REMOVE_DEMO_EMAILS] } },
   });
 
-  const removedExtraDoctors = await prisma.user.deleteMany({
-    where: {
-      role: Role.DOCTOR,
-      email: { not: DEMO_DOCTOR.email },
-    },
-  });
-
   console.log(
     `[auth] Demo accounts ready: ${DEMO_DOCTOR.email} / ${DEMO_DOCTOR.password}, ${DEMO_ADMIN.email} / ${DEMO_ADMIN.password}` +
-      ` (removed ${removedDemo.count} patient demo, ${removedExtraDoctors.count} other doctors)`,
+      ` (removed ${removedDemo.count} patient demo)`,
   );
 }

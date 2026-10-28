@@ -14,6 +14,10 @@ const envSchema = z.object({
   SYNTHFLOW_API_BASE_URL: z.string().default("https://api.us.synthflow.ai/v2"),
   SYNTHFLOW_AGENT_ID: z.string().optional().default(""),
   SYNTHFLOW_PHONE_NUMBER: z.string().optional().default(""),
+  /** Synthflow chat agent (SMS channel) for texts sent without a call. Create it in the Synthflow dashboard. */
+  SYNTHFLOW_CHAT_AGENT_ID: z.string().optional().default("").transform((v) => v.trim()),
+  /** When set, every booking OTP SMS goes to this number instead of the inbound caller. */
+  BOOKING_OTP_SMS_TO: z.string().optional().default("").transform((v) => v.trim()),
   SYNTHFLOW_SYNC_WEBHOOKS: z
     .enum(["true", "false"])
     .optional()

@@ -5,6 +5,7 @@ import {
   getClinicCallHealth,
   getClinicReceptionistTestCall,
   getClinicVoiceSettings,
+  sendDemoOtpSms,
   startClinicReceptionistTestCall,
   syncClinicDirectoryToSynthflow,
   updateClinicVoiceSettings,
@@ -76,6 +77,14 @@ export async function startTestCall(req: Request, res: Response, next: NextFunct
     const body = testCallSchema.parse(req.body ?? {});
     const result = await startClinicReceptionistTestCall(body);
     return res.json(result);
+  } catch (error) {
+    return next(error);
+  }
+}
+
+export async function sendDemoOtp(_req: Request, res: Response, next: NextFunction) {
+  try {
+    return res.json(await sendDemoOtpSms());
   } catch (error) {
     return next(error);
   }

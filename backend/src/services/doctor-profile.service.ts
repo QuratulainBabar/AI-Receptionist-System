@@ -521,7 +521,7 @@ export function formatDoctorDirectoryLine(input: {
   ].join(" | ");
 }
 
-/** Short spoken profile the phone agent should read when a doctor is discussed. */
+/** Short spoken profile the phone agent should read once before offering slots. */
 export function formatDoctorSpokenBlurb(input: {
   fullName: string;
   specialty: string;
@@ -537,6 +537,8 @@ export function formatDoctorSpokenBlurb(input: {
   location?: string;
   areasOfExpertise?: string[];
 }) {
+  const certs = (input.certifications || []).map((item) => item.trim()).filter(Boolean);
+  const bio = input.about?.trim();
   const lead = [
     `${input.fullName} is a ${input.specialty}`,
     input.experienceYears ? `with ${input.experienceYears} years of experience` : "",
@@ -549,6 +551,8 @@ export function formatDoctorSpokenBlurb(input: {
       : "";
   const parts = [
     lead,
+    certs.length ? `Certifications: ${certs.join(", ")}` : "",
+    bio || "",
     input.clinic?.trim() ? `Hospital: ${input.clinic.trim()}` : "",
     input.location?.trim() ? `Location: ${input.location.trim()}` : "",
     fee ? `Fee ${fee}` : "",

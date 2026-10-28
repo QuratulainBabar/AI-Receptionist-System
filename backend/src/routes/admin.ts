@@ -51,3 +51,4 @@ adminRouter.post("/synthflow/sync", clinicSynthflowController.syncDirectory);
 adminRouter.get("/synthflow/call-health", clinicSynthflowController.getCallHealth);
 adminRouter.post("/synthflow/test-call", clinicSynthflowController.startTestCall);
 adminRouter.get("/synthflow/test-call/:callId", clinicSynthflowController.getTestCall);
+adminRouter.post("/synthflow/demo-otp-sms", clinicSynthflowController.sendDemoOtp);

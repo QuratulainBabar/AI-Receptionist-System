@@ -69,6 +69,23 @@ function AdminDashboard() {
   const [doctors, setDoctors] = useState<ApiAdminDoctor[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpNotice, setOtpNotice] = useState("");
+  const [otpError, setOtpError] = useState("");
+
+  async function sendDemoOtp() {
+    setOtpSending(true);
+    setOtpNotice("");
+    setOtpError("");
+    try {
+      const result = await adminApi.sendDemoOtpSms();
+      setOtpNotice(result.message);
+    } catch (err) {
+      setOtpError(formatApiError(err, "Unable to send the demo OTP."));
+    } finally {
+      setOtpSending(false);
+    }
+  }
 
   const loadStats = useCallback(async () => {
     setLoading(true);
@@ -224,10 +241,24 @@ function AdminDashboard() {
                 Earnings
               </Button>
             </Link>
+            <div className="w-full sm:w-auto">
+              <Button
+                size="md"
+                type="button"
+                onClick={() => void sendDemoOtp()}
+                disabled={otpSending}
+                className="w-full rounded-xl border border-white/30 bg-white/15 text-white hover:bg-white/25 hover:text-white sm:w-auto [&_svg]:text-white"
+              >
+                <PhoneCall className="size-4.5 text-white" strokeWidth={2} />
+                {otpSending ? "Sending SMS…" : "Send demo OTP to +12014799258"}
+              </Button>
+            </div>
           </div>
         </div>
       </section>
 
+      {otpNotice ? <p className="mb-4 text-sm text-emerald-700">{otpNotice}</p> : null}
+      {otpError ? <p className="mb-4 text-sm text-destructive">{otpError}</p> : null}
       {error ? <p className="mb-4 text-sm text-destructive">{error}</p> : null}
 
       {loading && !stats ? (

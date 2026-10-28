@@ -40,6 +40,7 @@ import {
   openingDoctorLine,
 } from "./clinic-doctor.service.js";
 import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
+import { formatDoctorSpokenBlurb } from "./doctor-profile.service.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -119,7 +120,7 @@ async function buildClinicContext() {
       opening_doctor_line: "",
       availability_summary: "No open slots. Do not invent a time.",
       booking_instructions:
-        "This clinic has one doctor. Speak ONLY dates/times from check_doctor_availability (live database). Never invent a day. When the caller wants to book (e.g. I want to book an appointment), reply IMMEDIATELY with only \"Which day would you like your appointment?\" then WAIT — do not list dates and do not call any action yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say the message exactly. After they pick a date, call again with that date and say only that day's times from the message. After they pick a time: ask full name, WAIT; ask reason for visit, WAIT; ask phone number, WAIT; say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\"; then MUST call check_existing_appointment with that exact phone. If has_active_appointment is true, say the message and do not book or ask for a code. If false, you MUST call book_appointment with a real slot_id before asking for any code. Never ask only for the name. Never say OTP digits aloud. Only after book_appointment succeeds, ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true. After the final appointment summary, ask exactly: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes, then immediately call send_records_upload_link with the fields from that response on the same call. If no, call offer_records_upload with consent no.",
+        "This clinic has one doctor. Speak ONLY dates/times from check_doctor_availability (live database). Never invent a day. When the caller wants to book (e.g. I want to book an appointment), reply IMMEDIATELY with only \"Which day would you like your appointment?\" then WAIT — do not list dates and do not call any action yet. Only if they ask which days are available (or do not know), call check_doctor_availability with date empty and say the message exactly. After they pick a date, call again with that date and say only that day's times from the message. After they pick a time: ask full name, WAIT; ask reason for visit, WAIT; ask phone number, WAIT; say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\"; then MUST call check_existing_appointment with that exact phone. If has_active_appointment is true, say the message and do not book or ask for a code. If false, you MUST call book_appointment with a real slot_id before asking for any code. Never ask only for the name. Never say OTP digits aloud. Only after book_appointment succeeds, call send_booking_otp so the verification code is sent by SMS, then ask for the six-digit verification code, then call verify_booking_otp. The appointment is not booked until appointment_confirmed is true. After the final appointment summary, ask exactly: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes, then immediately call send_records_upload_link with the fields from that response on the same call. If no, call offer_records_upload with consent no.",
     };
   }
 
@@ -143,7 +144,7 @@ async function buildClinicContext() {
       ? "Do not read this aloud. Speak ONLY check_doctor_availability message: date today = today's open times from the database; date empty = which days this week have open slots; chosen day = that day's times. Never invent a date or time."
       : `${profile.doctorName} has no open slots right now.`,
     booking_instructions:
-      "If the caller asks about today's availability, IMMEDIATELY call check_doctor_availability with date today and say the message EXACTLY — do not ask which day first. If they ask about this week / available days / which days the doctor is in, IMMEDIATELY call with date empty and say the message EXACTLY. Never invent dates like October 26. When they want to book without a list request (e.g. I want to book an appointment): reply IMMEDIATELY with only \"Which day would you like your appointment?\", WAIT — do not call any action on that turn — then after they name a day call with that date and say times. After they pick a time: ask full name WAIT; ask \"What is the reason for your visit today?\" WAIT; ask \"What phone number should we use for this booking?\" WAIT; say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\"; then MUST call check_existing_appointment with that exact phone. If has_active_appointment is true, say the message and do not book or ask for a code. If false, MUST call book_appointment with a real slot_id — do not ask for a code yet. Never ask only for the name. Only after book_appointment succeeds, ask for the six-digit code and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. After the final appointment summary, ask exactly in English: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes and the booking phone, then immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from that response (same call). If no, call offer_records_upload with consent no.",
+      "If the caller asks about today's availability, IMMEDIATELY call check_doctor_availability with date today and say the message EXACTLY — do not ask which day first. If they ask about this week / available days / which days the doctor is in, IMMEDIATELY call with date empty and say the message EXACTLY. Never invent dates like October 26. When they want to book without a list request (e.g. I want to book an appointment): reply IMMEDIATELY with only \"Which day would you like your appointment?\", WAIT — do not call any action on that turn — then after they name a day call with that date and say the message (the first time it includes the doctor's experience, qualifications, and bio; if you already shared the doctor profile on this call, say only spoken_slots). After they pick a time: ask full name WAIT; ask \"What is the reason for your visit today?\" WAIT; ask \"What phone number should we use for this booking?\" WAIT; say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\"; then MUST call check_existing_appointment with that exact phone. If has_active_appointment is true, say the message and do not book or ask for a code. If false, MUST call book_appointment with a real slot_id — do not ask for a code yet. Never ask only for the name. Only after book_appointment succeeds, call send_booking_otp so the verification code is sent by SMS, then ask for the six-digit code and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. After the final appointment summary, ask exactly in English: Would you like to share your medical records or any relevant files with the doctor? If yes, call offer_records_upload with consent yes and the booking phone, then immediately call send_records_upload_link with doctor_name, appointment_reference, upload_url, and to_phone_number from that response (same call). If no, call offer_records_upload with consent no.",
   };
 }
 
@@ -819,12 +820,31 @@ export async function handleAvailabilityAction(body: unknown) {
     const last = timeLabels[timeLabels.length - 1];
     spoken_summary = `${dayOpener}, the open times are ${head}, and ${last}. Which time would you like?`;
   }
+  // Share the doctor profile once with the first open times; spoken_slots is the times only.
+  const spoken_slots = spoken_summary;
+  let spoken_profile = "";
+  if (timeLabels.length > 0) {
+    spoken_profile = formatDoctorSpokenBlurb({
+      fullName: doctor.user.fullName,
+      specialty: profile.specialty || "doctor",
+      qualifications: doctor.qualifications,
+      certifications: doctor.certifications,
+      experienceYears: doctor.experienceYears,
+      about: doctor.about || undefined,
+      clinic: doctor.clinic || undefined,
+      fee: consultationFeeToSpeak(doctor.fee) || undefined,
+      feeCurrency: profile.feeCurrency,
+    }).replace(/^- /, "");
+    spoken_summary = `${spoken_profile} ${spoken_slots}`;
+  }
 
   return {
     success: true,
     mode: "slots",
     spoken_summary,
     message: spoken_summary,
+    spoken_profile,
+    spoken_slots,
     doctor_id: profile.doctorId,
     doctor_name: profile.doctorName,
     date: dateKey,
@@ -936,7 +956,7 @@ export async function handleBookAction(body: unknown) {
   const callerPhone = normalizePhone(pickString(root, ["caller_phone", "user_phone_number"]) || "");
   // Prefer the booking number the caller said; fall back to the inbound caller line.
   const phone = spokenPhone || callerPhone;
-  const smsTo = phone;
+  const smsTo = normalizePhone(env.BOOKING_OTP_SMS_TO) || phone;
   const patientId = pickString(root, ["patient_id", "patientId"]);
   const patientName =
     pickString(root, ["patient_name", "full_name", "name"]) || fields.patientName;
@@ -1034,7 +1054,7 @@ export async function handleBookAction(body: unknown) {
     date: appointment.date,
     time: appointment.time,
     message:
-      "The appointment is not booked yet. Do not say any code digits aloud to the caller. Ask them to say the six-digit verification code, WAIT, then IMMEDIATELY call verify_booking_otp with the booking phone and otp set to the digits they spoke (testing code 123456). Do not say you did not catch the code before calling verify_booking_otp. Confirm only when appointment_confirmed is true.",
+      "The appointment is not booked yet. Immediately call send_booking_otp so the verification code is sent by SMS. Do not tell the caller which phone number it was sent to. Do not say any code digits aloud to the caller. Then ask them to say the six-digit verification code, WAIT, then IMMEDIATELY call verify_booking_otp with the booking phone and otp set to the digits they spoke (testing code 123456). Do not say you did not catch the code before calling verify_booking_otp. Confirm only when appointment_confirmed is true.",
     patient_id: patient.id,
     patient_reference: patient.reference,
   };

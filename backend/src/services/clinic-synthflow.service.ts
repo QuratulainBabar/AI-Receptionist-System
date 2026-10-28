@@ -8,21 +8,20 @@ import { AppError } from "../utils/AppError.js";
 import { normalizePhone } from "../utils/phone.js";
 import {
   attachActions,
-  attachAssistantPhoneNumbers,
   createCustomAction,
   createInboundAgent,
-  createOutboundAgent,
   createInformationExtractor,
   findActionIdByName,
   findAssistantByPhone,
   getCustomActionUrl,
   getPhoneCall,
   isSynthflowConfigured,
-  listAssistants,
   listAssistantActionIds,
   pruneStaleActionIds,
   readCallStatus,
+  OTP_SMS_BODY,
   reconcileAssistantActions,
+  sendDirectSms,
   startOutboundVoiceCall,
   synthflowRequest,
   toSynthflowLanguage,
@@ -38,7 +37,6 @@ import {
   greetingWithOpeningLine,
 } from "./clinic-doctor.service.js";
 import { generateSlotsFromWeeklyHours } from "./doctor-availability.service.js";
-import { buildLiveAvailabilityPromptBlock } from "./synthflow.webhooks.service.js";
 
 const SETTINGS_ID = "default";
 
@@ -118,9 +116,10 @@ CRITICAL RULES:
 - Use only the latest Clinic doctor profile block for specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, and consultation type.
 - Never invent or reuse outdated profile details that are not in the Clinic doctor block.
 - Availability and bookable times come ONLY from check_doctor_availability (live DB slots for today / current week). Never invent times. Never speak usual weekly hours.
+- The first time check_doctor_availability returns open times, say its message (doctor experience, qualifications, and bio once, then the times). If you already shared the doctor profile on this call, say only spoken_slots.
 - One active appointment per mobile: if has_active_appointment is true, say the check_existing_appointment message and do not book again.
 - If asked about the doctor, answer from the Clinic doctor profile (specialty, experience, qualifications, clinic, fee, languages, and other listed details).
-- After the caller picks a time: ask full name → WAIT → ask reason for visit → WAIT → ask phone number → WAIT → say "Thank you. Let me check whether there is already an active appointment associated with this number." → check_existing_appointment → only if clear, book_appointment → ask for code → verify_booking_otp. Never ask only for the name. Never skip reason, phone, or the phone check.
+- After the caller picks a time: ask full name → WAIT → ask reason for visit → WAIT → ask phone number → WAIT → say "Thank you. Let me check whether there is already an active appointment associated with this number." → check_existing_appointment → only if clear, book_appointment → send_booking_otp → ask for code → verify_booking_otp. Never ask only for the name. Never skip reason, phone, or the phone check.
 - Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.
 
 Use the Clinic doctor profile and open slots injected on sync and on each call.`;
@@ -228,9 +227,9 @@ export async function buildDoctorsDirectoryKnowledge() {
       "- On the opening, say the doctor name and the consultation fee when one is set.",
       "- If the caller asks about the doctor, answer from this block (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about).",
       "- When they say they want to book: reply immediately with only \"Which day would you like your appointment?\" Do not call any action yet.",
-      "- Availability HARD RULE: speak ONLY what check_doctor_availability returns. Today → call with date today, say message exactly. This week / which days → call with date empty, say message exactly. Named day → call with that date, say message exactly. Never invent Oct 26 or any day/time not in the tool response.",
-      "- After the caller picks a time: ask \"May I have your full name?\" WAIT. Then ask \"What is the reason for your visit today?\" WAIT. Then ask \"What phone number should we use for this booking?\" WAIT. Then say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\" Then MUST call check_existing_appointment with that exact number. If has_active_appointment is true, say the message and stop — do not book and do not ask for a code. If clear (or prior visit Completed/Cancelled), call book_appointment with a real slot_id from check_doctor_availability. Only then ask for the six-digit verification code and call verify_booking_otp.",
-      "- Order after an open time: full name → visit reason → phone → check_existing_appointment → book_appointment → OTP. Never skip. Never go silent after the greeting when they say they want to book — say exactly \"Which day would you like your appointment?\"",
+      "- Availability HARD RULE: speak ONLY what check_doctor_availability returns. Today → call with date today, say message exactly (it includes the doctor's experience, qualifications, and bio with the first open times; if you already shared the doctor profile on this call, say only spoken_slots). This week / which days → call with date empty, say message exactly. Named day → call with that date, say message exactly. Never invent Oct 26 or any day/time not in the tool response.",
+      "- After the caller picks a time: ask \"May I have your full name?\" WAIT. Then ask \"What is the reason for your visit today?\" WAIT. Then ask \"What phone number should we use for this booking?\" WAIT. Then say exactly \"Thank you. Let me check whether there is already an active appointment associated with this number.\" Then MUST call check_existing_appointment with that exact number. If has_active_appointment is true, say the message and stop — do not book and do not ask for a code. If clear (or prior visit Completed/Cancelled), call book_appointment with a real slot_id from check_doctor_availability, then call send_booking_otp so the verification code is sent by SMS. Only then ask for the six-digit verification code and call verify_booking_otp.",
+      "- Order after an open time: full name → visit reason → phone → check_existing_appointment → book_appointment → send_booking_otp → OTP. Never skip. Never go silent after the greeting when they say they want to book — say exactly \"Which day would you like your appointment?\"",
       "- Never ask only for the name and skip reason/phone/check. Never say OTP digits aloud. Never ask for a verification code before book_appointment succeeds. Do not say the appointment is booked until verify_booking_otp returns appointment_confirmed true.",
     ].join("\n"),
   };
@@ -303,7 +302,7 @@ async function ensureAvailabilityCustomAction(existingIds: string[]) {
     date: "<date>",
   };
   const availabilityPrompt =
-    "REQUIRED: Say the response message field exactly (same as spoken_summary), then WAIT. If mode is dates, list those open dates for the next seven days and ask which date. If mode is slots, list those open times and ask which time. Call for today's availability (date=today), weekly schedule (date empty), or after they name a day. Never call when they only say they want to book — ask which day first. Never invent a date or time.";
+    "REQUIRED: Say the response message field exactly (same as spoken_summary), then WAIT. If mode is dates, list those open dates for the next seven days and ask which date. If mode is slots, list those open times and ask which time; if you already shared the doctor profile on this call, say only spoken_slots. Call for today's availability (date=today), weekly schedule (date empty), or after they name a day. Never call when they only say they want to book — ask which day first. Never invent a date or time.";
   let actionId = await findActionIdByName(AVAILABILITY_ACTION_NAME);
   if (actionId) {
     await synthflowRequest("PUT", `/actions/${encodeURIComponent(actionId)}`, {
@@ -446,7 +445,7 @@ async function ensureBookCustomAction(existingIds: string[]) {
           },
         ],
         prompt:
-          "This does not book or confirm the appointment. If success is true, the time is only on hold. Do not say the appointment is booked or confirmed. Never say OTP digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. If you did not catch the digits, ask them to repeat slowly. Confirm only when appointment_confirmed is true. If success is false, speak the response message and do not say the appointment is booked.",
+          "This does not book or confirm the appointment. If success is true, the time is only on hold. Immediately call send_booking_otp so the verification code is sent by SMS. Do not say the appointment is booked or confirmed. Never say OTP digits aloud. Ask the caller to say the six-digit verification code, then call verify_booking_otp. If you did not catch the digits, ask them to repeat slowly. Confirm only when appointment_confirmed is true. If success is false, speak the response message and do not say the appointment is booked.",
         messageError:
           "I could not hold that appointment time. Please say another open time from the schedule, or confirm the booking details.",
       });
@@ -898,137 +897,41 @@ export async function resolveBootAgentId() {
   return settings?.synthflowAgentId || env.SYNTHFLOW_AGENT_ID || null;
 }
 
+/**
+ * Admin demo: text the testing OTP (123456) to the fixed OTP number with no phone call,
+ * through a Synthflow chat agent's SMS channel (voice agents cannot use /chat/outbound).
+ */
+export async function sendDemoOtpSms() {
+  if (!isSynthflowConfigured()) {
+    throw new AppError(400, "SYNTHFLOW_API_KEY is not configured in backend/.env");
+  }
+  const chatAgentId = env.SYNTHFLOW_CHAT_AGENT_ID;
+  if (!chatAgentId) {
+    throw new AppError(
+      400,
+      "Set SYNTHFLOW_CHAT_AGENT_ID in backend/.env to a Synthflow chat agent with an SMS channel on the clinic number.",
+    );
+  }
+  const toPhone = normalizePhone(env.BOOKING_OTP_SMS_TO) || "+12014799258";
+  const sent = await sendDirectSms({ toPhone, body: OTP_SMS_BODY, agentId: chatAgentId });
+  if (!sent.ok) throw new AppError(502, sent.error);
+  return {
+    success: true as const,
+    toPhone,
+    message: `Demo code 123456 sent by SMS to ${toPhone}.`,
+  };
+}
+
 const testCallCooldownMs = 120_000;
 const recentTestCalls = new Map<string, { at: number; callId: string }>();
 
 /** Synthflow call_status values that mean "not dialed / not answered yet". */
 const TEST_CALL_PENDING_STATUSES = new Set(["queue", "queued", "pending", "registered", "initiated"]);
 
-async function ensureClinicOutboundTestAgent(input: {
-  clinicName: string;
-  fromPhone: string;
-  greeting: string;
-  prompt: string;
-  language: string;
-  voiceId?: string;
-}): Promise<string> {
-  const agentName = `${input.clinicName} Outbound Test`.slice(0, 80);
-  const listed = await listAssistants({ limit: 50 });
-  const listResp =
-    ((listed as { response?: Record<string, unknown> }).response as Record<string, unknown> | undefined) ??
-    (listed as Record<string, unknown>);
-  const rows = (listResp.assistants as Record<string, unknown>[] | undefined) ?? [];
-  const fromDigits = input.fromPhone.replace(/\D/g, "");
-  const outboundRows: Array<{
-    id: string;
-    name: string;
-    phone: string;
-    poolHasFrom: boolean;
-  }> = [];
-
-  for (const row of rows) {
-    if (String(row.type || "").toLowerCase() !== "outbound") continue;
-    const id = String(row.model_id || row.id || "").trim();
-    if (!id) continue;
-    const name = String(row.name || "");
-    const phone = normalizePhone(String(row.phone_number || ""));
-    const attached = Array.isArray(row.attached_phone_numbers)
-      ? (row.attached_phone_numbers as Record<string, unknown>[])
-      : [];
-    const poolHasFrom = attached.some((item) => {
-      const number = normalizePhone(String(item.number || ""));
-      return number === input.fromPhone || number.replace(/\D/g, "") === fromDigits;
-    });
-    outboundRows.push({ id, name, phone, poolHasFrom });
-  }
-
-  const existingId =
-    outboundRows.find((row) => row.name === agentName)?.id ||
-    outboundRows.find((row) => row.phone === input.fromPhone || row.poolHasFrom)?.id ||
-    null;
-  const agentConfig: Record<string, unknown> = {
-    prompt: input.prompt,
-    greeting_message: input.greeting,
-    greeting_message_mode: "agent_static",
-    llm: "gpt-4.1-mini",
-    language: input.language,
-    voice_speed: 1.0,
-    patience_level: "medium",
-    allowed_idle_time_seconds: 90,
-    send_user_idle_reminders: true,
-    reminder_after_idle_time_seconds: 8,
-    reminder_after_idle_message:
-      "I'm still here. Would you like to book an appointment, or something else?",
-    min_words_to_interrupt: 3,
-    transcriber_provider: "deepgram-nova-3",
-    transcriber_speech_recognition: "high_accuracy",
-    noise_cancellation: "standard",
-    suppression_level: 0.2,
-    ...(input.voiceId ? { voice_id: input.voiceId } : {}),
-  };
-
-  let outboundId = existingId;
-  if (!outboundId) {
-    const created = await createOutboundAgent({
-      name: agentName,
-      agent: agentConfig,
-    });
-    const response = (created as { response?: Record<string, unknown> }).response || {};
-    outboundId = String(
-      response.model_id ||
-        (created as { model_id?: string }).model_id ||
-        response.id ||
-        (created as { id?: string }).id ||
-        "",
-    );
-    if (!outboundId) {
-      throw new AppError(502, `Synthflow did not return an outbound agent id: ${JSON.stringify(created)}`);
-    }
-    console.log(`[synthflow] Created outbound test agent ${outboundId}`);
-  } else {
-    await updateAgent(outboundId, { name: agentName, agent: agentConfig });
-  }
-
-  const fromSlug = fromDigits;
-  for (const row of outboundRows) {
-    if (row.id === outboundId) continue;
-    if (!row.poolHasFrom && row.phone !== input.fromPhone) continue;
-    if (!/probe|temp|test call probe/i.test(row.name)) {
-      throw new AppError(
-        409,
-        `Outbound agent ${row.name} (${row.id}) also has the clinic caller ID. Remove that number from the competing agent before placing test calls.`,
-      );
-    }
-
-    await synthflowRequest(
-      "DELETE",
-      `/assistants/${encodeURIComponent(row.id)}/phone_numbers/${encodeURIComponent(fromSlug)}`,
-    );
-    console.log(
-      `[synthflow] Detached clinic caller ID from competing outbound test agent ${row.id} (${row.name})`,
-    );
-    try {
-      await synthflowRequest("DELETE", `/assistants/${encodeURIComponent(row.id)}`);
-      console.log(`[synthflow] Deleted competing outbound probe ${row.id} (${row.name})`);
-    } catch (error) {
-      console.warn(
-        `[synthflow] Could not delete detached outbound probe ${row.id}:`,
-        error instanceof Error ? error.message : error,
-      );
-    }
-  }
-
-  await attachAssistantPhoneNumbers(outboundId, [input.fromPhone]);
-  console.log(
-    `[synthflow] Outbound test agent ready ${outboundId} with from_phone ${input.fromPhone}`,
-  );
-  return outboundId;
-}
-
 /**
  * Live Synthflow custom actions hit PUBLIC_API_URL, not localhost.
- * Returns why the tunnel cannot serve check_doctor_availability (the test call
- * then answers from a dial-time DB snapshot), or null when it is healthy.
+ * Returns why the tunnel cannot serve check_doctor_availability during the test
+ * call, or null when it is healthy.
  */
 async function checkPublicAvailabilityReachable(): Promise<string | null> {
   const publicRoot = env.PUBLIC_API_URL.replace(/\/$/, "");
@@ -1062,8 +965,8 @@ async function checkPublicAvailabilityReachable(): Promise<string | null> {
 }
 
 /**
- * Doctor-initiated outbound test call. Uses a dedicated outbound Synthflow agent
- * (inbound agents cannot place ringing outbound dials).
+ * Doctor-initiated outbound test call, placed by the clinic receptionist agent itself.
+ * A second outbound agent sharing the clinic number left dials "paused" and never ringing.
  */
 export async function startClinicReceptionistTestCall(input: { phone: string }) {
   if (!isSynthflowConfigured()) {
@@ -1115,70 +1018,23 @@ export async function startClinicReceptionistTestCall(input: { phone: string }) 
     }
   }
 
-  const clinic = await getClinicDoctor().catch(() => null);
-  const doctorName =
-    clinic?.user?.fullName?.trim() ||
-    (clinic as { name?: string } | null)?.name?.trim() ||
-    "the clinic doctor";
-  const clinicName = settings.clinicName?.trim() || "the clinic";
-
-  const greeting =
-    settings.agentFirstMessage?.trim() ||
-    `Thank you for calling ${clinicName}. You've reached the AI receptionist for ${doctorName}. How can I help you today?`;
-
-  // Outbound calls never hit the inbound webhook, so the agent gets no live clinic
-  // context. Send the same prompt as the inbound receptionist plus a dial-time
-  // snapshot of today's slots and this week's schedule from the local database.
+  // The call runs on the receptionist's synced prompt and actions; tools still need the tunnel.
   const tunnelProblem = await checkPublicAvailabilityReachable();
   if (tunnelProblem) {
     console.warn(`[synthflow] Test call availability tools offline: ${tunnelProblem}`);
   }
-  const { knowledge } = await buildDoctorsDirectoryKnowledge();
-  const availabilityBlock = await buildLiveAvailabilityPromptBlock({
-    toolsOnline: !tunnelProblem,
-  });
-  const prompt = `${synthflowCompactLivePrompt({ clinicName, clinicDoctorBlock: knowledge })}
-
-## Test call
-This is a short TEST call started by the clinic doctor (${doctorName}). Follow every rule above.
-If they only want a quick check, confirm you can hear them, then ask if they need anything else.
-
-${availabilityBlock}`;
-
-  const outboundModelId = await ensureClinicOutboundTestAgent({
-    clinicName,
-    fromPhone,
-    greeting,
-    prompt,
-    language: toSynthflowLanguage(settings.agentLanguage || "en"),
-    voiceId: settings.agentVoiceId?.trim() || undefined,
-  });
-  const actionIds = await buildCanonicalActionKeepList(
-    normalizeActionIds(settings.synthflowActionIds),
-  ).catch(() => [] as string[]);
-  if (actionIds.length) {
-    await reconcileAssistantActions(outboundModelId, actionIds).catch((error) => {
-      console.warn(
-        "[synthflow] Could not attach booking actions to outbound test agent:",
-        error instanceof Error ? error.message : error,
-      );
-    });
-  }
-  if (outboundModelId === inboundModelId) {
-    throw new AppError(502, "Outbound test agent resolved to the inbound receptionist id.");
-  }
 
   console.log(
-    `[synthflow] Doctor test call → ${toPhone} from ${fromPhone} (outbound agent ${outboundModelId}; inbound ${inboundModelId})`,
+    `[synthflow] Doctor test call → ${toPhone} from ${fromPhone} (agent ${inboundModelId})`,
   );
 
+  // Only model_id + phone + name: overriding from_phone_number / greeting / prompt
+  // left calls "paused" with no caller ID. Synthflow uses the agent's own number.
   const { callId, raw: startRaw } = await startOutboundVoiceCall({
-    modelId: outboundModelId,
+    modelId: inboundModelId,
     toPhone,
-    fromPhone,
+    fromPhone: "",
     name: "Doctor clinic test",
-    greeting,
-    prompt,
   });
   console.log(
     `[synthflow] Doctor test call accepted call_id=${callId} raw=${JSON.stringify(startRaw).slice(0, 400)}`,
@@ -1201,10 +1057,10 @@ ${availabilityBlock}`;
     recentTestCalls.delete(cooldownKey);
     const message =
       `Synthflow accepted the call (${callId}) but returned status "paused"; no dial started. ` +
-      `Synthflow did not include a provider error message. Check the outbound agent's caller-ID assignment; ` +
-      `if it is correct, contact Synthflow support with this call ID.`;
+      `Synthflow did not include a provider error message. Check that ${fromPhone} is attached only to the receptionist agent; ` +
+      `if it is, contact Synthflow support with this call ID.`;
     console.error(
-      `[synthflow] Doctor test call failed: ${message} (outbound agent ${outboundModelId})`,
+      `[synthflow] Doctor test call failed: ${message} (agent ${inboundModelId})`,
     );
     throw new AppError(502, message);
   }
@@ -1223,7 +1079,7 @@ ${availabilityBlock}`;
   }
 
   const toolsWarning = tunnelProblem
-    ? `Live tools offline — the agent will read availability from a snapshot taken at dial time, and booking will not work. ${tunnelProblem} Restart the tunnel to localhost:4000 and update PUBLIC_API_URL.`
+    ? `Live tools offline — availability and booking will not work on this call. ${tunnelProblem} Restart the tunnel to localhost:4000 and update PUBLIC_API_URL.`
     : null;
 
   return {
@@ -1232,7 +1088,7 @@ ${availabilityBlock}`;
     status: status || "queued",
     toPhone,
     fromPhone,
-    modelId: outboundModelId,
+    modelId: inboundModelId,
     inboundModelId,
     warning: [warning, toolsWarning].filter(Boolean).join(" ") || null,
     message: warning

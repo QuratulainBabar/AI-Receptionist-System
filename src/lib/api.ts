@@ -1238,6 +1238,13 @@ export const adminApi = {
       settings: ClinicSynthflowSettings;
     }>("/api/admin/synthflow/sync", { method: "POST", body: JSON.stringify({}) }, authHeader());
   },
+  sendDemoOtpSms() {
+    return request<{
+      success: boolean;
+      toPhone: string;
+      message: string;
+    }>("/api/admin/synthflow/demo-otp-sms", { method: "POST", body: JSON.stringify({}) }, authHeader());
+  },
 };
 
 export const doctorsApi = {

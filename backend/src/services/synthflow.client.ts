@@ -384,7 +384,7 @@ export async function updateCustomActionUrl(actionId: string, url: string) {
  */
 const OPENING_RULE = `OPENING RULE:
 The greeting already includes the clinic welcome, the doctor's name, and the consultation fee only when that doctor has a fee.
-If the greeting did not already say the doctor's name, say only opening_doctor_line, then ask how you can help.
+If the greeting did not already say the doctor's name, say only opening_doctor_line, then ask how you can help. On the greeting, do not read the full bio yet.
 If the caller asks about the doctor, answer from the latest Clinic doctor profile (specialty, experience, qualifications, certifications, expertise, languages, hospital, location, fee, consultation type/services, about). Never invent missing details.`;
 
 const FAST_RESPONSE_RULE = `FAST RESPONSE RULE (CRITICAL — NO DEAD AIR — HIGHEST PRIORITY):
@@ -411,6 +411,7 @@ HARD RULE — REAL DATABASE SLOTS ONLY:
 - Scope is ONLY today and the current seven days from the tool. If a day is not in the tool response, that day is NOT available — do not mention it.
 SPEAKING: Speak clearly at a natural pace. Brief pause only after questions or between listed times — never before your first words.
 EXCEPTION TO BREVITY: When answering availability, say the FULL message / spoken_summary from check_doctor_availability word-for-word (word limits do not apply). Then WAIT.
+- The first open times on this call come with the doctor's experience, qualifications, and bio (spoken_profile) — say them once. If you already shared the doctor profile on this call, say only spoken_slots.
 - If the message says "today" or "tomorrow", speak those exact words — do not replace them with a calendar date.
 PRIORITY — AVAILABILITY QUESTIONS OVERRIDE BOOKING ORDER:
 - TODAY / open times today / what times are free today → do NOT ask which day. Immediately call check_doctor_availability with date "today". Say the returned message exactly, then WAIT.
@@ -426,7 +427,7 @@ DETAILS COLLECTION RULE — AFTER TIME IS CHOSEN (one question per turn, then WA
 A. Ask exactly: "May I have your full name?" Then STOP and WAIT.
 B. After they give their name, ask exactly: "What is the reason for your visit today?" Then STOP and WAIT. Do not ask for the phone yet.
 C. After they give the reason, ask exactly: "What phone number should we use for this booking?" Then STOP and WAIT.
-D. After they give the phone number, follow PHONE APPOINTMENT RULE (thank-you line → check_existing_appointment → book only if clear → then OTP).
+D. After they give the phone number, follow PHONE APPOINTMENT RULE (thank-you line → check_existing_appointment → book only if clear → send_booking_otp → then OTP).
 NEVER ask only for the name and then book or ask for a verification code.
 NEVER skip the reason. NEVER skip the phone number. NEVER skip the existing-appointment check.`;
 
@@ -449,7 +450,7 @@ After the caller picks a real open time, collect details in this exact order (on
 5. MUST call check_existing_appointment with the exact booking phone the caller spoke (never skip; pass the real digits, never invent a number).
 6. If has_active_appointment is true, say the action message exactly and STOP. Do not book. Do not ask for a code.
 7. If has_active_appointment is false, you MUST call book_appointment with doctor_id, real slot_id from check_doctor_availability, patient_name, phone, and reason. This only holds the time.
-8. ONLY after book_appointment returns success true (and otp_required true): ask exactly "Please say the six-digit verification code." Then WAIT for their reply.
+8. ONLY after book_appointment returns success true (and otp_required true): call send_booking_otp so the verification code is sent by SMS (do not pass to_phone_number), then ask exactly "Please say the six-digit verification code." Then WAIT for their reply.
 9. As soon as they reply with any digits or digit-words (for testing the code is 123456 / one two three four five six), IMMEDIATELY call verify_booking_otp. Put the digits in the otp field as 123456 when that is what they said. Do NOT say "sorry I did not catch that" before calling the action.
 10. Say the verify_booking_otp response message exactly. If appointment_confirmed is true, give the final appointment summary, then follow RECORDS UPLOAD OFFER RULE.
 If appointment_confirmed is false, say the message. If it says to call book_appointment first, do that before asking for a code again.
@@ -458,6 +459,7 @@ NEVER ask for a verification code before name, reason, phone, check_existing_app
 NEVER call verify_booking_otp before book_appointment succeeds in this call.
 NEVER call book_appointment before check_existing_appointment succeeds with has_active_appointment false in this call.
 NEVER speak OTP digits aloud to the caller. You MAY and MUST pass the digits into verify_booking_otp.otp (testing code 123456).
+Do not tell the caller which phone number the code was sent to.
 Never invent a confirmation. Never say the visit is booked before verify_booking_otp returns appointment_confirmed true.`;
 
 const RECORDS_UPLOAD_OFFER_RULE = `RECORDS UPLOAD OFFER RULE:
@@ -521,7 +523,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "book_appointment",
       url: urls.bookAction,
       prompt:
-        "Only call this AFTER check_existing_appointment returned has_active_appointment false. REQUIRED before any verification code. This does not book or confirm the appointment. If success is true, the time is only on hold — then ask the caller to say the six-digit verification code, WAIT, and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not ask for a code.",
+        "Only call this AFTER check_existing_appointment returned has_active_appointment false. REQUIRED before any verification code. This does not book or confirm the appointment. If success is true, the time is only on hold — immediately call send_booking_otp so the verification code is sent by SMS, then ask the caller to say the six-digit verification code, WAIT, and call verify_booking_otp. Never say OTP digits aloud. Confirm only when appointment_confirmed is true. If success is false, say the message exactly and do not ask for a code.",
       message_error:
         "I could not hold that appointment time. Please say another open time from the schedule, or confirm the booking details.",
       jsonBody: {
@@ -589,7 +591,7 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
       name: "check_doctor_availability",
       url: urls.availabilityAction,
       prompt:
-        "REQUIRED — say the response message field EXACTLY (same as spoken_summary), then WAIT. Do not add, remove, or invent any date or time. If mode is dates, those are the ONLY open days this week from the doctor dashboard database. If mode is slots, those are the ONLY open times for that day. Call for today's times (date=today), this week's days (date empty), or after they name a day — never on a plain 'I want to book' turn.",
+        "REQUIRED — say the response message field EXACTLY (same as spoken_summary), then WAIT. Do not add, remove, or invent any date or time. If mode is dates, those are the ONLY open days this week from the doctor dashboard database. If mode is slots, those are the ONLY open times for that day; if you already shared the doctor profile on this call, say only spoken_slots. Call for today's times (date=today), this week's days (date empty), or after they name a day — never on a plain 'I want to book' turn.",
       message_error: "I could not load open times just now. Which day would you like instead?",
       jsonBody: { date: "<date>" },
       create: {
@@ -908,20 +910,24 @@ export async function syncCustomActionWebhookUrls(modelId?: string) {
   }
 }
 
-const OTP_SMS_BODY =
-  "Your Qubetech appointment code is <otp>. Testing code 123456 may be reused. Do not share it.";
+// The agent never receives the OTP digits, so the body cannot use an <otp> placeholder.
+// generateCode() always issues the testing code 123456 for now.
+export const OTP_SMS_BODY = "Your Qubetech appointment code is 123456. Do not share it.";
 
 /** Text the one-time code to the inbound caller during the live call. */
 async function ensureBookingOtpSmsAction() {
   const fromNumber = env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053";
-  // Do NOT set to_phone_number. In Synthflow that system field is the clinic number
-  // that was dialed. INCALL_SMS already delivers to user_phone_number (the caller).
+  const fixedTo = normalizePhone(env.BOOKING_OTP_SMS_TO);
+  // Without BOOKING_OTP_SMS_TO, leave to_phone_number unset: INCALL_SMS then delivers
+  // to user_phone_number (the caller). A fixed E.164 number overrides that.
   const body = {
     name: "send_booking_otp",
     message_body: OTP_SMS_BODY,
+    ...(fixedTo ? { to_phone_number: fixedTo } : {}),
     from_phone_number: fromNumber,
-    message_before_action:
-      "I am texting a 6-digit code to the phone you are calling from. Please read those digits back to me.",
+    message_before_action: fixedTo
+      ? "I am texting a 6-digit verification code now. Please read those digits back to me."
+      : "I am texting a 6-digit code to the phone you are calling from. Please read those digits back to me.",
     wait_for_reply: false,
   };
 
@@ -1000,8 +1006,12 @@ async function ensurePhoneAppointmentRule(modelId: string) {
   }
 
   const bodyPrompt = stripStaleMultiDoctorPrompt(prompt);
-  const nextPrefix = synthflowPromptRulePrefix();
-  let nextPrompt = `${nextPrefix}\n\n${bodyPrompt}`.trim();
+  // The compact live prompt already carries every rule; prefixing it again duplicates them.
+  const bodyHasRules =
+    bodyPrompt.includes("BOOKING OTP RULE") && bodyPrompt.includes("AVAILABILITY SPEAK RULE");
+  let nextPrompt = bodyHasRules
+    ? bodyPrompt
+    : `${synthflowPromptRulePrefix()}\n\n${bodyPrompt}`.trim();
   let changed = nextPrompt !== prompt.trim();
   if (nextPrompt.includes("unless book_appointment returns success true")) {
     nextPrompt = nextPrompt.replaceAll(
@@ -1307,26 +1317,8 @@ async function attachBookingOtpSms(modelId: string, actionId: string) {
       {
         action_id: actionId,
         attachment_type: "during",
-        input_variables_mapping: [
-          {
-            variable_name: "otp",
-            source: "llm",
-            llm_config: {
-              description: "The otp value returned by book_appointment. Do not read it aloud.",
-              example: "482913",
-              required: true,
-            },
-          },
-          {
-            variable_name: "expires_seconds",
-            source: "llm",
-            llm_config: {
-              description: "The expires_seconds value returned by book_appointment.",
-              example: "120",
-              required: true,
-            },
-          },
-        ],
+        // The SMS body has no placeholders, so the agent fills nothing in.
+        input_variables_mapping: [],
       },
     ],
   });
@@ -1468,9 +1460,11 @@ async function attachRecordsUploadSmsOutbound(modelId: string, actionId: string)
 export async function sendDirectSms(input: {
   toPhone: string;
   body: string;
+  /** Synthflow chat agent with an SMS channel; defaults to the clinic voice agent. */
+  agentId?: string;
 }): Promise<{ ok: true; mode: "chat_outbound" } | { ok: false; error: string }> {
   const fromNumber = normalizePhone(env.SYNTHFLOW_PHONE_NUMBER.trim() || "+14244849053");
-  const agentId = env.SYNTHFLOW_AGENT_ID.trim();
+  const agentId = input.agentId?.trim() || env.SYNTHFLOW_AGENT_ID.trim();
   const toPhone = normalizePhone(input.toPhone);
   const body = input.body.trim();
 
