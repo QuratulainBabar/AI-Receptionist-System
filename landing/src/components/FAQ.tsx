@@ -1,70 +1,58 @@
-import { useState } from 'react'
-import { Plus } from 'lucide-react'
+import { useState } from "react"
 
-const faqs = [
+const FAQS = [
   {
-    q: 'What does the AI receptionist do on a phone call?',
-    a: 'It answers your clinic line with your doctor and clinic profile in context, can share the consultation fee when configured, offers only real open appointment times, recognizes existing active appointments by phone number, and holds the slot while it sends a verification code.',
+    q: "What does the AI receptionist actually do on a call?",
+    a: "It handles inbound appointment conversations and can book against your real open availability, with SMS OTP verification before confirmation.",
   },
   {
-    q: 'How does appointment confirmation work?',
-    a: 'After the caller picks a time, the slot is held and a 6-digit OTP is sent to them by SMS. The appointment is confirmed only after the code is verified.',
+    q: "Does it book random times or use my real calendar?",
+    a: "Bookings use your availability calendar and open slots, not a fixed script of fake times.",
   },
   {
-    q: 'Does it book from my real schedule?',
-    a: 'Yes. The agent uses the availability you set in the portal, including your weekly schedule, specific dates and breaks, and slot lengths, and speaks only open times.',
+    q: "Who is this for, doctors or patients?",
+    a: "Clinics and doctors are the primary customers. Patients get web access to find doctors, book, and manage history and records. Clinic staff can work in the doctor portal with permissions.",
   },
   {
-    q: 'Can my clinic team use the portal too?',
-    a: 'Yes. You can invite staff with role-based permissions: Receptionist, Clinic Administrator, Office Manager, Appointment Coordinator, Nurse / Clinical Assistant, Billing / Accounts, or Additional Doctor.',
+    q: "What's the difference between Starter and Growth?",
+    a: "Starter covers phone booking, OTP, reminders, dashboard, appointments, patients, and basic records. Growth adds follow-ups, patient timeline, SMS record requests, Stripe invoice links, team users, richer notifications, and My Clinic phone AI configuration.",
   },
   {
-    q: 'What happens after an appointment is confirmed?',
-    a: 'It appears in your doctor portal with the patient’s context. You can manage its status, add clinical notes and prescriptions to the patient timeline, schedule a follow-up, and rely on automated SMS reminders.',
-  },
-  {
-    q: 'Can I send reminders and follow-ups?',
-    a: 'Yes. Appointment reminders are sent automatically by SMS at 3 days, 24 hours and 6 hours before the visit, and you can schedule follow-up appointments from the patient’s file.',
-  },
-  {
-    q: 'How does billing work?',
-    a: 'Clinic plans are billed monthly or yearly through Stripe. You can also send appointment invoice payment links to patients by SMS.',
+    q: "Can we send appointment reminders and confirmations?",
+    a: "Yes, automated SMS appointment reminders are included on all plans. You control what your clinic sends and when reminders go out before visits.",
   },
 ] as const
 
 export default function FAQ() {
-  const [open, setOpen] = useState<Record<number, boolean>>({})
-
-  const toggle = (i: number) => {
-    setOpen((prev) => ({ ...prev, [i]: !prev[i] }))
-  }
+  const [openIndex, setOpenIndex] = useState<number | null>(null)
 
   return (
-    <section className="sec faq" id="faq">
-      <div className="wrap faq-wrap">
-        <div className="sec-head rv">
-          <h2>Questions clinics ask</h2>
-          <p>Straight answers about how the phone agent and the portal work.</p>
+    <section className="faq-section" id="faq">
+      <div className="container">
+        <div className="faq-header" id="faq-header">
+          <h2 className="section-title section-title-lg">Questions clinics ask before switching</h2>
+          <p className="section-description">Straight answers about how AI Receptionist works.</p>
         </div>
-        <div id="faqList">
-          {faqs.map((item, i) => {
-            const isOpen = !!open[i]
+        <div className="faq-list" id="faq-list">
+          {FAQS.map((item, index) => {
+            const open = openIndex === index
             return (
-              <div className={`qa${isOpen ? ' open' : ''}`} key={item.q}>
+              <div
+                className={`faq-item${open ? " active" : ""}`}
+                id={`faq-item-${index + 1}`}
+                key={item.q}
+              >
                 <button
                   type="button"
-                  aria-expanded={isOpen}
-                  onClick={() => toggle(i)}
+                  className="faq-question"
+                  aria-expanded={open}
+                  onClick={() => setOpenIndex(open ? null : index)}
                 >
                   <span>{item.q}</span>
-                  <span className="pm">
-                    <Plus className="i" aria-hidden />
-                  </span>
+                  <span className="faq-icon">+</span>
                 </button>
-                <div className="ans">
-                  <div>
-                    <p>{item.a}</p>
-                  </div>
+                <div className="faq-answer">
+                  <p>{item.a}</p>
                 </div>
               </div>
             )

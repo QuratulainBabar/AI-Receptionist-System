@@ -1,21 +1,18 @@
-import { SIGN_UP_URL } from '../lib/app'
+import { SIGN_UP_URL } from "../lib/app"
 
 export default function FinalCTA() {
   return (
-    <section className="final">
-      <div className="wrap">
-        <div className="final-box rv">
-          <h2>Put an AI receptionist on your clinic line.</h2>
-          <p>
-            Answer calls, confirm visits with SMS OTP, and manage appointments, patients, and
-            records in one place.
+    <section className="cta-section" id="cta">
+      <div className="container">
+        <div className="cta-card" id="cta-card">
+          <h2 className="cta-title">Put an AI receptionist on your clinic line</h2>
+          <p className="cta-description">
+            Book from real availability, confirm with SMS OTP, and run appointments, patients, and
+            billing from one portal.
           </p>
-          <div className="cta-row">
-            <a href={SIGN_UP_URL} className="btn btn-white">
+          <div className="cta-actions">
+            <a href={SIGN_UP_URL} className="btn btn-primary btn-cta" id="cta-getstarted">
               Get started
-            </a>
-            <a href="#pricing" className="btn btn-ghost">
-              View plans
             </a>
           </div>
         </div>
