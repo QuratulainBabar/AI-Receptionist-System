@@ -11,13 +11,13 @@ const CARDS = [
   },
   {
     num: "03",
-    title: "SMS OTP confirmation",
+    title: "Email OTP confirmation",
     desc: "Patients verify by text before a voice booking is confirmed.",
   },
   {
     num: "04",
     title: "Automated reminders",
-    desc: "Scheduled SMS reminders keep every appointment on track.",
+    desc: "Scheduled email reminders keep every appointment on track.",
   },
   {
     num: "05",

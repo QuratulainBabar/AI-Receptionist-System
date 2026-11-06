@@ -18,7 +18,7 @@ const FAQS = [
     a: "Starter covers phone booking, OTP, reminders, dashboard, appointments, patients, and basic records. Growth adds follow-ups, patient timeline, SMS record requests, Stripe invoice links, team users, richer notifications, and My Clinic phone AI configuration.",
   },
   {
-    q: "Can we send appointment reminders and confirmations?",
+    q: "Can we send appointment reminders and confirmations by email?",
     a: "Yes, automated SMS appointment reminders are included on all plans. You control what your clinic sends and when reminders go out before visits.",
   },
 ] as const

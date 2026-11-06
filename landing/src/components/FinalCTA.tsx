@@ -7,7 +7,7 @@ export default function FinalCTA() {
         <div className="cta-card" id="cta-card">
           <h2 className="cta-title">Put an AI receptionist on your clinic line</h2>
           <p className="cta-description">
-            Book from real availability, confirm with SMS OTP, and run appointments, patients, and
+            Book from real availability, confirm with email OTP, and run appointments, patients, and
             billing from one portal.
           </p>
           <div className="cta-actions">

@@ -13,7 +13,7 @@ export default function Hero() {
               for modern clinics
             </h1>
             <p className="hero-banner-description">
-              Answer patient calls, book from your real availability, and confirm visits with SMS OTP
+              Answer patient calls, book from your real availability, and confirm visits with email OTP
               all managed through your doctor portal.
             </p>
             <div className="hero-banner-actions">

@@ -2,7 +2,7 @@ const STEPS = [
   "Patient calls the clinic.",
   "AI receptionist answers and handles the appointment request.",
   "Available appointment slots are checked.",
-  "Patient verifies the booking through SMS OTP.",
+  "Patient verifies the booking through email OTP.",
   "Appointment is managed through the doctor portal.",
 ] as const
 

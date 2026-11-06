@@ -54,7 +54,7 @@ jobs:
           cp backend/package-lock.json deploy-backend/package-lock.json
           cp backend/ecosystem.config.cjs deploy-backend/ecosystem.config.cjs
 
-      - name: Repair remote nvm npm prefix
+      - name: Prepare remote dirs and repair nvm npm prefix
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.SSH_HOST }}
@@ -63,6 +63,21 @@ jobs:
           port: ${{ secrets.SSH_PORT || 22 }}
           script: |
             set -eu
+            FRONTEND_DIR="${{ env.FRONTEND_DIR }}"
+            APP_DIR="${{ env.APP_DIR }}"
+
+            mkdir -p "$FRONTEND_DIR" "$APP_DIR"
+
+            echo "== disk before deploy =="
+            df -h "$HOME" "$FRONTEND_DIR" "$APP_DIR" || df -h
+
+            # Full frontend replace: clear docroot so SCP unpack cannot fail on
+            # stale/read-only files or run out of quota mid-extract.
+            find "$FRONTEND_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+
+            touch "$FRONTEND_DIR/.deploy-write-test"
+            rm -f "$FRONTEND_DIR/.deploy-write-test"
+
             if [ -f "$HOME/.npmrc" ]; then
               sed -i -E '/^[[:space:]]*(globalconfig|prefix)[[:space:]]*=/Id' "$HOME/.npmrc"
             fi
@@ -90,6 +105,7 @@ jobs:
           target: ${{ env.FRONTEND_DIR }}
           strip_components: 1
           overwrite: true
+          tar_dereference: true
 
       - name: Deploy backend app files
         uses: appleboy/scp-action@v0.1.7
@@ -102,6 +118,7 @@ jobs:
           target: ${{ env.APP_DIR }}
           strip_components: 1
           overwrite: true
+          tar_dereference: true
 
       - name: Install deps, migrate, restart PM2
         uses: appleboy/ssh-action@v1.2.0
